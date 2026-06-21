@@ -121,6 +121,10 @@ services:
     container_name: noc-controller
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount the SCALED spec over the image's baked-in copy so the controller
+      # models the full 34-node topology (5P/5PE/16branch/4hub/4dc), not the
+      # stale build-time spec.
+      - /root/LAB/topology-spec.yaml:/app/topology-spec.yaml:ro
     environment:
       DIURNAL_PERIOD: "3600"
       TOPO_SPEC: /app/topology-spec.yaml
@@ -141,6 +145,9 @@ services:
     container_name: noc-trafficgen
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Same scaled-spec mount as controller so trafficgen drives flows across
+      # all scaled sites, not just the build-time set.
+      - /root/LAB/topology-spec.yaml:/app/topology-spec.yaml:ro
     environment:
       DIURNAL_PERIOD: "3600"
       TRAFFICGEN_BACKEND: "nc"

@@ -1,127 +1,202 @@
 {
-  "source_parquet": "dataset_1782053619_1782054519_30s.parquet",
-  "source_rows": 4619,
+  "source_parquet": "dataset_1782052929_1782060129_30s.parquet",
+  "source_rows": 48306,
   "step_s": 30,
   "octet_rate_by_site": {
     "branch": {
-      "rate_in_median": 2669.0,
-      "rate_out_median": 1662.0,
+      "rate_in_median": 4299.0,
+      "rate_out_median": 2097.0,
       "_src": "real"
     },
     "core": {
-      "rate_in_median": 3481.0,
-      "rate_out_median": 3538.0,
+      "rate_in_median": 67118.0,
+      "rate_out_median": 6374.0,
       "_src": "real"
     },
     "dc": {
       "rate_in_median": 66270.0,
-      "rate_out_median": 2856.0,
+      "rate_out_median": 3578.0,
       "_src": "real"
     },
     "hub": {
-      "rate_in_median": 66442.0,
-      "rate_out_median": 4057.0,
+      "rate_in_median": 66312.0,
+      "rate_out_median": 5460.0,
       "_src": "real"
     },
     "pe": {
-      "rate_in_median": 66421.0,
-      "rate_out_median": 1806.0,
+      "rate_in_median": 66439.0,
+      "rate_out_median": 3010.0,
+      "_src": "real"
+    },
+    "nan": {
+      "rate_in_median": 66270.0,
+      "rate_out_median": 2935.0,
       "_src": "real"
     }
   },
   "tunnel_baseline": {
     "tunnel_latency_ms": {
-      "mean": 20.320526795580108,
-      "std": 6.952592984013775,
-      "p50": 24.29025,
+      "mean": 31.550166193999175,
+      "std": 18.996099171067993,
+      "p50": 26.690649999999998,
       "min": 14.1134,
-      "max": 84.4526,
+      "max": 118.5263,
       "_src": "real"
     },
     "tunnel_jitter_ms": {
-      "mean": 2.0105743093922652,
-      "std": 0.732391468954956,
-      "p50": 1.93,
-      "min": 1.7692,
-      "max": 10.9834,
+      "mean": 2.463550493218249,
+      "std": 0.6975820673050992,
+      "p50": 2.4951,
+      "min": 1.0198,
+      "max": 8.4697,
       "_src": "real"
     },
     "tunnel_loss_pct": {
-      "mean": 0.05481546961325968,
-      "std": 0.36150501003555097,
-      "p50": 0.0178,
-      "min": 0.0003,
-      "max": 4.4854,
+      "mean": 0.3239061652281134,
+      "std": 0.5563560206165364,
+      "p50": 0.0341,
+      "min": 0.0,
+      "max": 4.8196,
       "_src": "real"
     },
     "tunnel_rekeys": {
-      "mean": 7.262430939226519,
-      "std": 2.2540017111914454,
-      "p50": 7.0,
-      "min": 3.0,
-      "max": 12.0,
+      "mean": 11.657007809288944,
+      "std": 14.25298184509505,
+      "p50": 4.0,
+      "min": 0.0,
+      "max": 49.0,
       "_src": "real"
+    }
+  },
+  "tunnel_baseline_by_site": {
+    "branch": {
+      "tunnel_latency_ms": {
+        "mean": 33.493821939631076,
+        "std": 21.301702143381974,
+        "p50": 26.926499999999997,
+        "min": 14.1134,
+        "max": 118.5263,
+        "_src": "real"
+      },
+      "tunnel_jitter_ms": {
+        "mean": 2.456625880380101,
+        "std": 0.6845601763234267,
+        "p50": 2.4971,
+        "min": 1.0198,
+        "max": 7.6152,
+        "_src": "real"
+      },
+      "tunnel_loss_pct": {
+        "mean": 0.3357137506987144,
+        "std": 0.5655717453020432,
+        "p50": 0.0364,
+        "min": 0.0,
+        "max": 4.0874,
+        "_src": "real"
+      },
+      "tunnel_rekeys": {
+        "mean": 10.769424259362772,
+        "std": 13.943060605870604,
+        "p50": 4.0,
+        "min": 0.0,
+        "max": 49.0,
+        "_src": "real"
+      }
+    },
+    "dc": {
+      "tunnel_latency_ms": {
+        "mean": 26.15078711180124,
+        "std": 7.951338560480046,
+        "p50": 25.55985,
+        "min": 14.3557,
+        "max": 67.7163,
+        "_src": "real"
+      },
+      "tunnel_jitter_ms": {
+        "mean": 2.4827867236024845,
+        "std": 0.7324738392654141,
+        "p50": 2.4787,
+        "min": 1.0448,
+        "max": 8.4697,
+        "_src": "real"
+      },
+      "tunnel_loss_pct": {
+        "mean": 0.2911052795031056,
+        "std": 0.5287453392875052,
+        "p50": 0.030350000000000002,
+        "min": 0.0,
+        "max": 4.8196,
+        "_src": "real"
+      },
+      "tunnel_rekeys": {
+        "mean": 14.122670807453416,
+        "std": 14.809398148268068,
+        "p50": 6.0,
+        "min": 0.0,
+        "max": 47.0,
+        "_src": "real"
+      }
     }
   },
   "fault_signatures": {
     "congestion": {
-      "lat_peak": 94.0888,
-      "loss_peak": 5.2063,
-      "jit_peak": 12.6057,
-      "lead_s": 57.45,
+      "lat_peak": 101.9836,
+      "loss_peak": 5.7612,
+      "jit_peak": 13.8134,
+      "lead_s": 66.4,
       "kind": "tunnel_ramp",
       "_src": "real"
     },
     "bgp_flap": {
-      "lat_peak": 24.29025,
-      "loss_peak": 0.3,
-      "jit_peak": 1.93,
+      "lat_peak": 34.3347,
+      "loss_peak": 0.6658,
+      "jit_peak": 3.2858,
       "lead_s": 2.0,
       "kind": "iface_churn",
       "_src": "real"
     },
     "tunnel_degrade": {
-      "lat_peak": 35.0,
-      "loss_peak": 5.0,
-      "jit_peak": 12.0,
-      "lead_s": 40.0,
+      "lat_peak": 52.6217,
+      "loss_peak": 9.1985,
+      "jit_peak": 6.131,
+      "lead_s": 2.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     },
     "policy_drift": {
-      "lat_peak": 29.2891,
-      "loss_peak": 0.3517,
-      "jit_peak": 2.5652,
+      "lat_peak": 25.0708,
+      "loss_peak": 0.0293,
+      "jit_peak": 2.0077,
       "lead_s": 3.0,
       "kind": "iface_churn",
       "_src": "real"
     },
     "node_failure": {
-      "lat_peak": 24.29025,
-      "loss_peak": 1.0,
-      "jit_peak": 1.93,
+      "lat_peak": 29.7041,
+      "loss_peak": 0.0583,
+      "jit_peak": 2.6974,
       "lead_s": 1.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src": "real"
     },
     "asymmetric_loss": {
-      "lat_peak": 26.719275000000003,
-      "loss_peak": 4.0,
-      "jit_peak": 2.895,
-      "lead_s": 30.0,
+      "lat_peak": 32.9258,
+      "loss_peak": 9.4281,
+      "jit_peak": 3.1289,
+      "lead_s": 2.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     },
     "brownout": {
-      "lat_peak": 45.0,
-      "loss_peak": 1.5,
-      "jit_peak": 6.0,
-      "lead_s": 55.0,
+      "lat_peak": 28.6514,
+      "loss_peak": 0.0266,
+      "jit_peak": 2.4888,
+      "lead_s": 2.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     }
   },
-  "real_fault_fraction": 0.014721801255683049,
+  "real_fault_fraction": 0.0077216080818117835,
   "inventory": {
     "ce_branch1": {
       "site_type": "branch",
@@ -138,7 +213,149 @@
       ],
       "tunnels": [
         "ce_branch1-ce_hub1",
-        "ce_branch1-ce_hub2"
+        "ce_branch1-ce_hub2",
+        "ce_branch1-ce_hub3",
+        "ce_branch1-ce_hub4"
+      ]
+    },
+    "ce_branch10": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch10-ce_hub1",
+        "ce_branch10-ce_hub2",
+        "ce_branch10-ce_hub3",
+        "ce_branch10-ce_hub4"
+      ]
+    },
+    "ce_branch11": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch11-ce_hub1",
+        "ce_branch11-ce_hub2",
+        "ce_branch11-ce_hub3",
+        "ce_branch11-ce_hub4"
+      ]
+    },
+    "ce_branch12": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch12-ce_hub1",
+        "ce_branch12-ce_hub2",
+        "ce_branch12-ce_hub3",
+        "ce_branch12-ce_hub4"
+      ]
+    },
+    "ce_branch13": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch13-ce_hub1",
+        "ce_branch13-ce_hub2",
+        "ce_branch13-ce_hub3",
+        "ce_branch13-ce_hub4"
+      ]
+    },
+    "ce_branch14": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch14-ce_hub1",
+        "ce_branch14-ce_hub2",
+        "ce_branch14-ce_hub3",
+        "ce_branch14-ce_hub4"
+      ]
+    },
+    "ce_branch15": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch15-ce_hub1",
+        "ce_branch15-ce_hub2",
+        "ce_branch15-ce_hub3",
+        "ce_branch15-ce_hub4"
+      ]
+    },
+    "ce_branch16": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch16-ce_hub1",
+        "ce_branch16-ce_hub2",
+        "ce_branch16-ce_hub3",
+        "ce_branch16-ce_hub4"
       ]
     },
     "ce_branch2": {
@@ -156,7 +373,9 @@
       ],
       "tunnels": [
         "ce_branch2-ce_hub1",
-        "ce_branch2-ce_hub2"
+        "ce_branch2-ce_hub2",
+        "ce_branch2-ce_hub3",
+        "ce_branch2-ce_hub4"
       ]
     },
     "ce_branch3": {
@@ -174,7 +393,9 @@
       ],
       "tunnels": [
         "ce_branch3-ce_hub1",
-        "ce_branch3-ce_hub2"
+        "ce_branch3-ce_hub2",
+        "ce_branch3-ce_hub3",
+        "ce_branch3-ce_hub4"
       ]
     },
     "ce_branch4": {
@@ -192,7 +413,109 @@
       ],
       "tunnels": [
         "ce_branch4-ce_hub1",
-        "ce_branch4-ce_hub2"
+        "ce_branch4-ce_hub2",
+        "ce_branch4-ce_hub3",
+        "ce_branch4-ce_hub4"
+      ]
+    },
+    "ce_branch5": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch5-ce_hub1",
+        "ce_branch5-ce_hub2",
+        "ce_branch5-ce_hub3",
+        "ce_branch5-ce_hub4"
+      ]
+    },
+    "ce_branch6": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch6-ce_hub1",
+        "ce_branch6-ce_hub2",
+        "ce_branch6-ce_hub3",
+        "ce_branch6-ce_hub4"
+      ]
+    },
+    "ce_branch7": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch7-ce_hub1",
+        "ce_branch7-ce_hub2",
+        "ce_branch7-ce_hub3",
+        "ce_branch7-ce_hub4"
+      ]
+    },
+    "ce_branch8": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch8-ce_hub1",
+        "ce_branch8-ce_hub2",
+        "ce_branch8-ce_hub3",
+        "ce_branch8-ce_hub4"
+      ]
+    },
+    "ce_branch9": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch9-ce_hub1",
+        "ce_branch9-ce_hub2",
+        "ce_branch9-ce_hub3",
+        "ce_branch9-ce_hub4"
       ]
     },
     "ce_dc1": {
@@ -213,7 +536,9 @@
       ],
       "tunnels": [
         "ce_dc1-ce_hub1",
-        "ce_dc1-ce_hub2"
+        "ce_dc1-ce_hub2",
+        "ce_dc1-ce_hub3",
+        "ce_dc1-ce_hub4"
       ]
     },
     "ce_dc2": {
@@ -234,7 +559,55 @@
       ],
       "tunnels": [
         "ce_dc2-ce_hub1",
-        "ce_dc2-ce_hub2"
+        "ce_dc2-ce_hub2",
+        "ce_dc2-ce_hub3",
+        "ce_dc2-ce_hub4"
+      ]
+    },
+    "ce_dc3": {
+      "site_type": "dc",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_dc3-ce_hub1",
+        "ce_dc3-ce_hub2",
+        "ce_dc3-ce_hub3",
+        "ce_dc3-ce_hub4"
+      ]
+    },
+    "ce_dc4": {
+      "site_type": "dc",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_dc4-ce_hub1",
+        "ce_dc4-ce_hub2",
+        "ce_dc4-ce_hub3",
+        "ce_dc4-ce_hub4"
       ]
     },
     "ce_hub1": {
@@ -273,6 +646,42 @@
       ],
       "tunnels": []
     },
+    "ce_hub3": {
+      "site_type": "hub",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": []
+    },
+    "ce_hub4": {
+      "site_type": "hub",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": []
+    },
     "p1": {
       "site_type": "core",
       "interfaces": [
@@ -280,6 +689,8 @@
         "eth1",
         "eth2",
         "eth3",
+        "eth4",
+        "eth5",
         "lo"
       ],
       "tunnels": []
@@ -291,6 +702,8 @@
         "eth1",
         "eth2",
         "eth3",
+        "eth4",
+        "eth5",
         "lo"
       ],
       "tunnels": []
@@ -302,6 +715,34 @@
         "eth1",
         "eth2",
         "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p4": {
+      "site_type": null,
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p5": {
+      "site_type": null,
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
         "lo"
       ],
       "tunnels": []
@@ -314,6 +755,9 @@
         "VOICE",
         "eth0",
         "eth1",
+        "eth10",
+        "eth11",
+        "eth12",
         "eth2",
         "eth3",
         "eth4",
@@ -321,6 +765,7 @@
         "eth6",
         "eth7",
         "eth8",
+        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -333,6 +778,10 @@
         "VOICE",
         "eth0",
         "eth1",
+        "eth10",
+        "eth11",
+        "eth12",
+        "eth13",
         "eth2",
         "eth3",
         "eth4",
@@ -353,21 +802,74 @@
         "VOICE",
         "eth0",
         "eth1",
+        "eth10",
+        "eth11",
+        "eth12",
+        "eth13",
         "eth2",
         "eth3",
         "eth4",
         "eth5",
         "eth6",
+        "eth7",
+        "eth8",
+        "eth9",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "pe4": {
+      "site_type": null,
+      "interfaces": [
+        "CORP",
+        "GUEST",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth10",
+        "eth11",
+        "eth12",
+        "eth13",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "eth7",
+        "eth8",
+        "eth9",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "pe5": {
+      "site_type": null,
+      "interfaces": [
+        "CORP",
+        "GUEST",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth10",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "eth7",
+        "eth8",
+        "eth9",
         "lo"
       ],
       "tunnels": []
     }
   },
   "octet_seed_by_site": {
-    "branch": 141336.0,
-    "core": 193826.0,
-    "dc": 1441659.5,
-    "hub": 1696950.5,
-    "pe": 4273323.0
+    "branch": 145838.0,
+    "core": 380315.0,
+    "dc": 412197.5,
+    "hub": 541185.0,
+    "pe": 6262982.5,
+    "nan": 254079.0
   }
 }

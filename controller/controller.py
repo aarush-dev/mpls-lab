@@ -40,8 +40,72 @@ from topo import build_model  # noqa: E402
 # Path selection may override this on degradation (failover).
 VRF_PREFERRED_HUB = {"CORP": "ce_hub1", "VOICE": "ce_hub1", "GUEST": "ce_hub2"}
 
-# --- Per-tunnel baseline RTT (ms). Hub1 is the "closer/better" primary.
-HUB_BASELINE_MS = {"ce_hub1": 12.0, "ce_hub2": 22.0}
+# ----------------------------------------------------------------------------
+# LATENCY TIERS BY PATH GEOGRAPHY
+# Real WANs are not uniform: a datacenter sits next to the core (short fiber to
+# its hub), a branch is out at the edge (longer access + backhaul). And each hub
+# lives in a different region, so the same spoke reaches different hubs over
+# different distances. We model baseline RTT as:
+#
+#   base_ms = site_floor[site_type]                  (access/backhaul tier)
+#           + spoke_distance(site_type, spoke_idx)   (deterministic per-spoke spread)
+#           + hub_offset(hub_idx)                    (which region the hub is in)
+#
+# All terms are deterministic from indices so a given tunnel's baseline is stable
+# across restarts (the ML team sees a consistent topology), but tunnels differ.
+#
+# ponytail: a closed-form geography proxy, not a real fiber-distance matrix.
+#   Ceiling: distances are synthetic index arithmetic, not geocoded sites; the
+#   deepest fidelity (per-link propagation delay) would come from netem baselines
+#   on each dataplane link. Upgrade path noted in the module docstring.
+# ----------------------------------------------------------------------------
+# Per-site-type access floor (ms): dc hugs the core, branch is far, hub mid.
+SITE_FLOOR_MS = {"dc": 5.0, "hub": 8.0, "branch": 18.0}
+# Per-site-type spoke spread (ms): how far apart the worst/closest spoke are.
+SITE_SPREAD_MS = {"dc": 12.0, "hub": 14.0, "branch": 38.0}
+# Per-site-type queue sensitivity multiplier (branches have thinner uplinks, so
+# congestion bites harder -> steeper queue climb).
+SITE_QUEUE_MULT = {"dc": 0.6, "hub": 0.8, "branch": 1.3}
+
+# VOICE-class paths are policed tighter and are more loss/jitter sensitive; this
+# scales the modelled jitter/loss on a tunnel that carries VOICE.
+VOICE_SENSITIVITY = 1.4
+
+
+def _hub_index(hub_node):
+    """Numeric index from 'ce_hubN' -> N (1-based); 1 if unparseable."""
+    digits = "".join(c for c in hub_node if c.isdigit())
+    return int(digits) if digits else 1
+
+
+def _spoke_index(site_node):
+    """Numeric index from 'ce_branch7' / 'ce_dc2' -> 7 / 2; 1 if unparseable."""
+    digits = "".join(c for c in site_node if c.isdigit())
+    return int(digits) if digits else 1
+
+
+def baseline_rtt_ms(site_type, site_node, hub_node):
+    """Deterministic per-tunnel baseline RTT (ms) from path geography.
+
+    Spoke spread uses an irrational-multiplier hash of the spoke index so spokes
+    are spread non-uniformly across [floor, floor+spread] (real sites aren't
+    evenly spaced) yet fully deterministic. Hub offset puts each hub region at a
+    different distance (hub1 = closest/primary), and a spoke<->hub cross term
+    makes "this spoke is near hub2 but far from hub4" plausible.
+    """
+    floor = SITE_FLOOR_MS.get(site_type, 12.0)
+    spread = SITE_SPREAD_MS.get(site_type, 20.0)
+    si = _spoke_index(site_node)
+    hi = _hub_index(hub_node)
+    # Deterministic fractional spread in [0,1) from the spoke index (golden-ratio
+    # low-discrepancy sequence -> even-ish but non-linear coverage).
+    spoke_frac = (si * 0.6180339887) % 1.0
+    # Hub region offset: hub1 closest, each further hub adds a few ms.
+    hub_off = (hi - 1) * 3.5
+    # Spoke<->hub cross term: some spokes are nearer specific hubs (regional homing).
+    cross = ((si * 2 + hi * 5) % 7) * 1.2
+    return floor + spoke_frac * spread + hub_off + cross
+
 
 # Degradation thresholds for failover (loss% or latency ms over baseline).
 FAILOVER_LOSS_PCT = 5.0
@@ -61,14 +125,33 @@ class TunnelState:
         self.spoke_wg = spec["spoke_wg"]
         self.hub_wg = spec["hub_wg"]
         self.vrfs = spec["vrfs"]
-        self.base_ms = HUB_BASELINE_MS.get(self.hub, 20.0)
-        # smoothed metrics
+        # Baseline RTT from path geography (site_type tier + per-spoke spread + hub region).
+        self.base_ms = baseline_rtt_ms(self.site_type, self.site, self.hub)
+        # Per-site-type queue sensitivity (thin branch uplinks congest harder).
+        self.queue_mult = SITE_QUEUE_MULT.get(self.site_type, 1.0)
+        # VOICE-carrying tunnels are more loss/jitter sensitive.
+        self.voice = "VOICE" in self.vrfs
+        # smoothed metrics, seeded at baseline so series start plausible
         self.latency_ms = self.base_ms
-        self.jitter_ms = 1.0
+        self.jitter_ms = 0.5 + self.base_ms * 0.04
         self.loss_pct = 0.0
         self.rekeys = 0  # cumulative WireGuard rekey counter
+        # Deterministic per-tunnel RNG so the noise realization is stable per tunnel.
         self._rng = random.Random(hash(self.tunnel) & 0xFFFFFFFF)
+        # Correlated-jitter state: an AR(1) random walk (not white noise) so jitter
+        # wanders the way real path jitter does, with brief excursions.
+        self._jit_walk = 0.0
+        # Micro-burst loss state: a countdown of remaining "burst" ticks; when >0
+        # the tunnel is in a transient loss event (brief, occasional).
+        self._burst_ticks = 0
+        self._burst_loss = 0.0
         self._last_rekey = time.time()
+        self._rekey_debt = 0  # queued clustered rekeys (handshake retries under stress)
+
+    # Set True by --selftest so the model is exercised hermetically (no docker
+    # exec round-trips, which are slow and environment-dependent). Live runs leave
+    # it False so injected netem still folds into the telemetry.
+    _SKIP_NETEM = False
 
     def _read_netem(self):
         """Read injected netem delay/loss on the spoke's uplink, if present.
@@ -83,6 +166,8 @@ class TunnelState:
         #   docker CLI already in PATH (added to image). Best-effort; any
         #   exception returns (0, 0) so the controller still runs without a lab.
         """
+        if TunnelState._SKIP_NETEM:
+            return 0.0, 0.0
         cname = f"clab-sdwan_mpls_noc-{self.site}"
         try:
             out = subprocess.run(
@@ -102,37 +187,83 @@ class TunnelState:
         return delay_ms, loss_pct
 
     def update(self, now):
-        """Recompute modelled metrics for this tick."""
+        """Recompute modelled metrics for this tick, coupled to the diurnal curve.
+
+        The same curve that drives offered load (diurnal.util) drives congestion
+        here, so telemetry and traffic move together. A nonlinear M/M/1-style
+        queue term makes latency/jitter climb sharply as utilization -> 1, and a
+        weekly envelope makes weekends visibly calmer.
+        """
         hod = diurnal.hour_of_cycle(now, PERIOD_SECONDS)
-        # Congestion proxy: max VRF utilization on this tunnel drives queueing.
-        cong = max((diurnal.util(hod, v) for v in self.vrfs), default=0.3)
+        wk = diurnal.week_scale(now, PERIOD_SECONDS)
+        # Congestion proxy: max VRF utilization on this tunnel drives queueing,
+        # scaled by the weekly envelope (weekend tunnels sit less congested).
+        cong = max((diurnal.util(hod, v) for v in self.vrfs), default=0.3) * wk
+        cong = max(0.0, min(0.985, cong))  # cap below 1 so the queue term stays finite
 
         netem_delay, netem_loss = self._read_netem()
 
-        # Latency = baseline + congestion queueing delay + injected netem + noise.
-        target_lat = (self.base_ms
-                      + cong ** 2 * 18.0       # nonlinear queue buildup near saturation
-                      + netem_delay
-                      + self._rng.gauss(0, 0.6))
-        # Jitter grows with congestion and with injected delay variance.
-        target_jit = 0.5 + cong * 3.0 + netem_delay * 0.15 + abs(self._rng.gauss(0, 0.3))
-        # Loss: near-zero until congestion is high; netem loss adds directly.
-        target_loss = max(0.0, (cong - 0.75) * 8.0) + netem_loss + max(0, self._rng.gauss(0, 0.05))
+        # --- Nonlinear queueing delay (M/M/1: wait ~ rho/(1-rho)) -----------------
+        # As utilization (rho) approaches 1 the queue blows up; multiplied by the
+        # per-site-type sensitivity (thin branch uplinks feel it more). Capped so a
+        # near-saturation tick can't emit absurd RTT.
+        rho = cong
+        queue_ms = min(60.0, self.queue_mult * 9.0 * rho / (1.0 - rho))
 
-        # Exponential smoothing so the series looks like a real time-series.
+        # --- Correlated jitter: AR(1) walk, not white noise -----------------------
+        # Jitter is the short-term variance of the queue. We drive an AR(1) process
+        # (memory 0.85) so it wanders smoothly with occasional excursions, and its
+        # amplitude grows with congestion + injected delay variance.
+        amp = 0.25 + 1.6 * rho + netem_delay * 0.12
+        self._jit_walk = 0.85 * self._jit_walk + 0.15 * self._rng.gauss(0, amp)
+        voice_k = VOICE_SENSITIVITY if self.voice else 1.0
+        target_jit = max(0.0, (0.4 + abs(self._jit_walk) + 0.4 * rho) * voice_k)
+
+        # --- Loss: mostly 0-0.3%, congestion-driven tail, plus micro-bursts -------
+        # Baseline loss is a small noisy floor (link is healthy ~0-0.3%). A gentle
+        # congestion tail kicks in only when the queue is deep. On top, rare brief
+        # micro-bursts (buffer overrun / transient reroute) spike loss for a few
+        # ticks then clear — the kind of transient the ML team needs to see.
+        floor_loss = max(0.0, self._rng.gauss(0.08, 0.06))      # ~0-0.3% healthy floor
+        cong_tail = max(0.0, (rho - 0.80)) ** 2 * 22.0          # only deep queues lose
+        if self._burst_ticks > 0:
+            self._burst_ticks -= 1
+        else:
+            # Micro-burst probability rises with congestion; small even when calm.
+            p_burst = 0.004 + rho * 0.05
+            if self._rng.random() < p_burst:
+                self._burst_ticks = self._rng.randint(1, 4)
+                self._burst_loss = self._rng.uniform(0.6, 3.5) * voice_k
+        burst_loss = self._burst_loss if self._burst_ticks > 0 else 0.0
+        target_loss = (floor_loss + cong_tail) * voice_k + burst_loss + netem_loss
+
+        target_lat = self.base_ms + queue_ms + netem_delay + self._rng.gauss(0, 0.4)
+
+        # Exponential smoothing so the series looks like a real time-series. Loss is
+        # smoothed lightly so micro-bursts stay visibly spiky rather than averaged out.
         a = 0.3
         self.latency_ms = max(0.1, (1 - a) * self.latency_ms + a * target_lat)
         self.jitter_ms = max(0.0, (1 - a) * self.jitter_ms + a * target_jit)
-        self.loss_pct = max(0.0, (1 - a) * self.loss_pct + a * target_loss)
+        self.loss_pct = max(0.0, 0.45 * self.loss_pct + 0.55 * target_loss)
 
-        # Rekey: WireGuard rekeys ~every 2 min of real time; emit as an event/counter.
-        # Under heavy loss, rekeys cluster (handshake retries) — a flap precursor signal.
+        # --- Rekey cadence + clustering (flap precursor) --------------------------
+        # WireGuard rekeys ~every 2 min of real time. Under stress (high loss),
+        # handshakes retry and rekeys CLUSTER: we accrue "debt" that drains as a
+        # burst of rekeys over the next few ticks — a precursor the ML can learn.
         rekey_interval = 120.0 / (1.0 + self.loss_pct * 0.5)
-        if now - self._last_rekey >= rekey_interval:
+        fired = False
+        if self.loss_pct > 2.0 and self._rng.random() < (self.loss_pct - 2.0) * 0.04:
+            self._rekey_debt += self._rng.randint(1, 3)  # stress-induced retry cluster
+        if self._rekey_debt > 0:
+            self.rekeys += 1
+            self._rekey_debt -= 1
+            self._last_rekey = now
+            fired = True
+        elif now - self._last_rekey >= rekey_interval:
             self.rekeys += 1
             self._last_rekey = now
-            return True  # signals a rekey event this tick
-        return False
+            fired = True
+        return fired  # signals a rekey event this tick
 
 
 def _parse_time_ms(s):
@@ -315,15 +446,52 @@ def serve(ctrl, port, interval):
 
 # ----------------------------------------------------------------------------- selftest
 def _selftest():
+    TunnelState._SKIP_NETEM = True  # hermetic: model-only, no docker exec
     ctrl = Controller()
-    assert len(ctrl.tunnels) == 12, f"expected 12 tunnels, got {len(ctrl.tunnels)}"
+    n = len(ctrl.tunnels)
+    # Tunnels = spokes x hubs. Scaled spec = (16 branch + 4 dc) x 4 hubs = 80;
+    # fallback default spec = (4 branch + 2 dc) x 2 hubs = 12. Accept either so the
+    # selftest passes both with and without the scaled topology-spec.yaml mounted.
+    assert n in (12, 80), f"unexpected tunnel count {n} (expected 12 or 80)"
 
-    # Drive several ticks; metrics must move and stay finite/sane.
-    for i in range(50):
-        ctrl.tick(now=i * 5.0)
+    # --- Latency tiers by geography: dc should sit BELOW branch on average -------
+    # Check on the static baselines (deterministic, no ticks needed).
+    base_by_type = {}
+    for t in ctrl.tunnels:
+        base_by_type.setdefault(t.site_type, []).append(t.base_ms)
+    avg = {k: sum(v) / len(v) for k, v in base_by_type.items()}
+    assert avg.get("dc", 1e9) < avg.get("branch", 0), \
+        f"latency tier wrong: dc {avg.get('dc')} !< branch {avg.get('branch')}"
+    # Per-tunnel variance within a tier (not all identical).
+    assert len(set(round(b, 1) for b in base_by_type["branch"])) > 1, \
+        "branch baselines are uniform (no per-spoke variance)"
+
+    # Drive several ticks at a BUSY hour so congestion/queueing is exercised.
+    busy = PERIOD_SECONDS * (14.0 / 24.0)
+    for i in range(60):
+        ctrl.tick(now=busy + i * 5.0)
     lat = [t.latency_ms for t in ctrl.tunnels]
     assert all(math.isfinite(x) and x > 0 for x in lat), "latency not finite/positive"
     assert all(t.loss_pct >= 0 for t in ctrl.tunnels), "negative loss"
+    # Loss bounded: healthy fabric, no tunnel should be catastrophically lossy here.
+    assert all(t.loss_pct < 40.0 for t in ctrl.tunnels), "loss unbounded"
+    # Jitter present and positive somewhere (not a flat zero series).
+    assert any(t.jitter_ms > 0.1 for t in ctrl.tunnels), "no jitter present"
+
+    # --- Diurnal coupling: a sample tunnel is more congested at peak than trough -
+    sample = ctrl.tunnels[0]
+    peak_t = PERIOD_SECONDS * (14.0 / 24.0)
+    trough_t = PERIOD_SECONDS * (3.0 / 24.0)
+    # Re-derive latency cleanly at each hour (reset smoothing toward each target).
+    def settle(t0):
+        sample.latency_ms = sample.base_ms
+        for j in range(40):
+            sample.update(t0 + j * 5.0)
+        return sample.latency_ms
+    peak_lat = settle(peak_t)
+    trough_lat = settle(trough_t)
+    assert peak_lat > trough_lat, \
+        f"no diurnal latency coupling: peak {peak_lat:.1f} !> trough {trough_lat:.1f}"
 
     # Exposition must be well-formed: HELP/TYPE present, label set parseable,
     # values numeric, no NaN/inf tokens.
@@ -339,7 +507,7 @@ def _selftest():
         f = float(val)  # raises if malformed
         assert math.isfinite(f), f"non-finite metric value: {ln}"
         n_series += 1
-    assert n_series >= 12 * 4, f"too few series: {n_series}"
+    assert n_series >= n * 4, f"too few series: {n_series}"
 
     # Path selection: force a degradation on the preferred CORP hub for a site and
     # confirm failover to the other hub, then recovery.
@@ -356,7 +524,10 @@ def _selftest():
     ctrl.select_paths()
     assert ctrl.active[(site, "CORP")] == pref, "did not recover to preferred hub"
 
-    print(f"controller selftest OK  tunnels={len(ctrl.tunnels)} series={n_series} "
+    print(f"controller selftest OK  tunnels={n} series={n_series} "
+          f"tiers={{dc:{avg.get('dc',0):.1f} hub:{avg.get('hub',0):.1f} "
+          f"branch:{avg.get('branch',0):.1f}}} "
+          f"peak_lat={peak_lat:.1f} trough_lat={trough_lat:.1f} "
           f"path_changes={ctrl.path_changes}")
 
 

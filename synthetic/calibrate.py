@@ -56,13 +56,22 @@ def _octet_rate(iface):
 
 
 def _tunnel_baseline(tun_nf):
-    out = {}
-    for col, default in [
+    """Global baseline (backward-compat) + per-site_type breakdown.
+
+    ponytail: the new 34-device lab has measurable dc<branch latency tiers;
+    the prior version averaged across site_types and lost the tier signal.
+    Now we emit tunnel_baseline (global, as before) AND tunnel_baseline_by_site
+    so generate.py can preserve dc<branch in synthetic data.
+    """
+    cols_defaults = [
         ("tunnel_latency_ms", (20.0, 7.0)),
         ("tunnel_jitter_ms", (2.0, 0.7)),
         ("tunnel_loss_pct", (0.05, 0.1)),
         ("tunnel_rekeys", (7.0, 2.0)),
-    ]:
+    ]
+    # global (unchanged shape for backward compat)
+    out = {}
+    for col, default in cols_defaults:
         s = tun_nf[col].dropna()
         if len(s) >= 5:
             out[col] = {"mean": float(s.mean()), "std": float(s.std()),
@@ -72,7 +81,34 @@ def _tunnel_baseline(tun_nf):
             m, sd = default
             out[col] = {"mean": m, "std": sd, "p50": m, "min": max(0.0, m - 2 * sd),
                         "max": m + 4 * sd, "_src": "default"}
-    return out
+
+    # per-site_type tiers -- dc has lower latency than branch
+    # ponytail: only tunnel-bearing site_types (branch/dc); hub/pe rarely have tunnels
+    site_defaults = {
+        "branch": {"tunnel_latency_ms": (33.0, 21.0), "tunnel_jitter_ms": (2.5, 0.7),
+                   "tunnel_loss_pct": (0.33, 0.57)},
+        "dc":     {"tunnel_latency_ms": (26.0, 8.0),  "tunnel_jitter_ms": (2.5, 0.73),
+                   "tunnel_loss_pct": (0.29, 0.53)},
+    }
+    by_site = {}
+    for st, g in tun_nf.groupby("site_type", dropna=False):
+        st = str(st)
+        by_site[st] = {}
+        for col, _ in cols_defaults:
+            s = g[col].dropna()
+            sd_dft = site_defaults.get(st, {}).get(col, (out[col]["mean"], out[col]["std"]))
+            if len(s) >= 5:
+                by_site[st][col] = {
+                    "mean": float(s.mean()), "std": float(s.std()),
+                    "p50": float(s.median()), "min": float(s.min()),
+                    "max": float(s.max()), "_src": "real",
+                }
+            else:
+                m, sd = sd_dft
+                by_site[st][col] = {"mean": m, "std": sd, "p50": m,
+                                    "min": max(0.0, m - 2 * sd),
+                                    "max": m + 4 * sd, "_src": "default"}
+    return out, by_site
 
 
 def _fault_signatures(f, tun_nf):
@@ -133,12 +169,14 @@ def build_profile(real_path):
     tun_nf = tun[~tun.is_fault]
     f = df[df.is_fault]
 
+    tun_baseline, tun_baseline_by_site = _tunnel_baseline(tun_nf)
     profile = {
         "source_parquet": os.path.basename(real_path),
         "source_rows": int(len(df)),
         "step_s": STEP,
         "octet_rate_by_site": _octet_rate(iface[~iface.is_fault]),
-        "tunnel_baseline": _tunnel_baseline(tun_nf),
+        "tunnel_baseline": tun_baseline,
+        "tunnel_baseline_by_site": tun_baseline_by_site,
         "fault_signatures": _fault_signatures(f, tun_nf),
         "real_fault_fraction": float(df.is_fault.mean()),
         "inventory": _inventory(df),

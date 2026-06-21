@@ -27,6 +27,9 @@ CLI:
 import argparse
 import json
 import os
+import random
+import signal
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -342,18 +345,265 @@ def demo():
     return row
 
 
+# --------------------------------------------------------------------------- campaign
+# ponytail: Poisson arrivals = expovariate(1/mean_gap). One thread per active
+#   fault so concurrent faults on DIFFERENT targets are real (not serialised).
+#   Active-target set guards against stacking two faults on the same device.
+#   try/finally + SIGINT handler guarantee every injected fault is reverted.
+
+# Valid targets per scenario class.  Non-critical means: not P-core (p1-p5).
+_CE_BRANCHES = [f"ce_branch{i}" for i in range(1, 17)]
+_CE_HUBS     = [f"ce_hub{i}"    for i in range(1, 5)]
+_CE_DCS      = [f"ce_dc{i}"     for i in range(1, 5)]
+_CE_ALL      = _CE_BRANCHES + _CE_HUBS + _CE_DCS   # 24 CEs
+_PE_ALL      = [f"pe{i}"        for i in range(1, 6)]  # 5 PEs
+
+# ponytail: scenario pools defined once here; avoids re-deriving them later.
+CAMPAIGN_POOLS = {
+    # netem scenarios need an uplink CE
+    "congestion":      _CE_ALL,
+    "tunnel_degrade":  _CE_ALL,
+    "asymmetric_loss": _CE_ALL,
+    "brownout":        _CE_ALL,
+    # routing scenarios can target CE or PE (kill bgpd is non-destructive on PE)
+    "bgp_flap":        _CE_ALL + _PE_ALL,
+    "policy_drift":    _CE_ALL,             # CORP VRF only exists on CEs
+    # node_failure (bgpd kill) — avoid PE core nodes to keep core stable;
+    # actually fine on CEs and PE spokes; skip P-core entirely
+    "node_failure":    _CE_ALL + _PE_ALL,
+}
+
+# Fault duration bounds (seconds) per scenario, independent of --duration.
+# ponytail: short enough to keep campaign lively; long enough to get telemetry.
+_DURATION_BOUNDS = {
+    "congestion":      (30, 90),
+    "tunnel_degrade":  (25, 70),
+    "asymmetric_loss": (20, 60),
+    "brownout":        (20, 60),
+    "bgp_flap":        (15, 45),
+    "policy_drift":    (20, 60),
+    "node_failure":    (10, 30),
+}
+
+
+def _campaign_fault(name, target, severity, duration, ramp_steps,
+                    campaign_id, active_targets, lock, stats, dry_run):
+    """Run one fault in a thread; guard active_targets; always revert."""
+    with lock:
+        if target in active_targets:
+            # Another fault is already running on this target — skip silently.
+            return
+        active_targets.add(target)
+
+    try:
+        spec = SCENARIOS[name](target, severity, duration)
+        injector = spec["injector"]
+        scenario_id = f"{name}-{target}-{uuid.uuid4().hex[:8]}"
+
+        baseline = None
+        if spec.get("probe"):
+            baseline = vm_instant(spec["probe"])
+
+        t_start = now_utc()
+        print(json.dumps({"event": "campaign_inject", "campaign_id": campaign_id,
+                          "scenario_id": scenario_id, "type": name, "target": target,
+                          "severity": severity, "duration": duration,
+                          "t_start": iso(t_start), "dry_run": dry_run}), flush=True)
+
+        if not dry_run:
+            if spec.get("ramp"):
+                injector.ramp(steps=ramp_steps,
+                              step_seconds=max(2.0, duration / (ramp_steps * 2)))
+            else:
+                injector.apply()
+            if spec.get("extra"):
+                spec["extra"].apply()
+
+        # t_impact (same logic as run_scenario)
+        if spec["impact_method"] == "vm_threshold" and spec.get("probe") and not dry_run:
+            t_impact, observed = poll_threshold(
+                spec["probe"], spec["threshold"], baseline=baseline,
+                timeout_s=int(duration), interval_s=3)
+            impact_method = "vm_threshold" if t_impact else "modelled_fallback"
+            if t_impact is None:
+                t_impact = t_start
+        else:
+            impact_method = "modelled"
+            t_impact = t_start
+            observed = None
+
+        if impact_method.startswith("modelled"):
+            delay = spec.get("impact_delay_s", 2)
+            t_impact = datetime.fromtimestamp(
+                t_start.timestamp() + delay, tz=timezone.utc)
+
+        # Hold for remainder of duration
+        elapsed = time.time() - t_start.timestamp()
+        remaining = duration - elapsed
+        if remaining > 0 and not dry_run:
+            time.sleep(remaining)
+
+    finally:
+        # Always revert, even on exception or SIGINT (finally fires on Thread.join timeout too)
+        try:
+            if not dry_run:
+                if spec.get("extra"):
+                    spec["extra"].revert()
+                injector.revert()
+        except Exception as e:
+            print(json.dumps({"event": "revert_error", "scenario_id": scenario_id,
+                              "error": str(e)}), flush=True)
+
+        t_end = now_utc()
+        print(json.dumps({"event": "campaign_revert", "campaign_id": campaign_id,
+                          "scenario_id": scenario_id, "t_end": iso(t_end)}), flush=True)
+
+        lead_time = round((t_impact - t_start).total_seconds(), 1)
+        row = {
+            "scenario_id": scenario_id,
+            "campaign_id": campaign_id,
+            "type": spec["type"],
+            "target": spec["target"],
+            "severity": severity,
+            "t_start": iso(t_start),
+            "t_impact": iso(t_impact),
+            "t_end": iso(t_end),
+            "lead_time": lead_time,
+            "impact_method": impact_method,
+            "probe": spec.get("probe"),
+            "baseline_value": baseline,
+            "impact_value": observed,
+            "signature": spec["signature"],
+            "device": target,
+        }
+        write_label(row)
+        print(json.dumps({"event": "label_written", "row": row}), flush=True)
+
+        with lock:
+            active_targets.discard(target)
+            stats["count"] += 1
+            stats["by_type"][name] = stats["by_type"].get(name, 0) + 1
+            stats["fault_seconds"] += (t_end - t_start).total_seconds()
+
+
+def run_campaign(total_duration, mean_gap=120, seed=None, dry_run=False,
+                 ramp_steps=4, campaign_id=None):
+    """Drive a Poisson-arrival fault campaign for `total_duration` seconds.
+
+    # ponytail: arrival model = Poisson process with mean_gap seconds between
+    #   incidents (inter-arrival ~ Exp(1/mean_gap)). This gives realistic burstiness
+    #   vs. a fixed timer. mean_gap=120 → ~1 fault per 2 min on average.
+    #   Seed makes runs reproducible for CI/ML dataset versioning.
+    """
+    rng = random.Random(seed)
+    campaign_id = campaign_id or f"campaign-{uuid.uuid4().hex[:12]}"
+    deadline = time.time() + total_duration
+
+    lock = threading.Lock()
+    active_targets = set()
+    threads = []
+    stats = {"count": 0, "by_type": {}, "fault_seconds": 0.0}
+
+    # SIGINT handler: join all threads (their finally blocks revert)
+    _stop = threading.Event()
+
+    def _sigint(sig, frame):
+        print(json.dumps({"event": "campaign_interrupted",
+                          "campaign_id": campaign_id}), flush=True)
+        _stop.set()
+
+    old_handler = signal.signal(signal.SIGINT, _sigint)
+
+    print(json.dumps({"event": "campaign_start", "campaign_id": campaign_id,
+                      "total_duration": total_duration, "mean_gap_s": mean_gap,
+                      "seed": seed, "dry_run": dry_run}), flush=True)
+
+    try:
+        while not _stop.is_set():
+            # ponytail: Exp(1/mean_gap) inter-arrival; clamp to avoid near-zero gaps.
+            gap = max(5.0, rng.expovariate(1.0 / mean_gap))
+            wake_at = time.time() + gap
+            if wake_at >= deadline:
+                # No more incidents fit in the window — wait out the remaining time.
+                remaining = deadline - time.time()
+                if remaining > 0:
+                    _stop.wait(timeout=remaining)
+                break
+
+            _stop.wait(timeout=max(0, wake_at - time.time()))
+            if _stop.is_set():
+                break
+            if time.time() >= deadline:
+                break
+
+            # Pick scenario + target
+            name = rng.choice(list(CAMPAIGN_POOLS.keys()))
+            pool = CAMPAIGN_POOLS[name]
+            # Skip targets already faulted (check without holding lock long)
+            with lock:
+                available = [t for t in pool if t not in active_targets]
+            if not available:
+                print(json.dumps({"event": "campaign_skip", "reason": "all_targets_busy",
+                                  "scenario": name}), flush=True)
+                continue
+
+            target = rng.choice(available)
+            severity = rng.choice(list(SEVERITY.keys()))
+            lo, hi = _DURATION_BOUNDS[name]
+            duration = round(rng.uniform(lo, hi), 1)
+
+            # Spawn thread so concurrent faults on different targets are real
+            t = threading.Thread(
+                target=_campaign_fault,
+                args=(name, target, severity, duration, ramp_steps,
+                      campaign_id, active_targets, lock, stats, dry_run),
+                daemon=True,
+            )
+            threads.append(t)
+            t.start()
+
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+        # Wait for all active faults to revert (their finally blocks run)
+        for t in threads:
+            t.join(timeout=300)
+
+    healthy_seconds = total_duration - stats["fault_seconds"]
+    summary = {
+        "event": "campaign_summary",
+        "campaign_id": campaign_id,
+        "total_incidents": stats["count"],
+        "by_type": stats["by_type"],
+        "fault_seconds": round(stats["fault_seconds"], 1),
+        "healthy_seconds": round(healthy_seconds, 1),
+        "fault_pct": round(100 * stats["fault_seconds"] / total_duration, 1),
+    }
+    print(json.dumps(summary), flush=True)
+    return summary
+
+
 # --------------------------------------------------------------------------- cli
 def main():
     ap = argparse.ArgumentParser(description="Fault orchestrator + label writer")
     ap.add_argument("--scenario", choices=list(SCENARIOS))
     ap.add_argument("--target", help="device name, e.g. ce_branch1 / pe1")
     ap.add_argument("--severity", choices=list(SEVERITY), default="medium")
-    ap.add_argument("--duration", type=float, default=90)
+    ap.add_argument("--duration", type=float, default=90,
+                    help="single-scenario hold duration OR campaign total duration (s)")
     ap.add_argument("--ramp-steps", type=int, default=6)
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--demo", action="store_true", help="run a short demo scenario")
     ap.add_argument("--dry-run", action="store_true",
                     help="write a label without touching the lab (schema check)")
+    # Campaign flags
+    ap.add_argument("--campaign", action="store_true",
+                    help="run a Poisson-arrival fault campaign for --duration seconds")
+    ap.add_argument("--mean-gap", type=float, default=120,
+                    help="campaign: mean inter-arrival gap in seconds (default 120)")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="campaign: RNG seed for reproducibility")
+    ap.add_argument("--campaign-id", default=None,
+                    help="campaign: explicit campaign tag (auto-generated if omitted)")
     args = ap.parse_args()
 
     if args.list:
@@ -363,8 +613,13 @@ def main():
     if args.demo:
         demo()
         return
+    if args.campaign:
+        run_campaign(total_duration=args.duration, mean_gap=args.mean_gap,
+                     seed=args.seed, dry_run=args.dry_run,
+                     ramp_steps=args.ramp_steps, campaign_id=args.campaign_id)
+        return
     if not args.scenario or not args.target:
-        ap.error("--scenario and --target are required (or use --demo / --list)")
+        ap.error("--scenario and --target are required (or use --demo / --list / --campaign)")
     run_scenario(args.scenario, args.target, severity=args.severity,
                  duration=args.duration, ramp_steps=args.ramp_steps,
                  dry_run=args.dry_run)

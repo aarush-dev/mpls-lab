@@ -11,18 +11,19 @@
 # -----------------------------------------------------------------------------
 knobs:
   # Provider core
-  p_count:  3          # P routers (LDP LSRs, OSPF-only, no BGP)
-  pe_count: 3          # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs)
+  p_count:  5          # P routers (LDP LSRs, OSPF-only, no BGP)
+  pe_count: 5          # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs)
 
   # Customer sites — total CE nodes = branch + hub + dc
-  branch_count: 4      # branch CEs  (small, single uplink, CORP+VOICE)
-  hub_count:    2      # hub CEs     (regional, CORP+VOICE+GUEST, WG hub)
-  dc_count:     2      # datacenter CEs (CORP+VOICE+GUEST, WG spoke)
+  branch_count: 16     # branch CEs  (small, single uplink, CORP+VOICE)
+  hub_count:    4      # hub CEs     (regional, CORP+VOICE+GUEST, WG hub)
+  dc_count:     4      # datacenter CEs (CORP+VOICE+GUEST, WG spoke)
   # Option A — true per-VRF host separation: ONE host container per (site, VRF).
   #   branch=CORP,VOICE (2 hosts); hub/dc=CORP,VOICE,GUEST (3 hosts).
-  #   hosts = branch*2 + hub*3 + dc*3 = 4*2 + 2*3 + 2*3 = 20.
+  #   hosts = branch*2 + hub*3 + dc*3 = 16*2 + 4*3 + 4*3 = 56.
   # Total containers ≈ p_count + pe_count + (branch+hub+dc) + hosts
-  #   = 3 + 3 + 8 + 20 = 34 nodes — well within 108 GB.
+  #   = 5 + 5 + 24 + 56 = 90 containers — safe on 108 GB / 19 cores
+  #   (target mid-size enterprise; stay in 80–95 range for deploy reliability).
   # (host count is DERIVED from each site's VRF membership; no per-site knob.)
 
   # BGP AS
@@ -50,8 +51,12 @@ underlay:
 # -----------------------------------------------------------------------------
 overlay:
   pe_bgp:
-    # DECISION: full-mesh iBGP at pe_count=3 → only 3 sessions, no RR complexity.
-    # Switch to route-reflector=true + rr_node="pe1" if pe_count grows beyond ~5.
+    # DECISION: full-mesh iBGP kept at pe_count=5 → C(5,2)=10 VPNv4 sessions.
+    # That is comfortably small and converges reliably; route-reflection would
+    # require new template + model code (RR cluster-id, rr-client neighbors, P
+    # routers carrying VPNv4) for no convergence benefit at this scale — YAGNI.
+    # ponytail THRESHOLD: revisit RR only beyond ~pe_count=8 (C(8,2)=28 sessions)
+    # where the n^2 mesh starts to hurt; set route_reflector=true + rr_node then.
     route_reflector: false
     rr_node: null
     # All PEs peer with each other via loopback (update-source lo).
@@ -96,11 +101,11 @@ addressing:
   #   CE hub:      10.255.4.{1..hub_count}/32
   #   CE dc:       10.255.5.{1..dc_count}/32
   loopback_base:
-    P:      "10.255.1.0/24"   # .1, .2, .3
-    PE:     "10.255.2.0/24"   # .1, .2, .3
-    CE_branch: "10.255.3.0/24"
-    CE_hub:    "10.255.4.0/24"
-    CE_dc:     "10.255.5.0/24"
+    P:      "10.255.1.0/24"   # .1 .. .p_count   (5)
+    PE:     "10.255.2.0/24"   # .1 .. .pe_count  (5)
+    CE_branch: "10.255.3.0/24"  # .1 .. .16
+    CE_hub:    "10.255.4.0/24"  # .1 .. .4
+    CE_dc:     "10.255.5.0/24"  # .1 .. .4
 
   # --- Core P-P links (/31) ---
   # Block 10.0.0.0/16 for provider core point-to-point links.
@@ -128,13 +133,13 @@ addressing:
   #   vrf_idx: CORP=0, VOICE=1, GUEST=2  (slot 3 of each block of 4 is spare)
   #   host gets .10/24, CE gets .1/24 as gateway.
   # Collision-free: per-site third-octet ranges [4i, 4i+2] are disjoint (gap of 4).
-  # Max octet with 8 sites = 7*4+2 = 30 < 256.
+  # Max octet with 24 sites = 23*4+2 = 94 < 256. (selftest --check asserts this.)
   customer_lan_base: "192.168.0.0/16"
 
   # --- BGP ASNs for CEs ---
-  # branch CE{i}: AS 65101 + (i-1)     → 65101, 65102, 65103, 65104
-  # hub    CE{i}: AS 65201 + (i-1)     → 65201, 65202
-  # dc     CE{i}: AS 65301 + (i-1)     → 65301, 65302
+  # branch CE{i}: AS 65101 + (i-1)     → 65101 .. 65116 (16 branches)
+  # hub    CE{i}: AS 65201 + (i-1)     → 65201 .. 65204 (4 hubs)
+  # dc     CE{i}: AS 65301 + (i-1)     → 65301 .. 65304 (4 dc)
   ce_asn_base:
     branch: 65101
     hub:    65201
@@ -142,7 +147,10 @@ addressing:
 
   # --- WireGuard overlay ---
   # Subnet 172.16.0.0/24; all WG peers in this /24.
-  # Hubs get .1, .2; branch spokes .11+idx; dc spokes .21+idx.
+  # Hubs get .1..(hub_count); branch spokes .11+idx; dc spokes .101+idx.
+  # ponytail: at branch_count=16 the branch block runs .11..27, which would
+  # overrun a .21-based dc block — so dc base was moved to .101 (in generate.py)
+  # to keep the two spoke ranges disjoint. selftest --check asserts no collision.
   wg_overlay_subnet: "172.16.0.0/24"
   wg_port: 51820
 

@@ -84,17 +84,25 @@ def _gen_interfaces(rng, inv, prof, times):
 
 
 def _gen_tunnels(rng, inv, prof, times):
-    tb = prof["tunnel_baseline"]
-    lat = tb["tunnel_latency_ms"]; jit = tb["tunnel_jitter_ms"]
-    loss = tb["tunnel_loss_pct"]; rk = tb["tunnel_rekeys"]
+    # ponytail: use per-site_type baseline if available (preserves dc<branch tier);
+    # fall back to global for site_types without tunnels in the real capture.
+    global_tb = prof["tunnel_baseline"]
+    by_site = prof.get("tunnel_baseline_by_site", {})
+    rk_g = global_tb["tunnel_rekeys"]
     rows = []
     for dev, meta in inv.items():
         st = meta["site_type"] or "branch"
+        # pick site-specific or global baseline
+        tb = by_site.get(st, global_tb)
+        lat = tb.get("tunnel_latency_ms", global_tb["tunnel_latency_ms"])
+        jit = tb.get("tunnel_jitter_ms", global_tb["tunnel_jitter_ms"])
+        loss = tb.get("tunnel_loss_pct", global_tb["tunnel_loss_pct"])
+        rk = global_tb["tunnel_rekeys"]  # rekeys same across sites
         for ent in meta["tunnels"]:
             rekeys = float(rng.integers(int(rk["min"]), int(rk["max"]) + 1))
             for ep in times:
                 d = _diurnal(ep)
-                # latency: baseline + diurnal congestion bump; jitter/loss small
+                # latency: site-tier baseline + diurnal congestion bump
                 l = max(1.0, rng.normal(lat["mean"], lat["std"] * 0.4) + d * 8.0)
                 j = max(0.1, rng.normal(jit["mean"], jit["std"] * 0.5) + d * 0.5)
                 lo = max(0.0, rng.normal(loss["mean"], max(loss["std"], 0.05) * 0.5)) + d * 0.02
@@ -119,69 +127,119 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
       time_to_impact_s = t_impact - bucket_ts  (>0 BEFORE impact, <0 after)
     During [t_start, t_impact] metrics RAMP up so the model can predict; after
     impact they peak then decay. Only rows in [t_start, t_end] are is_fault.
+
+    ponytail: old version had a per-row Python loop over ~17M rows (O(n*ep),
+    very slow). Replaced with fully vectorized numpy masking per episode;
+    prog ramp computed as array slice, metrics updated in-place on numpy arrays
+    then written back once — O(rows_in_window) per episode, no Python for-loop.
     """
     sigs = prof["fault_signatures"]
     ce_devs = [d for d, m in inv.items() if d.startswith("ce_")]
     pe_devs = [d for d in inv if d.startswith(("pe", "p"))]
     span = times[-1] - times[0]
-    # episode budget scales with span & --scale; ~one episode per device-hour/8
     n_ep = max(4, int(scale * len(inv) * span / 3600 / 8))
 
-    # index rows for fast masked update
     df = df.reset_index(drop=True)
-    epoch = df["ts"].map(lambda s: datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
-                         .replace(tzinfo=timezone.utc).timestamp()).to_numpy()
+    # ponytail: pandas datetime64[us] -> int64 is microseconds, divide by 1e6 not 1e9
+    epoch = pd.to_datetime(df["ts"], utc=True).astype("int64").to_numpy() // 10**6
+
+    # extract metric columns as mutable numpy arrays; .copy() makes them writable
+    lat_arr  = df["tunnel_latency_ms"].to_numpy(dtype=float, na_value=np.nan).copy()
+    jit_arr  = df["tunnel_jitter_ms"].to_numpy(dtype=float, na_value=np.nan).copy()
+    loss_arr = df["tunnel_loss_pct"].to_numpy(dtype=float, na_value=np.nan).copy()
+    iin_arr  = df["if_in_octets"].to_numpy(dtype=float, na_value=np.nan).copy()
+    ops_arr  = df["if_oper_status"].to_numpy(dtype=float, na_value=np.nan).copy()
+
+    dev_arr  = df["device"].to_numpy()
+    etype    = df["entity_type"].to_numpy()
+    ent_arr  = df["entity"].to_numpy()
+
+    # label columns as object arrays
+    fault_col = np.full(len(df), False, dtype=bool)
+    sid_col   = np.full(len(df), None, dtype=object)
+    ftype_col = np.full(len(df), None, dtype=object)
+    sev_col   = np.full(len(df), None, dtype=object)
+    lead_col  = np.full(len(df), np.nan)
+    tti_col   = np.full(len(df), np.nan)
 
     ftypes = list(sigs)
+    times_arr = np.array(times, dtype=np.int64)
     for _ in range(n_ep):
         ft = rng.choice(ftypes)
         sig = sigs[ft]
         kind = sig["kind"]
         target = rng.choice(pe_devs if ft in ("bgp_flap", "node_failure") and pe_devs else ce_devs)
         lead = float(sig["lead_s"])
-        dur_impact = rng.uniform(60, 240)  # how long the impact phase lasts
-        t_start = float(rng.choice(times[: max(1, len(times) - 1)]))
+        dur_impact = float(rng.uniform(60, 240))
+        t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
         t_impact = t_start + lead
         t_end = t_impact + dur_impact
         sid = f"{ft}-{target}-{uuid.uuid4().hex[:8]}"
         sev = rng.choice(["low", "medium", "high"], p=[0.3, 0.4, 0.3])
         sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(sev)]
 
-        win = (df["device"] == target) & (epoch >= t_start) & (epoch <= t_end)
+        # vectorized window mask
+        win = (dev_arr == target) & (epoch >= t_start) & (epoch <= t_end)
         if not win.any():
             continue
-        df.loc[win, "is_fault"] = True
-        df.loc[win, "scenario_id"] = sid
-        df.loc[win, "fault_type"] = ft
-        df.loc[win, "severity"] = str(sev)
-        df.loc[win, "lead_time_s"] = lead
-        tti = t_impact - epoch[win.to_numpy()]
-        df.loc[win, "time_to_impact_s"] = np.round(tti, 1)
 
-        # perturb metrics: ramp 0->1 across [t_start,t_impact], decay after
-        idx = np.where(win.to_numpy())[0]
-        for i in idx:
-            e = epoch[i]
-            if e <= t_impact:
-                prog = (e - t_start) / max(lead, step)        # 0..1 precursor ramp
-            else:
-                prog = max(0.0, 1.0 - (e - t_impact) / max(dur_impact, step))  # decay
-            prog = float(np.clip(prog, 0.0, 1.0)) * sevmul
-            row = df.iloc[i]
-            if kind == "tunnel_ramp" and row["entity_type"] == "tunnel":
-                df.at[i, "tunnel_latency_ms"] = round(row["tunnel_latency_ms"] +
-                    prog * (sig["lat_peak"] - row["tunnel_latency_ms"]), 4)
-                df.at[i, "tunnel_jitter_ms"] = round(row["tunnel_jitter_ms"] +
-                    prog * (sig["jit_peak"] - row["tunnel_jitter_ms"]), 4)
-                df.at[i, "tunnel_loss_pct"] = round(row["tunnel_loss_pct"] +
-                    prog * sig["loss_peak"], 4)
-            elif kind == "iface_churn" and row["entity_type"] == "interface":
-                # churn = transient traffic spike on the device interfaces
-                if pd.notna(row["if_in_octets"]):
-                    df.at[i, "if_in_octets"] = round(row["if_in_octets"] * (1 + prog * 0.4), 1)
-            elif kind == "iface_down" and row["entity_type"] == "interface":
-                if e > t_impact and row["entity"] not in ("lo",):
-                    df.at[i, "if_oper_status"] = 0.0
+        fault_col[win] = True
+        sid_col[win]   = sid
+        ftype_col[win] = ft
+        sev_col[win]   = str(sev)
+        lead_col[win]  = lead
+        tti_col[win]   = np.round(t_impact - epoch[win], 1)
+
+        # vectorized prog ramp (no Python loop)
+        ep_win = epoch[win].astype(float)
+        prog = np.where(
+            ep_win <= t_impact,
+            (ep_win - t_start) / max(lead, step),
+            np.maximum(0.0, 1.0 - (ep_win - t_impact) / max(dur_impact, step)),
+        )
+        prog = np.clip(prog, 0.0, 1.0) * sevmul
+
+        if kind == "tunnel_ramp":
+            tmask = win & (etype == "tunnel")
+            if tmask.any():
+                # ponytail: recompute prog for tmask slice (subset of win)
+                ep_t = epoch[tmask].astype(float)
+                p_t = np.where(ep_t <= t_impact,
+                               (ep_t - t_start) / max(lead, step),
+                               np.maximum(0.0, 1.0 - (ep_t - t_impact) / max(dur_impact, step)))
+                p_t = np.clip(p_t, 0.0, 1.0) * sevmul
+                lat_arr[tmask]  = np.round(lat_arr[tmask]  + p_t * (sig["lat_peak"]  - lat_arr[tmask]),  4)
+                jit_arr[tmask]  = np.round(jit_arr[tmask]  + p_t * (sig["jit_peak"]  - jit_arr[tmask]),  4)
+                loss_arr[tmask] = np.round(loss_arr[tmask] + p_t * sig["loss_peak"],                      4)
+        elif kind == "iface_churn":
+            imask = win & (etype == "interface")
+            if imask.any():
+                ep_i = epoch[imask].astype(float)
+                p_i = np.where(ep_i <= t_impact,
+                               (ep_i - t_start) / max(lead, step),
+                               np.maximum(0.0, 1.0 - (ep_i - t_impact) / max(dur_impact, step)))
+                p_i = np.clip(p_i, 0.0, 1.0) * sevmul
+                valid = ~np.isnan(iin_arr[imask])
+                tmp = iin_arr[imask].copy()
+                tmp[valid] = np.round(tmp[valid] * (1 + p_i[valid] * 0.4), 1)
+                iin_arr[imask] = tmp
+        elif kind == "iface_down":
+            dmask = win & (etype == "interface") & (epoch > t_impact) & (ent_arr != "lo")
+            if dmask.any():
+                ops_arr[dmask] = 0.0
+
+    # write arrays back to df once
+    df["tunnel_latency_ms"] = lat_arr
+    df["tunnel_jitter_ms"]  = jit_arr
+    df["tunnel_loss_pct"]   = loss_arr
+    df["if_in_octets"]      = iin_arr
+    df["if_oper_status"]    = ops_arr
+    df["is_fault"]          = fault_col
+    df["scenario_id"]       = sid_col
+    df["fault_type"]        = ftype_col
+    df["severity"]          = sev_col
+    df["lead_time_s"]       = lead_col
+    df["time_to_impact_s"]  = tti_col
     return df
 
 

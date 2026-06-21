@@ -36,6 +36,7 @@ Run:
 import argparse
 import json
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -57,10 +58,22 @@ DEFAULT_BACKEND = os.environ.get("TRAFFICGEN_BACKEND", "nc")
 #   proto         : transport hint (telemetry/QoS label)
 #   dscp          : marking (matches qos.sh classes)
 #   burstiness    : 0=steady .. 1=very spiky (scales variance in flow count)
+#   size_cv       : coefficient of variation on per-flow size (0=fixed-size codec,
+#                   high=heavy-tailed bulk transfers)
+#
+# Application-traffic intent (what each class should LOOK like to the ML team):
+#   VOICE  codec-like: MANY small, steady, regularly-spaced flows; tiny variance.
+#          A VoIP call is ~constant bitrate, so flow count tracks util smoothly and
+#          per-flow size barely moves. Most flows of any class, smallest payloads.
+#   CORP   office TCP: FEWER, LARGER, BURSTY transfers concentrated in business
+#          hours; spiky flow count + moderately heavy-tailed sizes (a big sync next
+#          to a small request).
+#   GUEST  best-effort bulk: SPARSE but FAT transfers (downloads/streaming) that
+#          lean into the evening; very spiky and very heavy-tailed sizes.
 VRF_FLOW = {
-    "VOICE": {"flows_max": 40, "bytes_per_flow": 20_000,    "proto": "udp", "dscp": "EF",   "burstiness": 0.1},
-    "CORP":  {"flows_max": 25, "bytes_per_flow": 800_000,   "proto": "tcp", "dscp": "AF31", "burstiness": 0.7},
-    "GUEST": {"flows_max": 8,  "bytes_per_flow": 5_000_000, "proto": "tcp", "dscp": "BE",   "burstiness": 0.9},
+    "VOICE": {"flows_max": 60, "bytes_per_flow": 18_000,    "proto": "udp", "dscp": "EF",   "burstiness": 0.08, "size_cv": 0.10},
+    "CORP":  {"flows_max": 22, "bytes_per_flow": 900_000,   "proto": "tcp", "dscp": "AF31", "burstiness": 0.65, "size_cv": 0.60},
+    "GUEST": {"flows_max": 7,  "bytes_per_flow": 6_000_000, "proto": "tcp", "dscp": "BE",   "burstiness": 0.90, "size_cv": 1.10},
 }
 
 
@@ -73,23 +86,49 @@ def build_plan(now, model, fault_scale=None):
     """Return a list of per-(site,vrf) flow plans for this instant.
 
     fault_scale: optional {(site,vrf): multiplier} to perturb the curve (faults).
+
+    Realism layered on the base diurnal curve:
+      * weekly envelope   — weekends quieter (same week_scale the controller uses).
+      * burstiness        — flow count jitters around the curve by a per-VRF CV, so
+                            CORP/GUEST are spiky and VOICE is steady (codec-like).
+      * per-flow size CV  — payloads vary (heavy-tailed for bulk, near-fixed for
+                            VOICE) instead of a single constant size.
+    All variance is drawn from a deterministic RNG seeded by (site, vrf, tick) so
+    a given instant is reproducible across runs and across the two backends.
+
+    # ponytail: variance is a seeded lognormal/gauss draw, not a replayed packet
+    #   trace. Ceiling: it shapes flow COUNT and SIZE, not inter-packet timing
+    #   (nc has no pacing). Upgrade path: per-flow tc pacing or a real codec gen.
     """
     fault_scale = fault_scale or {}
     hod = diurnal.hour_of_cycle(now, PERIOD_SECONDS)
+    wk = diurnal.week_scale(now, PERIOD_SECONDS)
+    # Tick bucket: stable within a tick (PERIOD/240 ~ 6min of modelled time) so the
+    # random realization holds for the duration of a tick but evolves across ticks.
+    tick_bucket = int(now // max(1.0, PERIOD_SECONDS / 240.0))
     plans = []
     spokes = {s["node"]: s for s in model["spokes"]}
     for site, sp in spokes.items():
         for vrf in model["site_vrfs"].get(sp["site_type"], []):
-            u = diurnal.util(hod, vrf)
+            u = diurnal.util(hod, vrf) * wk
             mult = fault_scale.get((site, vrf), 1.0)
             shape = VRF_FLOW[vrf]
-            flows = max(0, round(shape["flows_max"] * u * mult))
-            offered_bps = flows * shape["bytes_per_flow"] * 8 / max(1, PERIOD_SECONDS / 24)
+            rng = random.Random(hash((site, vrf, tick_bucket)) & 0xFFFFFFFF)
+            # Burstiness: multiply the curve-driven flow count by a positive noise
+            # factor whose spread is the VRF's burstiness. VOICE ~ steady (tight),
+            # CORP/GUEST ~ spiky (wide, occasionally doubling or going quiet).
+            noise = max(0.0, 1.0 + rng.gauss(0, shape["burstiness"]))
+            flows = max(0, round(shape["flows_max"] * u * mult * noise))
+            # Per-flow size variance: lognormal-ish around the nominal payload.
+            cv = shape["size_cv"]
+            size_factor = max(0.15, rng.lognormvariate(0, cv) if cv > 0 else 1.0)
+            bytes_per_flow = max(1024, int(shape["bytes_per_flow"] * size_factor))
+            offered_bps = flows * bytes_per_flow * 8 / max(1, PERIOD_SECONDS / 24)
             plans.append({
                 "site": site, "site_type": sp["site_type"], "vrf": vrf,
                 "hod": round(hod, 2), "util": round(u, 3),
                 "flows": flows, "proto": shape["proto"], "dscp": shape["dscp"],
-                "bytes_per_flow": shape["bytes_per_flow"],
+                "bytes_per_flow": bytes_per_flow,
                 "offered_bps": round(offered_bps),
                 "src": _ce_host(site),
             })
@@ -339,15 +378,47 @@ def _selftest():
     model = build_model()
 
     # Plan at a peak hour and a trough hour; peak must offer strictly more load.
-    peak_t = PERIOD_SECONDS * (13.5 / 24.0)   # ~14:00
-    trough_t = PERIOD_SECONDS * (3.0 / 24.0)  # ~03:00
-    peak = build_plan(peak_t, model)
-    trough = build_plan(trough_t, model)
+    # Average several adjacent ticks so the per-tick burstiness noise washes out and
+    # the underlying diurnal swing is what's being tested.
+    def avg_load(center_hod, k=12):
+        loads = []
+        for j in range(k):
+            t = PERIOD_SECONDS * (center_hod / 24.0) + j * (PERIOD_SECONDS / 240.0)
+            loads.append(sum(p["offered_bps"] for p in build_plan(t, model)))
+        return sum(loads) / len(loads)
+    peak = build_plan(PERIOD_SECONDS * (13.5 / 24.0), model)
+    trough = build_plan(PERIOD_SECONDS * (3.0 / 24.0), model)
     assert peak and trough, "empty plan"
-    peak_load = sum(p["offered_bps"] for p in peak)
-    trough_load = sum(p["offered_bps"] for p in trough)
-    assert peak_load > trough_load * 2, \
-        f"diurnal swing degenerate: peak={peak_load} trough={trough_load}"
+    peak_load = avg_load(13.5)
+    trough_load = avg_load(3.0)
+    # Pronounced day/night swing: peak should offer >=4x the trough load.
+    assert peak_load > trough_load * 4, \
+        f"diurnal swing not pronounced: peak={peak_load:.0f} trough={trough_load:.0f}"
+
+    # Per-VRF burstiness: VOICE flow count must be STEADIER than CORP/GUEST.
+    # Sample flow counts across many ticks at a fixed busy hour and compare CV.
+    def flow_cv(vrf, site):
+        vals = []
+        for j in range(60):
+            t = PERIOD_SECONDS * (13.5 / 24.0) + j * (PERIOD_SECONDS / 240.0)
+            row = next((p for p in build_plan(t, model)
+                        if p["site"] == site and p["vrf"] == vrf), None)
+            if row:
+                vals.append(row["flows"])
+        m = sum(vals) / len(vals)
+        var = sum((x - m) ** 2 for x in vals) / len(vals)
+        return (var ** 0.5) / m if m else 0.0
+    voice_cv = flow_cv("VOICE", "ce_branch1")
+    corp_cv = flow_cv("CORP", "ce_branch1")
+    assert voice_cv < corp_cv, \
+        f"VOICE should be steadier than CORP: voice_cv={voice_cv:.2f} corp_cv={corp_cv:.2f}"
+
+    # Weekly envelope: a weekend tick should offer less than the same hour midweek.
+    weekday = avg_load(13.5)
+    weekend_t0 = PERIOD_SECONDS * 6 + PERIOD_SECONDS * (13.5 / 24.0)  # day 6 = Sun
+    weekend = sum(sum(p["offered_bps"] for p in build_plan(
+        weekend_t0 + j * (PERIOD_SECONDS / 240.0), model)) for j in range(12)) / 12
+    assert weekend < weekday, f"weekend not lighter: weekend={weekend:.0f} weekday={weekday:.0f}"
 
     # Branch sites must NOT carry GUEST; hub/dc must.
     vrfs_by_site = {}
@@ -362,10 +433,13 @@ def _selftest():
         assert p["src"].startswith("h_"), f"bad src {p['src']}"
         assert p["dscp"] in ("EF", "AF31", "BE")
 
-    # Fault perturbation visibly changes the curve.
+    # Fault perturbation visibly changes the curve. Same `now` -> same burstiness
+    # seed, so the 4x multiplier must yield strictly more GUEST flows.
+    peak_t = PERIOD_SECONDS * (13.5 / 24.0)
     fs = {("ce_dc1", "GUEST"): 4.0}
+    base_plan = build_plan(peak_t, model)
     perturbed = build_plan(peak_t, model, fault_scale=fs)
-    base_g = next(p["flows"] for p in peak if p["site"] == "ce_dc1" and p["vrf"] == "GUEST")
+    base_g = next(p["flows"] for p in base_plan if p["site"] == "ce_dc1" and p["vrf"] == "GUEST")
     pert_g = next(p["flows"] for p in perturbed if p["site"] == "ce_dc1" and p["vrf"] == "GUEST")
     assert pert_g > base_g, "fault_scale did not perturb the plan"
 
@@ -376,7 +450,9 @@ def _selftest():
     # sim backend: a couple of ticks actually move bytes through the sink.
     run_sim(model, interval=0.0, ticks=2)
 
-    print(f"trafficgen selftest OK  peak_bps={peak_load} trough_bps={trough_load} "
+    print(f"trafficgen selftest OK  peak_bps={peak_load:.0f} trough_bps={trough_load:.0f} "
+          f"ratio={peak_load/max(1,trough_load):.1f}x weekend_bps={weekend:.0f} "
+          f"voice_cv={voice_cv:.2f} corp_cv={corp_cv:.2f} "
           f"rows={len(peak)} iperf3_cmds={len(cmds)}")
 
 
