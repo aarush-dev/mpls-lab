@@ -1,0 +1,25 @@
+#!/bin/bash
+# qos.sh for {{ hostname }} — HTB shaping + DSCP classification on CE uplinks egress.
+# Applied on all PE-facing uplinks (CORP/VOICE/GUEST). Classes per topology-spec qos.classes.
+# ponytail: apply to ALL uplink ifaces so VOICE/GUEST uplinks are shaped, not just CORP.
+set -e
+RATE={{ uplink_rate }}
+
+{% for uplink_iface in uplink_ifaces %}
+DEV={{ uplink_iface }}
+tc qdisc del dev $DEV root 2>/dev/null || true
+tc qdisc add dev $DEV root handle 1: htb default {{ default_classid }}
+tc class add dev $DEV parent 1: classid 1:1 htb rate $RATE ceil $RATE
+
+{% for c in classes %}
+# {{ c.vrf }} — DSCP {{ c.dscp }} ({{ c.dscp_val }}), prio {{ c.prio }}
+tc class add dev $DEV parent 1:1 classid 1:{{ c.classid }} htb \
+    rate {{ c.rate }} ceil {{ c.ceil }} prio {{ c.prio }}
+# fq_codel: sch_sfq not always loaded in WSL2/clab containers; fq_codel is built-in and a better AQM.
+tc qdisc add dev $DEV parent 1:{{ c.classid }} handle {{ c.classid }}: fq_codel
+# Match on DSCP. tos = dscp << 2.
+tc filter add dev $DEV parent 1: protocol ip prio {{ c.prio }} u32 \
+    match ip tos {{ c.tos }} 0xfc flowid 1:{{ c.classid }}
+{% endfor %}
+echo "qos applied on $DEV"
+{% endfor %}

@@ -1,0 +1,135 @@
+frr defaults traditional
+hostname {{ hostname }}
+no ipv6 forwarding
+log syslog informational
+!
+{# ===== VRF definitions (PE only) ===== #}
+{% if role == 'PE' %}
+{% for v in vrfs %}
+vrf {{ v.name }}
+exit-vrf
+!
+{% endfor %}
+{% endif -%}
+{# ===== Loopback ===== #}
+interface lo
+ ip address {{ loopback }}/32
+{% if role in ('P', 'PE') %} ip ospf area 0
+{% endif -%}
+exit
+!
+{# ===== Core-facing interfaces (P + PE): OSPF + LDP ===== #}
+{% for link in core_links %}
+interface {{ link.iface }}
+ ip address {{ link.addr }}/31
+ ip ospf area 0
+ ip ospf network point-to-point
+exit
+!
+{% endfor -%}
+{# ===== CE-facing interfaces ===== #}
+{% if role == 'PE' %}
+{# PE side: VRF-bound, NOT in OSPF/LDP. VRF attach done via clab exec. #}
+{% for link in ce_links %}
+interface {{ link.iface }}
+ ip address {{ link.addr }}/30
+exit
+!
+{% endfor -%}
+{% elif role == 'CE' %}
+{# CE side: uplinks to PE (/30) + one LAN per VRF (/24). VRF binding via clab exec. #}
+{% for link in ce_links %}
+interface {{ link.iface }}
+ ip address {{ link.addr }}/30
+exit
+!
+{% endfor %}
+{% for lan in lans %}
+interface {{ lan.iface }}
+ ip address {{ lan.gw }}/24
+exit
+!
+{% endfor -%}
+{% endif -%}
+{# ===== OSPF (P + PE) ===== #}
+{% if role in ('P', 'PE') %}
+router ospf
+ ospf router-id {{ loopback }}
+ passive-interface lo
+exit
+!
+{% endif -%}
+{# ===== LDP (P + PE), core-facing ifaces + lo only ===== #}
+{% if role in ('P', 'PE') %}
+mpls ldp
+ router-id {{ loopback }}
+ address-family ipv4
+  discovery transport-address {{ loopback }}
+  interface lo
+  exit
+{% for link in core_links %}  interface {{ link.iface }}
+  exit
+{% endfor %} exit-address-family
+exit
+!
+{% endif -%}
+{# ===== MP-BGP VPNv4 (PE) ===== #}
+{% if role == 'PE' %}
+router bgp {{ provider_as }}
+ bgp router-id {{ loopback }}
+ no bgp ebgp-requires-policy
+ bgp log-neighbor-changes
+{% for peer in ibgp_peers %} neighbor {{ peer }} remote-as {{ provider_as }}
+ neighbor {{ peer }} update-source lo
+{% endfor %} !
+ address-family ipv4 vpn
+{% for peer in ibgp_peers %}  neighbor {{ peer }} activate
+{% endfor %} exit-address-family
+exit
+!
+{% for v in vrfs %}
+router bgp {{ provider_as }} vrf {{ v.name }}
+ bgp router-id {{ loopback }}
+ no bgp ebgp-requires-policy
+ bgp log-neighbor-changes
+{% for nbr in v.ce_neighbors %} neighbor {{ nbr.ip }} remote-as {{ nbr.asn }}
+{% endfor %} !
+ address-family ipv4 unicast
+{% for nbr in v.ce_neighbors %}  neighbor {{ nbr.ip }} activate
+{% endfor %}
+{# ponytail: no redistribute connected — it would leak /30 PE-CE uplink
+   subnets into VPNv4. CE eBGP-learned LANs are already in the VRF table
+   and get exported to VPNv4 via export vpn automatically. #}
+  label vpn export auto
+  rd vpn export {{ v.rd }}
+  rt vpn both {{ v.rt }}
+  export vpn
+  import vpn
+ exit-address-family
+exit
+!
+{% endfor -%}
+{% endif -%}
+{# ===== eBGP CE — per-VRF bgpd instances ===== #}
+{% if role == 'CE' %}
+{# ponytail: CE VRF isolation is STRUCTURAL via kernel vrf devices (created in
+   clab exec). Each VRF runs its OWN bgpd process (`router bgp <asn> vrf <VRF>`)
+   so advertisement is scoped per-VRF — no per-neighbor outbound filters needed.
+   Each VRF process only sees routes in its own FIB → cross-VRF forward impossible. #}
+{% for vi in vrf_ifaces %}
+{% set nbr = pe_neighbors | selectattr('vrf', 'equalto', vi.vrf) | first %}
+router bgp {{ ce_as }} vrf vrf_{{ vi.vrf }}
+ bgp router-id {{ loopback }}
+ no bgp ebgp-requires-policy
+ bgp log-neighbor-changes
+ neighbor {{ nbr.ip }} remote-as {{ provider_as }}
+ !
+ address-family ipv4 unicast
+  neighbor {{ nbr.ip }} activate
+{% for lan in lans %}{% if lan.vrf == vi.vrf %}  network {{ lan.net }}
+{% endif %}{% endfor %} exit-address-family
+exit
+!
+{% endfor -%}
+{% endif -%}
+end

@@ -1,0 +1,17 @@
+# wg0.conf for {{ hostname }} ({{ wg_role }}) — WireGuard SD-WAN overlay.
+# Keys precomputed by generate.py (pure-stdlib x25519). Air-gapped: no deploy-time genkey.
+# ponytail: keys baked into config at generation time — fine for a closed lab; rotate by re-running generate.py.
+[Interface]
+Address = {{ wg_addr }}/24
+ListenPort = {{ wg_port }}
+PrivateKey = {{ priv_key }}
+
+{% for peer in peers %}
+# {{ peer.name }} ({{ peer.role }})
+[Peer]
+PublicKey = {{ peer.pub_key }}
+AllowedIPs = {{ peer.allowed_ips }}
+{% if peer.endpoint %}Endpoint = {{ peer.endpoint }}:{{ wg_port }}
+{% endif %}PersistentKeepalive = 25
+
+{% endfor -%}

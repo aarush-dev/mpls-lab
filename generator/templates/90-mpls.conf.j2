@@ -1,0 +1,7 @@
+# Enable MPLS label processing — rendered per node (P/PE only).
+# net.mpls.platform_labels must be set; per-iface input=1 on every core iface.
+net.mpls.platform_labels=1048575
+net.mpls.conf.lo.input=1
+{% for iface in core_ifaces -%}
+net.mpls.conf.{{ iface }}.input=1
+{% endfor -%}

@@ -1,0 +1,225 @@
+# =============================================================================
+# topology-spec.yaml — SD-WAN-over-MPLS NOC lab declarative spec
+# Generator (generate.py) reads this and emits: clab.yml, frr.conf (per node),
+# daemons, snmpd.conf, wg configs, qos.sh.
+#
+# KNOBS: edit the counts/params below; everything else is derived.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# TOP-LEVEL KNOBS — change these to rescale the lab
+# -----------------------------------------------------------------------------
+knobs:
+  # Provider core
+  p_count:  3          # P routers (LDP LSRs, OSPF-only, no BGP)
+  pe_count: 3          # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs)
+
+  # Customer sites — total CE nodes = branch + hub + dc
+  branch_count: 4      # branch CEs  (small, single uplink, CORP+VOICE)
+  hub_count:    2      # hub CEs     (regional, CORP+VOICE+GUEST, WG hub)
+  dc_count:     2      # datacenter CEs (CORP+VOICE+GUEST, WG spoke)
+  # Option A — true per-VRF host separation: ONE host container per (site, VRF).
+  #   branch=CORP,VOICE (2 hosts); hub/dc=CORP,VOICE,GUEST (3 hosts).
+  #   hosts = branch*2 + hub*3 + dc*3 = 4*2 + 2*3 + 2*3 = 20.
+  # Total containers ≈ p_count + pe_count + (branch+hub+dc) + hosts
+  #   = 3 + 3 + 8 + 20 = 34 nodes — well within 108 GB.
+  # (host count is DERIVED from each site's VRF membership; no per-site knob.)
+
+  # BGP AS
+  provider_as: 65000   # iBGP AS for all PEs
+  # CE private ASNs: branch=65101+idx, hub=65201+idx, dc=65301+idx (see addressing)
+
+  # Image
+  frr_image:  "quay.io/frrouting/frr:9.1"
+  host_image: "wbitt/network-multitool:alpine-minimal"
+
+# -----------------------------------------------------------------------------
+# UNDERLAY
+# -----------------------------------------------------------------------------
+underlay:
+  mode: mpls           # "mpls" (kernel modules verified) | "vrflite" (fallback)
+  igp:  ospf           # OSPF area 0 on all P/PE core-facing interfaces + loopbacks
+  transport: ldp       # LDP on all core P-P and P-PE links; loopback as transport addr
+  # MPLS kernel requirements:
+  #   modules: mpls_router, mpls_gso, mpls_iptunnel
+  #   sysctl: net.mpls.platform_labels=1048575
+  #   per-iface: net.mpls.conf.<iface>.input=1  (all core interfaces on P and PE nodes)
+
+# -----------------------------------------------------------------------------
+# OVERLAY (PE-PE MP-BGP VPNv4)
+# -----------------------------------------------------------------------------
+overlay:
+  pe_bgp:
+    # DECISION: full-mesh iBGP at pe_count=3 → only 3 sessions, no RR complexity.
+    # Switch to route-reflector=true + rr_node="pe1" if pe_count grows beyond ~5.
+    route_reflector: false
+    rr_node: null
+    # All PEs peer with each other via loopback (update-source lo).
+    # Families: ipv4 vpn (VPNv4 labeled unicast).
+
+# -----------------------------------------------------------------------------
+# VRFs
+# -----------------------------------------------------------------------------
+vrfs:
+  CORP:
+    rd_community: "65000:10"   # rd export = 65000:10, rt both = 65000:10
+    dscp_class: AF31           # DSCP 26 — Assured Forwarding class 3
+    qos_priority: 2            # HTB class priority (lower = higher)
+    sites: [branch, hub, dc]   # all site types get CORP
+
+  VOICE:
+    rd_community: "65000:20"
+    dscp_class: EF             # DSCP 46 — Expedited Forwarding
+    qos_priority: 1            # highest priority
+    sites: [branch, hub, dc]
+
+  GUEST:
+    rd_community: "65000:30"
+    dscp_class: BE             # DSCP 0 — Best Effort
+    qos_priority: 3            # lowest priority
+    sites: [hub, dc]           # branch sites do NOT get GUEST (YAGNI)
+
+# Per-VRF CE-PE: eBGP. CE advertises its LAN prefix(es) into the VRF.
+# PE redistributes into VPNv4 with label vpn export auto.
+ce_pe_protocol: ebgp
+
+# -----------------------------------------------------------------------------
+# ADDRESSING PLAN
+# (generator derives every address from indices — nothing hardcoded per-node)
+# -----------------------------------------------------------------------------
+addressing:
+  # --- Loopbacks (router-ids) ---
+  # Block 10.255.0.0/16 reserved for loopbacks; all /32.
+  #   P  routers:  10.255.1.{1..p_count}/32
+  #   PE routers:  10.255.2.{1..pe_count}/32
+  #   CE branch:   10.255.3.{1..branch_count}/32
+  #   CE hub:      10.255.4.{1..hub_count}/32
+  #   CE dc:       10.255.5.{1..dc_count}/32
+  loopback_base:
+    P:      "10.255.1.0/24"   # .1, .2, .3
+    PE:     "10.255.2.0/24"   # .1, .2, .3
+    CE_branch: "10.255.3.0/24"
+    CE_hub:    "10.255.4.0/24"
+    CE_dc:     "10.255.5.0/24"
+
+  # --- Core P-P links (/31) ---
+  # Block 10.0.0.0/16 for provider core point-to-point links.
+  # Allocation: sequential /31s from 10.0.0.0.
+  # Link numbering (generator enumerates all unordered pairs):
+  #   P-P  links: 10.0.0.{2k}/31  for pair k (k=0,1,2 → 3 links for 3 P nodes full mesh)
+  #   P-PE links: 10.0.1.{2k}/31  for the k-th P-PE connection
+  # Each PE connects to at least one P; generator assigns round-robin P attachment.
+  core_link_base:
+    PP:   "10.0.0.0/16"   # /31s starting at 10.0.0.0
+    PPE:  "10.0.1.0/16"   # /31s starting at 10.0.1.0
+
+  # --- CE-PE links (/30) ---
+  # One /30 per VRF per CE-PE connection, block 10.1.0.0/16.
+  # Address formula: 10.1.{vrf_idx}.{site_linear_idx*4}/30
+  #   vrf_idx: CORP=0, VOICE=1, GUEST=2
+  #   site_linear_idx: global sequential index across branch/hub/dc
+  # Within the /30: .1 = PE (VRF interface), .2 = CE
+  ce_pe_link_base: "10.1.0.0/16"
+
+  # --- Customer LAN subnets (behind host containers) — Option A, per (site,VRF) ---
+  # Block 192.168.0.0/16. Each (site,VRF) pair gets its OWN /24 so a host in
+  # CORP is a different subnet from a host in VOICE at the same site.
+  # Formula: 192.168.{site_linear_idx*4 + vrf_idx}.0/24
+  #   vrf_idx: CORP=0, VOICE=1, GUEST=2  (slot 3 of each block of 4 is spare)
+  #   host gets .10/24, CE gets .1/24 as gateway.
+  # Collision-free: per-site third-octet ranges [4i, 4i+2] are disjoint (gap of 4).
+  # Max octet with 8 sites = 7*4+2 = 30 < 256.
+  customer_lan_base: "192.168.0.0/16"
+
+  # --- BGP ASNs for CEs ---
+  # branch CE{i}: AS 65101 + (i-1)     → 65101, 65102, 65103, 65104
+  # hub    CE{i}: AS 65201 + (i-1)     → 65201, 65202
+  # dc     CE{i}: AS 65301 + (i-1)     → 65301, 65302
+  ce_asn_base:
+    branch: 65101
+    hub:    65201
+    dc:     65301
+
+  # --- WireGuard overlay ---
+  # Subnet 172.16.0.0/24; all WG peers in this /24.
+  # Hubs get .1, .2; branch spokes .11+idx; dc spokes .21+idx.
+  wg_overlay_subnet: "172.16.0.0/24"
+  wg_port: 51820
+
+# -----------------------------------------------------------------------------
+# SD-WAN OVERLAY (WireGuard hub-spoke)
+# -----------------------------------------------------------------------------
+sdwan:
+  overlay: wireguard
+  topology: hub_spoke    # hub-spoke; no spoke-spoke shortcuts (YAGNI at this scale)
+
+  hubs:
+    # Both hub CEs act as WireGuard concentrators (dual-hub for resilience)
+    - role: hub
+      site_type: hub     # hub CE1 → wg ip 172.16.0.1
+    - role: hub
+      site_type: hub     # hub CE2 → wg ip 172.16.0.2
+
+  spokes:
+    # All branch and dc CEs are spokes; they peer to BOTH hubs
+    - site_type: branch  # wg ips 172.16.0.11 .. 172.16.0.14
+    - site_type: dc      # wg ips 172.16.0.21 .. 172.16.0.22
+
+  # WireGuard keys are generated at deploy time (generate.py calls `wg genkey`)
+  # and written into per-node wg0.conf.
+
+# -----------------------------------------------------------------------------
+# QOS
+# -----------------------------------------------------------------------------
+qos:
+  # Applied on CE egress toward PE (eth0 on CE).
+  # tc HTB root; three classes; DSCP marking via iptables/tc flower.
+  mechanism: htb_dscp
+  classes:
+    - vrf: VOICE
+      dscp: EF          # 46
+      bandwidth_pct: 30  # guaranteed 30% of CE uplink
+      burst_pct:     10
+    - vrf: CORP
+      dscp: AF31        # 26
+      bandwidth_pct: 50
+      burst_pct:     20
+    - vrf: GUEST
+      dscp: BE          # 0
+      bandwidth_pct: 20  # best-effort remainder
+      burst_pct:     5
+  # CE uplink rate (used as HTB root rate); override per site_type if needed.
+  default_uplink_rate: "1gbit"
+
+# -----------------------------------------------------------------------------
+# TELEMETRY HOOKS (hints for later phases — not consumed by generate.py)
+# -----------------------------------------------------------------------------
+telemetry:
+  snmp:
+    community: "public"
+    agentx: true         # FRR AgentX → snmpd; requires "agentx" in frr.conf
+  pmacct:
+    protocol: ipfix
+    port: 4739
+  syslog:
+    level: informational
+    bgp_log_neighbor_changes: true
+  # These fields tell the telemetry generator which nodes need snmpd + pmacctd
+  # sidecar processes (all PE and CE nodes; P nodes are SNMP-only).
+  snmp_nodes:    [P, PE, CE]
+  flow_nodes:    [PE, CE]
+
+# -----------------------------------------------------------------------------
+# SITE TOPOLOGY MAP
+# (which PEs each site type homes into — generator assigns round-robin)
+# -----------------------------------------------------------------------------
+site_attachment:
+  # Each CE attaches to exactly one PE (round-robin across pe_count).
+  # Formula: pe_index = (site_linear_idx % pe_count) + 1
+  strategy: round_robin
+
+# -----------------------------------------------------------------------------
+# MPLS FALLBACK
+# -----------------------------------------------------------------------------
+fallback:
+  vrflite_mode: false  # set true if kernel probe fails; generator skips LDP/label blocks

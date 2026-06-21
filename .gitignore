@@ -1,0 +1,17 @@
+# Third-party reuse repos (cloned reference labs, not our source)
+refs/
+
+# Generated lab output (reproduce with: python3 generator/generate.py)
+# Also contains WireGuard private keys — keep out of git.
+topology/
+
+# WireGuard keypair cache (secrets)
+generator/.wg-keys.json
+
+# Python / tooling cruft
+__pycache__/
+*.pyc
+*.log
+
+# Windows WSL artifacts
+*:Zone.Identifier

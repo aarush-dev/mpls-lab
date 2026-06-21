@@ -1,0 +1,20 @@
+# snmpd.conf for {{ hostname }} — rendered by generate.py
+# IF-MIB / standard OIDs polled by Telegraf (Phase 2) with community 'public'.
+# AgentX master enabled so FRR's subagent can attach when frr-snmp is available.
+master agentx
+agentXSocket /var/agentx/master
+
+# Listen on all interfaces, UDP 161.
+agentAddress udp:161
+
+# Read-only community (v2c) — lab only, air-gapped.
+rocommunity {{ snmp_community }}
+
+# sysName / sysLocation / sysContact
+sysName    {{ hostname }}
+sysLocation NOC-LAB
+sysContact  noc@lab.local
+
+# Expose the full standard MIB tree (system, interfaces/IF-MIB, ip, ...).
+view all included .1
+rocommunity {{ snmp_community }} default -V all
