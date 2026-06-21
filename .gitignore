@@ -8,6 +8,9 @@ topology/
 # WireGuard keypair cache (secrets)
 generator/.wg-keys.json
 
+# Generated fault label timelines (runtime output; schema documented in faults/README.md)
+faults/labels/
+
 # Python / tooling cruft
 __pycache__/
 *.pyc

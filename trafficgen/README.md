@@ -24,21 +24,42 @@ Per-VRF profiles modulate the base curve:
 
 ## Backends
 
-- **`sim`** (default): Python socket flow simulator. Opens flows at a rate set by
-  the curve against a local loopback sink; carries the **true offered_bps** in the
-  emitted JSON plan while moving only ~1/1000 of the bytes (light). Same curve
-  shape, no iperf3, air-gap-trivial.
-- **`iperf3`**: derives the real `iperf3` client commands (pairing, bitrate, `-u`
-  for VOICE, DSCP→`--tos`) from the same plan. Currently **prints** them (dry) —
-  cross-container choreography + an iperf3 binary on hosts is Phase 2 wiring.
+- **`nc`** (default in compose): Drives real cross-site TCP flows via BusyBox `nc`
+  using `docker exec` over the mounted `/var/run/docker.sock`. For each plan row a
+  one-shot listener is started on the hub/DC host; the spoke host sends bytes shaped
+  to the diurnal curve. Moves real wire bytes so `ifHCInOctets`/`ifHCOutOctets` climb
+  on CE nodes and `nfacctd` exports flows. 5% of plan bytes sent per tick (tunable via
+  `NC_FLOW_SCALE`); 30s interval. Chosen over iperf3 because the lab host image
+  (`wbitt/network-multitool:alpine-minimal`) ships BusyBox nc but NOT iperf3.
+- **`sim`**: Python socket flow simulator. Opens flows at a rate set by the curve
+  against a local loopback sink — no real dataplane bytes, no docker.sock needed.
+  Useful for unit testing / offline runs.
+- **`iperf3`**: prints the iperf3 commands it would run (dry). Upgrade path once
+  hosts carry an iperf3 binary.
+
+## Compose wiring (Phase 2.2)
+
+Build from repo root: `docker build -t noc-trafficgen -f trafficgen/Dockerfile .`
+
+Service `trafficgen` in `telemetry/docker-compose.yml` runs at static IP `172.20.20.57`
+on the `clab` network with `/var/run/docker.sock:ro`. Environment variables:
+
+| Var | Default | Meaning |
+|---|---|---|
+| `TRAFFICGEN_BACKEND` | `nc` | Backend to use |
+| `CLAB_LAB` | `sdwan_mpls_noc` | Containerlab lab name |
+| `NC_PORT_BASE` | `19000` | First nc listener port (each flow row uses base+idx) |
+| `NC_FLOW_SCALE` | `0.05` | Fraction of plan bytes actually sent per tick |
+| `DIURNAL_PERIOD` | `3600` | 24h cycle compression in seconds |
 
 ## Run
 
 ```bash
-python3 trafficgen.py --plan            # one diurnal plan as JSON lines, then exit
-python3 trafficgen.py --backend sim     # run the simulator (Ctrl-C to stop)
+python3 trafficgen.py --plan               # one diurnal plan as JSON lines, then exit
+python3 trafficgen.py --backend nc         # drive real nc flows (needs docker.sock)
+python3 trafficgen.py --backend sim        # run the loopback simulator (Ctrl-C to stop)
 python3 trafficgen.py --backend sim --ticks 10
-python3 trafficgen.py --backend iperf3  # print the iperf3 commands it would run
+python3 trafficgen.py --backend iperf3     # print the iperf3 commands it would run
 python3 trafficgen.py --selftest
 ```
 
@@ -46,6 +67,7 @@ python3 trafficgen.py --selftest
 
 - `DIURNAL_PERIOD` (s): 24h cycle compression (default `3600`).
 - `TOPO_SPEC`: spec path (default `../topology-spec.yaml`).
+- `TRAFFICGEN_BACKEND`: backend override (default `nc`).
 
 ## Output schema (per-flow-row JSON, `--plan` and sim ticks reference it)
 
@@ -68,13 +90,16 @@ covers this).
 
 ## Dependency note
 
-- `sim` backend: stdlib only.
-- `iperf3` backend: needs `iperf3` on the host containers (the `wbitt/network-multitool`
-  image lacks it; `frr-node` has tools). Add an iperf3-capable image or install the
-  binary — **container wiring is Phase 2**, not solved here.
+- `nc` backend: requires docker CLI (`docker exec`) and `/var/run/docker.sock` mounted.
+  Lab host image `wbitt/network-multitool:alpine-minimal` has BusyBox nc — confirmed present.
+- `sim` backend: stdlib only, no docker.sock needed.
+- `iperf3` backend: needs `iperf3` on the host containers — NOT present in current lab hosts.
+  Upgrade: add iperf3 to the frr-node image and set `TRAFFICGEN_BACKEND=iperf3`.
 
 ## Shortcuts (`# ponytail:` in code)
 
-- Default backend is `sim`: real iperf3 orchestration across 22 containers is heavier
-  than the signal needs now. Upgrade: `--backend iperf3` once hosts carry the binary;
-  pairing is already derived.
+- nc backend chosen over iperf3: hosts lack iperf3, BusyBox nc is lighter and sufficient
+  to move counters. DSCP marking not applied by nc (BusyBox lacks `--tos`); QoS marking
+  would need to happen in the CE node. Upgrade path documented above.
+- NC_FLOW_SCALE=0.05 keeps traffic light; bump to 0.5+ if SNMP counter increments are
+  too small to see in Grafana.

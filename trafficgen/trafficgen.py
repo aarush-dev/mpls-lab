@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """Traffic generator — drives diurnal load across the lab's CE/host pairs.
 
-Two backends, same diurnal curve shape:
-  iperf3   — orchestrate real iperf3 client/server pairs (host -> hub host) shaped
-             to the curve. Realistic dataplane bytes for SNMP/pmacct telemetry.
-  sim      — Python socket flow simulator: opens short TCP/UDP flows at a rate set
-             by the curve, no iperf3 needed. Same utilization/latency curve shape,
-             air-gap-trivial, used when iperf3 cross-container orchestration is heavy.
+Three backends, same diurnal curve shape:
+  nc     — orchestrate real BusyBox-nc client/server flows between host containers
+           via `docker exec`, shaped to the diurnal curve. Moves real bytes across
+           the data plane so SNMP ifHCIn/OutOctets climb and nfacctd sees flows.
+           DEFAULT when TRAFFICGEN_BACKEND=nc or running in compose.
+  iperf3 — same but with iperf3 (not available on wbitt/network-multitool:alpine-minimal;
+           kept for future use when hosts carry iperf3).
+  sim    — Python socket flow simulator (loopback only, no real dataplane bytes).
+           Useful for unit testing without the lab.
 
-# ponytail: DEFAULT backend = "sim". iperf3 across 22 containers needs a server per
-#   sink + per-pair `docker exec` choreography and an iperf3 image on the hosts —
-#   heavier than the signal warrants right now. The sim backend produces the same
-#   diurnal utilization curve (the shape the ML learns from) by modulating flow
-#   count/size with diurnal.util(). Ceiling: sim emits a planned-bytes series, not
-#   real wire bytes; pmacct won't see sim flows. Upgrade path: set --backend iperf3
-#   once hosts carry an iperf3 binary (note in README) — pairing is derived here,
-#   so only the launch shell-out changes.
+# ponytail: nc backend chosen over iperf3 — host image is
+#   wbitt/network-multitool:alpine-minimal which has BusyBox nc but NOT iperf3.
+#   nc is enough: `dd if=/dev/zero | nc -w<t> <sink_ip> <port>` sends real TCP
+#   bytes across the MPLS/WireGuard overlay so ifHCInOctets visibly climbs and
+#   nfacctd captures flows. One nc listener per (sink, VRF, port) restarted each
+#   tick; connections are short-lived (one per flow plan row). Ceiling: no UDP DSCP
+#   marking (BusyBox nc lacks --tos); DSCP is preserved on the real traffic only
+#   if QoS marking happens inside the CE node (configured separately). Upgrade path:
+#   add iperf3 to the frr-node image via the Dockerfile and switch backend to iperf3.
 
 Per-VRF flow mix (per spec dscp classes):
   VOICE  small steady UDP-like  (EF,  many tiny flows, low variance)
@@ -23,15 +27,17 @@ Per-VRF flow mix (per spec dscp classes):
   GUEST  best-effort bulk       (BE,  occasional large transfers)
 
 Run:
-  python3 trafficgen.py --plan            # print the diurnal traffic plan as JSON lines and exit
-  python3 trafficgen.py --backend sim     # run the socket simulator (loopback by default)
-  python3 trafficgen.py --backend iperf3  # print the iperf3 commands it WOULD run (dry by default)
+  python3 trafficgen.py --plan               # print the diurnal traffic plan as JSON lines and exit
+  python3 trafficgen.py --backend nc         # drive real nc flows between lab hosts (default)
+  python3 trafficgen.py --backend sim        # run the loopback socket simulator
+  python3 trafficgen.py --backend iperf3     # print the iperf3 commands it WOULD run (dry)
   python3 trafficgen.py --selftest
 """
 import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -42,6 +48,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "controller"))
 from topo import build_model  # noqa: E402
 
 PERIOD_SECONDS = float(os.environ.get("DIURNAL_PERIOD", "3600"))
+# Default backend: nc moves real dataplane bytes; sim is loopback-only.
+DEFAULT_BACKEND = os.environ.get("TRAFFICGEN_BACKEND", "nc")
 
 # Per-VRF flow shape at full utilization (util=1.0):
 #   flows_max     : concurrent flows when saturated
@@ -188,6 +196,144 @@ def iperf3_commands(now, model, fault_scale=None):
     return cmds
 
 
+# --------------------------------------------------------------------------- nc backend
+# ponytail: no iperf3 on wbitt/network-multitool:alpine-minimal, but BusyBox nc is
+#   present. We drive real cross-site TCP flows with:
+#     docker exec <sink>  nc -l -p <port>  (listener, exits after one connection)
+#     docker exec <src>   sh -c "dd if=/dev/zero bs=<bs> count=<n> | nc -w3 <ip> <port>"
+#   One listener is started per flow row; the sender connects, dumps bytes, closes.
+#   Port base 19000 + row_index to avoid collisions across concurrent rows.
+#   Bytes scaled to diurnal curve (bytes_per_flow * flows at the current hour).
+#   This is enough to make ifHCInOctets climb on CE nodes and let nfacctd export flows.
+
+LAB_NAME = os.environ.get("CLAB_LAB", "sdwan_mpls_noc")
+NC_PORT_BASE = int(os.environ.get("NC_PORT_BASE", "19000"))
+NC_FLOW_SCALE = float(os.environ.get("NC_FLOW_SCALE", "0.05"))  # fraction of plan bytes to send (keep it light)
+
+
+def _clab(node):
+    """Return full clab container name for a node short-name."""
+    return f"clab-{LAB_NAME}-{node}"
+
+
+def _host_cname(ce_node, vrf):
+    """Container name for the host behind a CE node for a given VRF.
+
+    Generator creates hosts as h_<ce_suffix>_<vrf_lower>, e.g.
+    ce_branch1 + CORP -> h_branch1_corp.
+    """
+    suffix = ce_node[len("ce_"):] if ce_node.startswith("ce_") else ce_node
+    return _clab(f"h_{suffix}_{vrf.lower()}")
+
+
+def _host_eth1_ip(cname):
+    """Read eth1 IP from a running container. Returns None on failure."""
+    try:
+        out = subprocess.run(
+            ["docker", "exec", cname, "ip", "-4", "addr", "show", "eth1"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout
+        for tok in out.split():
+            if "." in tok and "/" in tok:
+                return tok.split("/")[0]
+    except Exception:
+        pass
+    return None
+
+
+def _nc_send_flow(src_cname, dst_ip, port, total_bytes):
+    """Send total_bytes from src to dst via nc. Fire-and-forget; errors are silent."""
+    # dd produces the bytes; nc pipes them to the listener.
+    bs = 65536
+    count = max(1, total_bytes // bs)
+    cmd = f"dd if=/dev/zero bs={bs} count={count} 2>/dev/null | nc -w4 {dst_ip} {port}"
+    try:
+        subprocess.run(
+            ["docker", "exec", src_cname, "sh", "-c", cmd],
+            capture_output=True, timeout=30,
+        )
+    except Exception:
+        pass
+
+
+def _nc_listen(sink_cname, port):
+    """Start a one-shot nc listener on the sink (exits after first connection)."""
+    try:
+        subprocess.run(
+            ["docker", "exec", sink_cname, "nc", "-l", "-p", str(port)],
+            capture_output=True, timeout=35,
+        )
+    except Exception:
+        pass
+
+
+def run_nc(model, interval, ticks=None, fault_scale=None):
+    """Drive real cross-site TCP flows using BusyBox nc via docker exec.
+
+    For each tick: build the plan, pick one hub per VRF as the sink, start nc
+    listeners on sinks, then launch senders from branch/dc spoke hosts.
+    Bytes sent = plan_bytes * NC_FLOW_SCALE (default 5%) to stay light.
+    """
+    # Pre-resolve sink IPs: hub hosts per VRF.
+    hub_nodes = [h["node"] for h in model["hubs"]]
+    sink_ip_cache = {}  # (hub_node, vrf) -> ip
+
+    def _sink_ip(hub_node, vrf):
+        key = (hub_node, vrf)
+        if key not in sink_ip_cache:
+            cname = _host_cname(hub_node, vrf)
+            ip = _host_eth1_ip(cname)
+            sink_ip_cache[key] = ip  # cache None too (no retry noise)
+        return sink_ip_cache[key]
+
+    print(json.dumps({"event": "trafficgen_up", "backend": "nc",
+                      "scale": NC_FLOW_SCALE, "period_s": PERIOD_SECONDS,
+                      "lab": LAB_NAME}), flush=True)
+    i = 0
+    while ticks is None or i < ticks:
+        now = time.time()
+        plan = build_plan(now, model, fault_scale)
+        threads = []
+        tick_bytes = 0
+
+        # Group plan by VRF to pick one sink hub per VRF (round-robin across hubs).
+        for row_idx, p in enumerate(plan):
+            if p["flows"] == 0:
+                continue
+            vrf = p["vrf"]
+            # Sink: cycle through hubs by row_idx
+            hub = hub_nodes[row_idx % len(hub_nodes)]
+            sink_ip = _sink_ip(hub, vrf)
+            if sink_ip is None:
+                continue  # hub host not present for this VRF (e.g. branch-only VRF)
+            sink_cname = _host_cname(hub, vrf)
+            src_cname = _host_cname(p["site"], vrf)
+            port = NC_PORT_BASE + row_idx
+            nbytes = max(1024, int(p["bytes_per_flow"] * p["flows"] * NC_FLOW_SCALE))
+            tick_bytes += nbytes
+
+            # Start listener then sender concurrently.
+            lt = threading.Thread(target=_nc_listen, args=(sink_cname, port), daemon=True)
+            lt.start()
+            time.sleep(0.05)  # give listener time to bind
+            st = threading.Thread(target=_nc_send_flow,
+                                  args=(src_cname, sink_ip, port, nbytes), daemon=True)
+            st.start()
+            threads.append((lt, st))
+
+        # Wait for all senders (listeners self-exit after one connection).
+        for lt, st in threads:
+            st.join(timeout=35)
+
+        total_offered = sum(p["offered_bps"] for p in plan)
+        print(json.dumps({"event": "tick", "hod": plan[0]["hod"] if plan else None,
+                          "offered_bps_total": total_offered,
+                          "nc_bytes_sent": tick_bytes,
+                          "active_rows": len(threads)}), flush=True)
+        i += 1
+        time.sleep(interval)
+
+
 # ---------------------------------------------------------------------------- selftest
 def _selftest():
     model = build_model()
@@ -236,8 +382,9 @@ def _selftest():
 
 def main():
     ap = argparse.ArgumentParser(description="Diurnal traffic generator")
-    ap.add_argument("--backend", choices=["sim", "iperf3"], default="sim")
-    ap.add_argument("--interval", type=float, default=5.0)
+    ap.add_argument("--backend", choices=["sim", "iperf3", "nc"], default=DEFAULT_BACKEND)
+    ap.add_argument("--interval", type=float, default=30.0,
+                    help="seconds between ticks (default 30 for nc backend)")
     ap.add_argument("--ticks", type=int, default=None, help="stop after N ticks")
     ap.add_argument("--plan", action="store_true", help="print one plan as JSON lines and exit")
     ap.add_argument("--selftest", action="store_true")
@@ -252,9 +399,12 @@ def main():
             print(json.dumps(p))
         return
     if args.backend == "iperf3":
-        # Dry: print the commands it would run (container wiring is Phase 2).
+        # Dry: print the commands it would run (iperf3 not present on lab hosts).
         for c in iperf3_commands(time.time(), model):
             print(c)
+        return
+    if args.backend == "nc":
+        run_nc(model, args.interval, args.ticks)
         return
     run_sim(model, args.interval, args.ticks)
 

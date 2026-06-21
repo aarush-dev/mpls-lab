@@ -1,0 +1,80 @@
+{
+  "uid": "noc-overview",
+  "title": "NOC Overview",
+  "tags": ["noc", "sdwan", "phase2"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "device",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "query": "label_values(interface_ifHCInOctets, device)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Interface RX throughput (bps)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "bps" } },
+      "targets": [
+        {
+          "expr": "rate(interface_ifHCInOctets{device=~\"$device\"}[5m]) * 8",
+          "legendFormat": "{{device}} {{interface}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Interface TX throughput (bps)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "bps" } },
+      "targets": [
+        {
+          "expr": "rate(interface_ifHCOutOctets{device=~\"$device\"}[5m]) * 8",
+          "legendFormat": "{{device}} {{interface}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "SD-WAN tunnel latency (ms)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        {
+          "expr": "sdwan_tunnel_latency_ms",
+          "legendFormat": "{{tunnel}} -> {{hub}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "SD-WAN tunnel loss (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [
+        {
+          "expr": "sdwan_tunnel_loss_pct",
+          "legendFormat": "{{tunnel}} -> {{hub}}"
+        }
+      ]
+    }
+  ]
+}

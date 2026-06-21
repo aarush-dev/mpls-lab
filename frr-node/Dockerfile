@@ -11,6 +11,9 @@ FROM quay.io/frrouting/frr:10.5.1
 # need.  Re-evaluate when Alpine ships frr-snmp-10.5.x.
 #
 # ponytail: no grafana/telegraf/fluentd here — those live in telemetry/docker-compose.yml.
+# rsyslog chosen over busybox syslogd: busybox -R flag sends RFC3164 only;
+# promtail syslog listener requires RFC5424.  rsyslog omfwd + SyslogProtocol23Format
+# is the smallest tool that speaks RFC5424 on Alpine.
 RUN apk add --no-cache \
     net-snmp \
     net-snmp-tools \
@@ -20,7 +23,11 @@ RUN apk add --no-cache \
     wireguard-go \
     iptables \
     tcpdump \
-    bash
+    bash \
+    rsyslog \
+    gettext
+
+COPY rsyslog.conf /etc/rsyslog.conf
 
 COPY start.sh /start.sh
 COPY pmacctd.conf /etc/pmacctd.conf

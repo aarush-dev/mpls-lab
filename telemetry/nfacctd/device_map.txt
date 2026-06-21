@@ -1,0 +1,18 @@
+! pre_tag_map: maps IPFIX exporter source IP → device label
+! Format: set_label=<value> ip=<exporter_ip>
+! peer_src_ip is the mgmt IP of the pmacctd/FRR node that exported the flow.
+
+set_label=p1          ip=172.20.20.101
+set_label=p2          ip=172.20.20.102
+set_label=p3          ip=172.20.20.103
+set_label=pe1         ip=172.20.20.104
+set_label=pe2         ip=172.20.20.105
+set_label=pe3         ip=172.20.20.106
+set_label=ce_branch1  ip=172.20.20.107
+set_label=ce_branch2  ip=172.20.20.108
+set_label=ce_branch3  ip=172.20.20.109
+set_label=ce_branch4  ip=172.20.20.110
+set_label=ce_hub1     ip=172.20.20.111
+set_label=ce_hub2     ip=172.20.20.112
+set_label=ce_dc1      ip=172.20.20.113
+set_label=ce_dc2      ip=172.20.20.114

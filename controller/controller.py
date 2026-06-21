@@ -73,14 +73,20 @@ class TunnelState:
     def _read_netem(self):
         """Read injected netem delay/loss on the spoke's uplink, if present.
 
-        Returns (extra_delay_ms, extra_loss_pct). Best-effort: if tc/the netns is
-        not reachable (e.g. running outside the deployed lab), returns (0, 0).
-        # ponytail: shells out to `tc`; only works once the lab is deployed.
+        Returns (extra_delay_ms, extra_loss_pct). Best-effort: returns (0, 0)
+        if the lab is not deployed or docker.sock is not mounted.
+
+        # ponytail: use `docker exec <clab-container> tc ...` via the mounted
+        #   /var/run/docker.sock rather than `ip netns exec` — the netns path
+        #   requires host-net privileges and silently fails inside a container.
+        #   docker.sock is cheaper: mount it read-only and shell out to the
+        #   docker CLI already in PATH (added to image). Best-effort; any
+        #   exception returns (0, 0) so the controller still runs without a lab.
         """
-        ns = f"clab-sdwan_mpls_noc-{self.site}"
+        cname = f"clab-sdwan_mpls_noc-{self.site}"
         try:
             out = subprocess.run(
-                ["ip", "netns", "exec", ns, "tc", "qdisc", "show", "dev", "eth0"],
+                ["docker", "exec", cname, "tc", "qdisc", "show", "dev", "eth1"],
                 capture_output=True, text=True, timeout=2,
             ).stdout
         except Exception:
@@ -260,7 +266,7 @@ class Controller:
         metric("sdwan_path_active", "1 if this hub is the active path for site/vrf", "gauge")
         for (site, vrf), hub in sorted(self.active.items()):
             st = next((t.site_type for t in self.tunnels if t.site == site), "")
-            lbl = f'{{site="{site}",site_type="{st}",vrf="{vrf}",hub="{hub}"}}'
+            lbl = f'{{device="{site}",site="{site}",site_type="{st}",vrf="{vrf}",hub="{hub}"}}'
             lines.append(f"sdwan_path_active{lbl} 1")
         metric("sdwan_path_changes_total", "Cumulative path-selection changes", "counter")
         lines.append(f"sdwan_path_changes_total {self.path_changes}")
@@ -269,7 +275,7 @@ class Controller:
 
 
 def _m(name, t, val):
-    lbl = (f'{{tunnel="{t.tunnel}",site="{t.site}",site_type="{t.site_type}",'
+    lbl = (f'{{device="{t.site}",tunnel="{t.tunnel}",site="{t.site}",site_type="{t.site_type}",'
            f'hub="{t.hub}"}}')
     return f"{name}{lbl} {val:.4f}" if isinstance(val, float) else f"{name}{lbl} {val}"
 

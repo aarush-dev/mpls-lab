@@ -1,5 +1,5 @@
-# SD-WAN controller image. Build context = /root/LAB (repo root).
-#   docker build -t noc-controller -f controller/Dockerfile .
+# Trafficgen image. Build context = /root/LAB (repo root).
+#   docker build -t noc-trafficgen -f trafficgen/Dockerfile .
 #
 # ponytail: apt docker.io ships dockerd/proxy/init but NO `docker` CLI binary.
 #   COPY --from=docker:cli pulls just the static client at build time (egress OK);
@@ -11,9 +11,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir pyyaml
 WORKDIR /app
-COPY controller/topo.py controller/controller.py /app/controller/
-COPY trafficgen/diurnal.py /app/trafficgen/
+COPY trafficgen/trafficgen.py trafficgen/diurnal.py /app/trafficgen/
+COPY controller/topo.py /app/controller/
 COPY topology-spec.yaml /app/topology-spec.yaml
 ENV TOPO_SPEC=/app/topology-spec.yaml
-EXPOSE 9362
-CMD ["python3", "/app/controller/controller.py", "--port", "9362"]
+ENV TRAFFICGEN_BACKEND=nc
+CMD ["python3", "/app/trafficgen/trafficgen.py", "--backend", "nc", "--interval", "30"]

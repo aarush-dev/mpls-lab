@@ -1,0 +1,156 @@
+# =============================================================================
+# Phase 2.1 — Telemetry stack for the sdwan_mpls_noc Containerlab lab.
+# All services join the EXISTING clab docker network (external) so they share
+# L2 with the FRR nodes (172.20.20.0/24) and get static mgmt IPs.
+#
+# AIR-GAP: every image is pinned to an explicit tag (no :latest). For offline
+# deploy these must be pre-saved/loaded (Phase air-gap packaging:
+#   docker save <img> | xz > img.tar.xz  →  docker load).
+# =============================================================================
+name: telemetry
+
+networks:
+  clab:
+    external: true          # the Containerlab-managed bridge (docker network: "clab")
+
+volumes:
+  vm-data:
+  grafana-data:
+
+services:
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.103.0
+    container_name: tele-victoriametrics
+    command:
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=30d"
+      - "-httpListenAddr=:8428"
+    volumes:
+      - vm-data:/victoria-metrics-data
+    ports:
+      - "8428:8428"
+    networks:
+      clab:
+        ipv4_address: 172.20.20.50
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: tele-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks:
+      clab:
+        ipv4_address: 172.20.20.51
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+
+  telegraf:
+    image: telegraf:1.31.1
+    container_name: tele-telegraf
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    networks:
+      clab:
+        ipv4_address: 172.20.20.52
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+
+  nfacctd:
+    image: pmacct/nfacctd:v1.7.9
+    container_name: tele-nfacctd
+    volumes:
+      - ./nfacctd/nfacctd.conf:/etc/pmacct/nfacctd.conf:ro
+      - ./nfacctd/device_map.txt:/etc/pmacct/device_map.txt:ro
+    command: ["-f", "/etc/pmacct/nfacctd.conf"]
+    ports:
+      - "2055:2055/udp"
+    networks:
+      clab:
+        ipv4_address: 172.20.20.53
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: tele-loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+    ports:
+      - "3100:3100"
+    networks:
+      clab:
+        ipv4_address: 172.20.20.54
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: tele-promtail
+    command: ["-config.file=/etc/promtail/promtail.yaml"]
+    volumes:
+      - ./promtail/promtail.yaml:/etc/promtail/promtail.yaml:ro
+    ports:
+      - "1514:1514/tcp"
+      - "1514:1514/udp"
+    networks:
+      clab:
+        ipv4_address: 172.20.20.55
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # --- SD-WAN controller (Phase 2.2) ----------------------------------------
+  # Serves Prometheus text exposition on :9362. Telegraf already points to
+  # http://172.20.20.56:9362/metrics (see telegraf/telegraf.conf).
+  # docker.sock (ro) lets controller.py read live netem state from CE nodes via
+  # `docker exec clab-sdwan_mpls_noc-<node> tc qdisc show dev eth1`.
+  # Build: docker build -t noc-controller -f controller/Dockerfile . (from /root/LAB)
+  controller:
+    image: noc-controller
+    container_name: noc-controller
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DIURNAL_PERIOD: "3600"
+      TOPO_SPEC: /app/topology-spec.yaml
+    networks:
+      clab:
+        ipv4_address: 172.20.20.56
+    restart: unless-stopped
+
+  # --- Traffic generator (Phase 2.2) -----------------------------------------
+  # Drives real cross-site TCP flows between lab host containers via BusyBox nc
+  # (wbitt/network-multitool:alpine-minimal ships nc but NOT iperf3).
+  # docker.sock (ro) lets trafficgen.py run `docker exec <host> nc ...` to move
+  # bytes across the MPLS/WireGuard overlay so ifHCIn/OutOctets climb and
+  # nfacctd captures flows. Backend=nc; sim backend available for offline testing.
+  # Build: docker build -t noc-trafficgen -f trafficgen/Dockerfile . (from /root/LAB)
+  trafficgen:
+    image: noc-trafficgen
+    container_name: noc-trafficgen
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DIURNAL_PERIOD: "3600"
+      TRAFFICGEN_BACKEND: "nc"
+      CLAB_LAB: "sdwan_mpls_noc"
+      NC_PORT_BASE: "19000"
+      NC_FLOW_SCALE: "0.05"
+      TOPO_SPEC: /app/topology-spec.yaml
+    networks:
+      clab:
+        ipv4_address: 172.20.20.57
+    depends_on:
+      - controller
+    restart: unless-stopped

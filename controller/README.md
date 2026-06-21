@@ -44,28 +44,46 @@ JSON event lines (stdout) for Loki/Fluentd: `{"event":"rekey",...}`,
 
 ## Metric + label schema (STABLE — Phase 2 depends on this)
 
-All metrics are `sdwan_*`. Per-tunnel metrics carry `tunnel,site,site_type,hub`;
-policy metrics carry `site,site_type,vrf,hub`.
+All metrics are `sdwan_*`. Per-tunnel metrics carry `device,tunnel,site,site_type,hub`;
+policy metrics carry `device,site,site_type,vrf,hub`.
+
+**`device`** is the universal join key: it equals the spoke/site node name (same string as
+SNMP `device`, log `device`, and flow `device` labels), enabling cross-signal joins such as
+`interface_ifHCInOctets * on(device) sdwan_path_active`.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `sdwan_tunnel_latency_ms` | gauge | tunnel, site, site_type, hub | Modelled RTT (ms) |
-| `sdwan_tunnel_jitter_ms`  | gauge | tunnel, site, site_type, hub | Modelled jitter (ms) |
-| `sdwan_tunnel_loss_pct`   | gauge | tunnel, site, site_type, hub | Modelled packet loss (%) |
-| `sdwan_tunnel_rekeys_total` | counter | tunnel, site, site_type, hub | Cumulative WG rekeys |
-| `sdwan_path_active`       | gauge | site, site_type, vrf, hub | `1` on the active hub for that site/vrf |
+| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | Modelled RTT (ms) |
+| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | Modelled jitter (ms) |
+| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | Modelled packet loss (%) |
+| `sdwan_tunnel_rekeys_total` | counter | **device**, tunnel, site, site_type, hub | Cumulative WG rekeys |
+| `sdwan_path_active`       | gauge | **device**, site, site_type, vrf, hub | `1` on the active hub for that site/vrf |
 | `sdwan_path_changes_total` | counter | (none) | Cumulative path-selection changes |
 
 Label values use the generator's node names (`ce_branch1`, `ce_hub1`, …); `vrf` ∈
-{CORP, VOICE, GUEST}; `site_type` ∈ {branch, hub, dc}.
+{CORP, VOICE, GUEST}; `site_type` ∈ {branch, hub, dc}; `device` = `site` (spoke node name).
 
-## Deploy (Phase 2 — not wired yet)
+## Deploy (Phase 2.2)
 
-`Dockerfile` builds a standalone image. Compose wiring (network access to the lab
-netns for `tc` reads, Telegraf scrape target) is Phase 2 scope — **not built here**.
+Build from the repo root (build context must include `controller/`, `trafficgen/`, and `topology-spec.yaml`):
+
+```bash
+docker build -t noc-controller -f controller/Dockerfile .
+```
+
+Add to `telemetry/docker-compose.yml` — already wired as service `controller` at static IP
+`172.20.20.56` on the `clab` external network, with `/var/run/docker.sock` mounted read-only.
+Telegraf at `.52` scrapes `http://172.20.20.56:9362/metrics` on its 30s interval.
+
+Netem reads now use `docker exec clab-sdwan_mpls_noc-<node> tc qdisc show dev eth1` via the
+docker.sock — no host-netns privilege needed (replaces the broken `ip netns exec` path).
+
+The trafficgen service (`noc-trafficgen`) runs alongside at `.57`, also docker.sock-mounted,
+driving real BusyBox-nc TCP flows across the MPLS/WireGuard overlay every 30 s so SNMP
+counters climb. See `trafficgen/README.md` for backend details.
 
 ## Shortcuts (`# ponytail:` in code)
 
 - Metrics modelled, not ping-measured (air-gap-safe, fault-responsive). Upgrade: real
   RTT via `docker exec ping` the WG peer IP.
-- Netem read shells out to `tc`; only active once the lab is deployed.
+- Netem read via `docker exec ... tc` over docker.sock (was broken `ip netns exec`).
