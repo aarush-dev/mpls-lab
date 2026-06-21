@@ -128,6 +128,7 @@ services:
     environment:
       DIURNAL_PERIOD: "3600"
       TOPO_SPEC: /app/topology-spec.yaml
+      MEASURE_RTT: "1"   # ping hub wg0 IP per tunnel (background pool) for real RTT
     networks:
       clab:
         ipv4_address: 172.20.20.56

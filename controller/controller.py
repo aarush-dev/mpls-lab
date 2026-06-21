@@ -6,15 +6,15 @@ preference picks the primary hub), derives per-tunnel metrics, does latency/loss
 path selection with failover, and exposes everything as Prometheus text on HTTP
 so Telegraf (Phase 2) scrapes it directly — no extra dependency.
 
-# ponytail: tunnel metrics are MODELLED (baseline + diurnal congestion + optional
-#   live netem state read from the host), NOT measured by pinging inside containers.
-#   This is the simpler, air-gap-safe choice and still fault-responsive: when the
-#   fault orchestrator (later phase) runs `containerlab tools netem set` on a CE
-#   uplink, we read that netem delay/loss back via `tc` and fold it into the signal,
-#   so injected faults visibly perturb the emitted telemetry.
+# ponytail: tunnel latency is MEASURED — a background pool pings the hub's wg0 IP
+#   from inside each spoke (`docker exec ... ping -I wg0`) on a ~45s cadence and
+#   caches min/avg/max/loss; update() reads the cache each tick and layers the
+#   tuned congestion/jitter/loss model on top. Propagation comes from the per-site
+#   eth0 netem the generator emits (geography formula lives there, ONE source).
+#   Faults still inject on eth1 (wg0 ping won't see them), so _read_netem(eth1)
+#   stays as the fault term. Gated behind MEASURE_RTT (off in --selftest/no-lab →
+#   graceful fallback to a 1ms floor + the existing layers).
 #   Ceiling: modelled jitter/loss are statistical, not the exact dataplane behaviour.
-#   Upgrade path: swap _read_netem()/_model_tunnel() for real RTT (ping the WG peer
-#   IP from inside the spoke container via `docker exec`) if higher fidelity is needed.
 
 Run:
   python3 controller.py                 # serve Prometheus metrics on :9362, also log JSON events to stdout
@@ -41,28 +41,11 @@ from topo import build_model  # noqa: E402
 VRF_PREFERRED_HUB = {"CORP": "ce_hub1", "VOICE": "ce_hub1", "GUEST": "ce_hub2"}
 
 # ----------------------------------------------------------------------------
-# LATENCY TIERS BY PATH GEOGRAPHY
-# Real WANs are not uniform: a datacenter sits next to the core (short fiber to
-# its hub), a branch is out at the edge (longer access + backhaul). And each hub
-# lives in a different region, so the same spoke reaches different hubs over
-# different distances. We model baseline RTT as:
-#
-#   base_ms = site_floor[site_type]                  (access/backhaul tier)
-#           + spoke_distance(site_type, spoke_idx)   (deterministic per-spoke spread)
-#           + hub_offset(hub_idx)                    (which region the hub is in)
-#
-# All terms are deterministic from indices so a given tunnel's baseline is stable
-# across restarts (the ML team sees a consistent topology), but tunnels differ.
-#
-# ponytail: a closed-form geography proxy, not a real fiber-distance matrix.
-#   Ceiling: distances are synthetic index arithmetic, not geocoded sites; the
-#   deepest fidelity (per-link propagation delay) would come from netem baselines
-#   on each dataplane link. Upgrade path noted in the module docstring.
+# Per-tunnel propagation latency is now MEASURED (ping over wg0), not modelled —
+# the geography formula lives once in the generator (site_netem(), emitted as a
+# per-site eth0 root netem). The controller measures the real RTT and layers the
+# tuned congestion/jitter/loss model on top. See _measure_rtt() + update().
 # ----------------------------------------------------------------------------
-# Per-site-type access floor (ms): dc hugs the core, branch is far, hub mid.
-SITE_FLOOR_MS = {"dc": 5.0, "hub": 8.0, "branch": 18.0}
-# Per-site-type spoke spread (ms): how far apart the worst/closest spoke are.
-SITE_SPREAD_MS = {"dc": 12.0, "hub": 14.0, "branch": 38.0}
 # Per-site-type queue sensitivity multiplier (branches have thinner uplinks, so
 # congestion bites harder -> steeper queue climb).
 SITE_QUEUE_MULT = {"dc": 0.6, "hub": 0.8, "branch": 1.3}
@@ -71,40 +54,10 @@ SITE_QUEUE_MULT = {"dc": 0.6, "hub": 0.8, "branch": 1.3}
 # scales the modelled jitter/loss on a tunnel that carries VOICE.
 VOICE_SENSITIVITY = 1.4
 
-
-def _hub_index(hub_node):
-    """Numeric index from 'ce_hubN' -> N (1-based); 1 if unparseable."""
-    digits = "".join(c for c in hub_node if c.isdigit())
-    return int(digits) if digits else 1
-
-
-def _spoke_index(site_node):
-    """Numeric index from 'ce_branch7' / 'ce_dc2' -> 7 / 2; 1 if unparseable."""
-    digits = "".join(c for c in site_node if c.isdigit())
-    return int(digits) if digits else 1
-
-
-def baseline_rtt_ms(site_type, site_node, hub_node):
-    """Deterministic per-tunnel baseline RTT (ms) from path geography.
-
-    Spoke spread uses an irrational-multiplier hash of the spoke index so spokes
-    are spread non-uniformly across [floor, floor+spread] (real sites aren't
-    evenly spaced) yet fully deterministic. Hub offset puts each hub region at a
-    different distance (hub1 = closest/primary), and a spoke<->hub cross term
-    makes "this spoke is near hub2 but far from hub4" plausible.
-    """
-    floor = SITE_FLOOR_MS.get(site_type, 12.0)
-    spread = SITE_SPREAD_MS.get(site_type, 20.0)
-    si = _spoke_index(site_node)
-    hi = _hub_index(hub_node)
-    # Deterministic fractional spread in [0,1) from the spoke index (golden-ratio
-    # low-discrepancy sequence -> even-ish but non-linear coverage).
-    spoke_frac = (si * 0.6180339887) % 1.0
-    # Hub region offset: hub1 closest, each further hub adds a few ms.
-    hub_off = (hi - 1) * 3.5
-    # Spoke<->hub cross term: some spokes are nearer specific hubs (regional homing).
-    cross = ((si * 2 + hi * 5) % 7) * 1.2
-    return floor + spoke_frac * spread + hub_off + cross
+# Minimal latency floor (ms) used until the measured-RTT cache is populated (or
+# when MEASURE_RTT is off / a ping fails). NOT the old geography model — just a
+# small positive seed so series start plausible.
+MEASURE_FLOOR_MS = 1.0
 
 
 # Degradation thresholds for failover (loss% or latency ms over baseline).
@@ -125,8 +78,10 @@ class TunnelState:
         self.spoke_wg = spec["spoke_wg"]
         self.hub_wg = spec["hub_wg"]
         self.vrfs = spec["vrfs"]
-        # Baseline RTT from path geography (site_type tier + per-spoke spread + hub region).
-        self.base_ms = baseline_rtt_ms(self.site_type, self.site, self.hub)
+        # Propagation reference (ms): seeded at a minimal floor, refreshed to the
+        # MEASURED avg RTT once the ping cache fills. Used for series seeding and as
+        # the failover-latency baseline. NO geography model here — it's measured.
+        self.base_ms = MEASURE_FLOOR_MS
         # Per-site-type queue sensitivity (thin branch uplinks congest harder).
         self.queue_mult = SITE_QUEUE_MULT.get(self.site_type, 1.0)
         # VOICE-carrying tunnels are more loss/jitter sensitive.
@@ -147,11 +102,50 @@ class TunnelState:
         self._burst_loss = 0.0
         self._last_rekey = time.time()
         self._rekey_debt = 0  # queued clustered rekeys (handshake retries under stress)
+        # Measured-RTT cache: (avg_ms, jitter_ms, loss_pct) or None. Written by the
+        # Controller's background ping pool (~45s cadence); read each 5s tick. None
+        # until the first refresh / when MEASURE_RTT off → falls back to floor.
+        self._measured = None
 
     # Set True by --selftest so the model is exercised hermetically (no docker
     # exec round-trips, which are slow and environment-dependent). Live runs leave
     # it False so injected netem still folds into the telemetry.
     _SKIP_NETEM = False
+
+    # Measured-RTT gate: on (env MEASURE_RTT) only in the deployed container; off
+    # in --selftest/--once/no-lab so the controller still runs without pinging.
+    _MEASURE_RTT = os.environ.get("MEASURE_RTT", "") not in ("", "0", "false")
+
+    def _measure_rtt(self):
+        """Ping the hub's wg0 overlay IP from inside this spoke over wg0.
+
+        Returns (avg_ms, jitter_ms, loss_pct) or None on any failure (graceful
+        fallback). busybox ping: `round-trip min/avg/max = a/b/c ms` + `N% packet
+        loss`; no mdev, so jitter = max-min.
+        """
+        cname = f"clab-sdwan_mpls_noc-{self.site}"
+        try:
+            out = subprocess.run(
+                ["docker", "exec", cname, "ping", "-c2", "-q", "-W1",
+                 "-I", "wg0", self.hub_wg],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+        except Exception:
+            return None
+        avg = mn = mx = None
+        loss = 0.0
+        for ln in out.splitlines():
+            if "packet loss" in ln:
+                for tok in ln.split(","):
+                    if "packet loss" in tok:
+                        loss = _parse_pct(tok.strip().split()[0])
+            if "min/avg/max" in ln and "=" in ln:
+                nums = ln.split("=", 1)[1].strip().split()[0].split("/")
+                if len(nums) >= 3:
+                    mn, avg, mx = (float(nums[0]), float(nums[1]), float(nums[2]))
+        if avg is None:
+            return None
+        return avg, max(0.0, mx - mn), loss
 
     def _read_netem(self):
         """Read injected netem delay/loss on the spoke's uplink, if present.
@@ -201,7 +195,19 @@ class TunnelState:
         cong = max((diurnal.util(hod, v) for v in self.vrfs), default=0.3) * wk
         cong = max(0.0, min(0.985, cong))  # cap below 1 so the queue term stays finite
 
+        # eth1 readback = the FAULT term: faults inject netem on the per-VRF uplink
+        # (eth1), which the wg0 ping does NOT traverse, so we still fold it in here.
         netem_delay, netem_loss = self._read_netem()
+
+        # --- Measured propagation (ping over wg0, cached) -------------------------
+        # The per-site eth0 netem the generator emits is what the ping actually sees.
+        # Cache is refreshed by the Controller's background pool; here we just read
+        # it. Empty/None → minimal floor (NOT the deleted geography model).
+        if self._measured is not None:
+            meas_avg, meas_jit, meas_loss = self._measured
+            self.base_ms = meas_avg          # keep the failover baseline on real RTT
+        else:
+            meas_avg, meas_jit, meas_loss = MEASURE_FLOOR_MS, 0.0, 0.0
 
         # --- Nonlinear queueing delay (M/M/1: wait ~ rho/(1-rho)) -----------------
         # As utilization (rho) approaches 1 the queue blows up; multiplied by the
@@ -217,7 +223,8 @@ class TunnelState:
         amp = 0.25 + 1.6 * rho + netem_delay * 0.12
         self._jit_walk = 0.85 * self._jit_walk + 0.15 * self._rng.gauss(0, amp)
         voice_k = VOICE_SENSITIVITY if self.voice else 1.0
-        target_jit = max(0.0, (0.4 + abs(self._jit_walk) + 0.4 * rho) * voice_k)
+        # jitter = measured (max-min) + AR(1) congestion walk.
+        target_jit = max(0.0, meas_jit + (0.4 + abs(self._jit_walk) + 0.4 * rho) * voice_k)
 
         # --- Loss: mostly 0-0.3%, congestion-driven tail, plus micro-bursts -------
         # Baseline loss is a small noisy floor (link is healthy ~0-0.3%). A gentle
@@ -235,9 +242,12 @@ class TunnelState:
                 self._burst_ticks = self._rng.randint(1, 4)
                 self._burst_loss = self._rng.uniform(0.6, 3.5) * voice_k
         burst_loss = self._burst_loss if self._burst_ticks > 0 else 0.0
-        target_loss = (floor_loss + cong_tail) * voice_k + burst_loss + netem_loss
+        # loss = max(measured, modelled floor) + congestion tail + bursts + fault.
+        modelled_loss = (floor_loss + cong_tail) * voice_k
+        target_loss = max(meas_loss, modelled_loss) + burst_loss + netem_loss
 
-        target_lat = self.base_ms + queue_ms + netem_delay + self._rng.gauss(0, 0.4)
+        # latency = measured avg + modelled congestion queue + fault (eth1) + noise.
+        target_lat = meas_avg + queue_ms + netem_delay + self._rng.gauss(0, 0.4)
 
         # Exponential smoothing so the series looks like a real time-series. Loss is
         # smoothed lightly so micro-bursts stay visibly spiky rather than averaged out.
@@ -297,6 +307,30 @@ class Controller:
         for t in self.tunnels:
             for v in t.vrfs:
                 self.active.setdefault((t.site, v), VRF_PREFERRED_HUB.get(v, t.hub))
+
+    def refresh_measured(self, workers=16):
+        """Refresh every tunnel's measured-RTT cache via a stdlib thread pool.
+
+        Propagation is ~constant, so this runs on a slow (~45s) cadence — NOT every
+        5s tick. Called once at startup (warm the cache) then by a background thread.
+        Best-effort: a tunnel whose ping fails keeps its previous cache (or None).
+        """
+        if not TunnelState._MEASURE_RTT:
+            return
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = pool.map(lambda t: (t, t._measure_rtt()), self.tunnels)
+            for t, r in results:
+                if r is not None:
+                    t._measured = r
+
+    def _measure_loop(self, period=45.0):
+        while True:
+            time.sleep(period)
+            try:
+                self.refresh_measured()
+            except Exception:
+                pass  # never let the ping pool kill the controller
 
     def _tunnels_for(self, site, hub):
         for t in self.tunnels:
@@ -380,7 +414,7 @@ class Controller:
             lines.append(f"# HELP {name} {help_}")
             lines.append(f"# TYPE {name} {typ}")
 
-        metric("sdwan_tunnel_latency_ms", "Modelled per-tunnel one-way-ish RTT in ms", "gauge")
+        metric("sdwan_tunnel_latency_ms", "measured RTT + modelled congestion (ms)", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_latency_ms", t, t.latency_ms))
         metric("sdwan_tunnel_jitter_ms", "Modelled per-tunnel jitter in ms", "gauge")
@@ -434,6 +468,10 @@ def serve(ctrl, port, interval):
     httpd = ThreadingHTTPServer(("0.0.0.0", port), _handler_factory(ctrl))
     import threading
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    # Warm the measured-RTT cache, then refresh it in the background (~45s). No-op
+    # when MEASURE_RTT is off (refresh_measured returns immediately).
+    ctrl.refresh_measured()
+    threading.Thread(target=ctrl._measure_loop, daemon=True).start()
     print(json.dumps({"event": "controller_up", "port": port,
                       "tunnels": len(ctrl.tunnels), "interval_s": interval}),
           flush=True)
@@ -446,7 +484,8 @@ def serve(ctrl, port, interval):
 
 # ----------------------------------------------------------------------------- selftest
 def _selftest():
-    TunnelState._SKIP_NETEM = True  # hermetic: model-only, no docker exec
+    TunnelState._SKIP_NETEM = True   # hermetic: model-only, no docker exec
+    TunnelState._MEASURE_RTT = False  # no pinging in selftest (mirror _SKIP_NETEM)
     ctrl = Controller()
     n = len(ctrl.tunnels)
     # Tunnels = spokes x hubs. Scaled spec = (16 branch + 4 dc) x 4 hubs = 80;
@@ -454,17 +493,18 @@ def _selftest():
     # selftest passes both with and without the scaled topology-spec.yaml mounted.
     assert n in (12, 80), f"unexpected tunnel count {n} (expected 12 or 80)"
 
-    # --- Latency tiers by geography: dc should sit BELOW branch on average -------
-    # Check on the static baselines (deterministic, no ticks needed).
-    base_by_type = {}
-    for t in ctrl.tunnels:
-        base_by_type.setdefault(t.site_type, []).append(t.base_ms)
-    avg = {k: sum(v) / len(v) for k, v in base_by_type.items()}
-    assert avg.get("dc", 1e9) < avg.get("branch", 0), \
-        f"latency tier wrong: dc {avg.get('dc')} !< branch {avg.get('branch')}"
-    # Per-tunnel variance within a tier (not all identical).
-    assert len(set(round(b, 1) for b in base_by_type["branch"])) > 1, \
-        "branch baselines are uniform (no per-spoke variance)"
+    # --- Measured-RTT cache: fallback (no measurement) seeds the floor, and an
+    # injected measurement flows into latency. Geography is now MEASURED (the
+    # formula lives in the generator's eth0 netem), so no tier check here.
+    assert all(t.base_ms == MEASURE_FLOOR_MS for t in ctrl.tunnels), \
+        "base_ms should seed at the measure floor when cache empty"
+    probe = ctrl.tunnels[0]
+    probe._measured = (42.0, 1.5, 0.2)  # simulate a cached ping result
+    for j in range(40):
+        probe.update(time.time() + j * 5.0)
+    assert probe.base_ms == 42.0, "measured avg did not become the latency baseline"
+    assert probe.latency_ms > 30.0, f"measured RTT not reflected: {probe.latency_ms}"
+    probe._measured = None  # reset so it doesn't skew the bulk ticks below
 
     # Drive several ticks at a BUSY hour so congestion/queueing is exercised.
     busy = PERIOD_SECONDS * (14.0 / 24.0)
@@ -525,8 +565,7 @@ def _selftest():
     assert ctrl.active[(site, "CORP")] == pref, "did not recover to preferred hub"
 
     print(f"controller selftest OK  tunnels={n} series={n_series} "
-          f"tiers={{dc:{avg.get('dc',0):.1f} hub:{avg.get('hub',0):.1f} "
-          f"branch:{avg.get('branch',0):.1f}}} "
+          f"measured_fallback_floor={MEASURE_FLOOR_MS} "
           f"peak_lat={peak_lat:.1f} trough_lat={trough_lat:.1f} "
           f"path_changes={ctrl.path_changes}")
 

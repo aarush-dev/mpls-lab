@@ -43,6 +43,10 @@ in `clab.yml`, so the deployed lab is self-contained (no post-deploy script).
 `templates/*.j2` — `clab.yml.j2`, `frr.conf.j2` (role conditionals),
 `daemons.j2`, `snmpd.conf.j2`, `90-mpls.conf.j2`, `qos.sh.j2`, `wg0.conf.j2`.
 
+## Per-site WAN baseline netem
+
+`generate.py` owns the `site_netem(site_type, idx)` helper — the single source of truth for per-site geography impairment. It emits a `tc qdisc replace dev eth0 root netem delay <d>ms <j>ms loss <l>%` command in each CE's clab `exec:` block, applying a baseline netem to `eth0` (the transport veth). Tier defaults: branch ~41 ms / ~5 ms jitter / ~0.3% loss; hub ~17 ms; dc ~12 ms. Bounds: delay ≤ 60 ms, jitter ≤ 0.3 × delay, loss ≤ 1%. This delays both WireGuard tunnels and NOC telemetry (SNMP/IPFIX/syslog) on the same veth — matching real WAN behavior. The controller measures the resulting latency (ping over wg0) but does not define it.
+
 ## Note
 
 `generate.py` only emits config. It does NOT deploy. Deploy with

@@ -37,6 +37,39 @@ DSCP_VAL = {"EF": 46, "AF31": 26, "BE": 0}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Per-site WAN geography → eth0 netem (SINGLE SOURCE of the latency/jitter/loss
+# model). One per-site root netem on each CE's mgmt/transport veth (eth0) delays
+# BOTH the WG tunnels AND the telemetry transport — realistic, since NOC telemetry
+# rides the same WAN. The controller MEASURES the resulting RTT (ping over wg0)
+# instead of re-deriving it, so this formula must live in exactly one place: here.
+#
+# One-way baseline = site_floor[site_type] (access tier: dc near, hub mid, branch
+# far) + deterministic per-spoke spread (golden-ratio low-discrepancy, so sites
+# differ but are stable across regenerations). Jitter and loss scale off delay.
+#
+# ponytail: a closed-form geography proxy, not a geocoded fiber matrix. Bounds are
+#   enforced so SNMP/IPFIX/syslog still flow (small scrape gaps are realistic).
+# ──────────────────────────────────────────────────────────────────────────────
+NETEM_FLOOR_MS = {"dc": 5.0, "hub": 8.0, "branch": 18.0}
+NETEM_SPREAD_MS = {"dc": 12.0, "hub": 14.0, "branch": 38.0}
+
+
+def site_netem(site_type, idx):
+    """Return (delay_ms, jitter_ms, loss_pct) for a CE's eth0 root netem.
+
+    Bounded: delay ≤ 60ms, jitter ≤ 0.3*delay, loss ≤ 1.0% (so telemetry on the
+    same transport keeps flowing). Deterministic from (site_type, idx).
+    """
+    floor = NETEM_FLOOR_MS.get(site_type, 12.0)
+    spread = NETEM_SPREAD_MS.get(site_type, 20.0)
+    frac = (idx * 0.6180339887) % 1.0          # golden-ratio low-discrepancy spread
+    delay = min(60.0, floor + frac * spread)
+    jitter = min(0.3 * delay, 0.12 * delay + 0.3)  # ~12% of delay, capped at 0.3*d
+    loss = min(1.0, 0.02 + frac * 0.4)          # tiny, site-varying, ≤1.0%
+    return delay, jitter, loss
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # WireGuard key generation — shell out to `wg` binary (correctness-critical).
 # ponytail: pure-python x25519 produced wrong pubkeys (RFC 7748 vector 2 fail).
 # `wg` is not on the host; run it inside frr-node:latest (already pulled).
@@ -382,6 +415,15 @@ def build(spec):
             ex.append(f"ip link set {vi['uplink_if']} vrf vrf_{vname}")
             ex.append(f"ip link set {vi['lan_if']} vrf vrf_{vname}")
         ex += ["chmod +x /qos.sh", "/qos.sh || true"]
+        # ponytail: ONE per-site root netem on eth0 (mgmt/transport veth, plain
+        # qdisc → root netem is valid). Delays BOTH the WG tunnels AND telemetry
+        # transport — the controller MEASURES this via ping over wg0 instead of
+        # modelling it. `replace` is idempotent. Geo formula = site_netem() above.
+        d, j, l = site_netem(ce["site_type"], ce["type_idx"])
+        ex.append(
+            f"tc qdisc replace dev eth0 root netem "
+            f"delay {d:.1f}ms {j:.1f}ms loss {l:.2f}%"
+        )
         if ce_name in wg:
             # ponytail: WG endpoints are CE loopbacks reachable only AFTER
             # BGP/MPLS converges (~30-90s). Background-retry loop so deploy

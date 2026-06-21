@@ -301,6 +301,28 @@ def pe_for_site(site_linear_idx, pe_count):
 
 This distributes CEs evenly. With 8 CEs and 3 PEs: PE1 gets sites 0,3,6; PE2 gets 1,4,7; PE3 gets 2,5.
 
+## Per-site baseline netem on CE eth0
+
+Each CE deploy exec block applies a baseline `netem` qdisc to `eth0` (the mgmt/transport veth — the interface through which WireGuard tunnels run and over which NOC telemetry travels):
+
+```
+tc qdisc replace dev eth0 root netem delay <d>ms <j>ms loss <l>%
+```
+
+Values are set by the `site_netem(site_type, idx)` helper in `generate.py`, which is the **single source of truth** for per-site geography impairment:
+
+| site_type | delay (d) | jitter (j) | loss (l) |
+|-----------|-----------|------------|----------|
+| branch    | ~41 ms    | ~5 ms      | ~0.3%    |
+| hub       | ~17 ms    | ~2 ms      | ~0.3%    |
+| dc        | ~12 ms    | ~1 ms      | ~0.3%    |
+
+Bounds enforced: delay ≤ 60 ms, jitter ≤ 0.3 × delay, loss ≤ 1%. Within each tier, per-spoke spread is deterministic via the golden-ratio sequence (no two spokes share the exact same value).
+
+**Why eth0:** this is the host-facing transport veth. Applying netem here delays both the WireGuard tunnels (overlay data plane) AND the site's telemetry transport (SNMP polls, IPFIX flows, syslog) — realistic, since NOC telemetry rides the same WAN access link. Verified at ≤1% loss: SNMP, IPFIX, and syslog all remain intact.
+
+**Single source of truth:** `site_netem()` in `generate.py` sets the physical impairment. The controller **measures** it (ping over wg0) but does not define it. The previously-duplicated geography baseline model inside the controller has been removed.
+
 ## Validation checklist for generate.py output
 
 After generation, verify manually or via script:

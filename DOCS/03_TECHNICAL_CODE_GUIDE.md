@@ -288,10 +288,12 @@ COLUMNS = [
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `tunnel_latency_ms` | float64 | WireGuard tunnel round-trip latency in milliseconds. The primary congestion/degradation signal. |
-| `tunnel_jitter_ms` | float64 | Latency variance. High jitter hurts VoIP (VOICE VRF) before loss starts. |
-| `tunnel_loss_pct` | float64 | Packet loss percentage on the tunnel. Rises last in congestion, first in asymmetric_loss. |
+| `tunnel_latency_ms` | float64 | WireGuard tunnel RTT in milliseconds. **Measured baseline** (real ping over wg0, refreshed ~every 45 s) plus additive modelled congestion (diurnal queue, fault netem readback, noise). Not fully synthetic. |
+| `tunnel_jitter_ms` | float64 | Latency variance. **Measured** as ping max−min from the RTT cache, plus an AR(1) random walk. High jitter hurts VoIP (VOICE VRF) before loss starts. |
+| `tunnel_loss_pct` | float64 | Packet loss percentage. `max(measured_loss, modelled_floor) + micro-bursts`. Rises last in congestion, first in asymmetric_loss. |
 | `tunnel_rekeys` | float64 | Cumulative WireGuard handshake counter. Clustering = rekey anomaly. |
+
+> **How the baseline is produced:** Each CE container has a per-site netem delay on `eth0` set by the lab generator (branch ~41 ms, hub ~17 ms, dc ~12 ms). The controller `ping`s the WireGuard peer IP from inside the spoke container every ~45 s (`MEASURE_RTT=1` env gate) to read this TRUE physical RTT. On top of that it adds a diurnal congestion model, live netem readback from fault injection on `eth1`, and small noise. Result: `avg by(site_type)(sdwan_tunnel_latency_ms)` shows branch ~51 ms > dc ~32 ms in live data.
 
 **Flow aggregates** (joined from NetFlow, bucketed per device):
 
@@ -877,7 +879,7 @@ This section maps the four competition objectives to specific model choices. The
 
 **Target:** Predict `is_fault=True` before `time_to_impact_s` reaches zero.
 
-**Signal:** `tunnel_latency_ms`, `tunnel_jitter_ms`, `tunnel_loss_pct` over the last N timesteps.
+**Signal:** `tunnel_latency_ms`, `tunnel_jitter_ms`, `tunnel_loss_pct` over the last N timesteps. These values are **measured-baseline + modelled-congestion** — not purely synthetic — so they reflect real physical delays from the lab topology.
 
 **Recommended models:**
 - **LSTM / GRU** on sequences of 20 timesteps (10 minutes at 30s cadence). Input: `[latency, jitter, loss]` per tunnel. Output: `P(fault in next K seconds)`.

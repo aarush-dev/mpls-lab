@@ -10,11 +10,23 @@ so `--selftest` runs anywhere).
 
 - **Model** (`topo.py`): derives hubs/spokes/tunnels/VRFs from `../topology-spec.yaml`
   using the same index arithmetic as the generator. 6 spokes x 2 hubs = **12 tunnels**.
-- **Metrics**: each tunnel's latency/jitter/loss is **modelled** from a baseline RTT
-  (hub1 = primary/closer ~12ms, hub2 = secondary ~22ms) + diurnal congestion
-  (shared `../trafficgen/diurnal.py`) + any **live netem** delay/loss read back from
-  the deployed spoke container via `tc` — so injected faults perturb the signal.
-  Exponential smoothing makes the series look like real time-series, not noise.
+- **Metrics**: each tunnel's latency/jitter/loss is built from a **measured RTT
+  baseline** plus additive modelled layers:
+  - **Measured RTT cache** (enabled by `MEASURE_RTT=1`): a background thread runs
+    `ping -c2 -q -W1 -I wg0 <peer-wg-ip>` via `docker exec` into each spoke every
+    ~45 s. Propagation delay is ~constant so one refresh per minute is enough; this
+    avoids pinging all tunnels on every 5 s tick. The real physical delay comes from
+    per-site baseline netem the generator sets on each CE's `eth0` (branch ~41 ms,
+    hub ~17 ms, dc ~12 ms), so the controller reads TRUE RTT.
+  - **Per-tick layering**: `latency = measured_avg (cached) + queue_ms (diurnal
+    congestion model) + eth1 netem readback (active faults) + noise`;
+    `loss = max(measured_loss, modelled_floor) + micro-burst term`;
+    `jitter = (ping max−min from cache) + AR(1) walk`.
+  - The invented geography baseline was removed; the generator's site netem is now
+    the single source of propagation truth. Fault injection still writes to `eth1`
+    and is read back via netem readback, so fault-responsiveness is preserved.
+  - When `MEASURE_RTT` is unset or `0` (e.g. `--selftest`), the controller falls
+    back gracefully to the diurnal congestion model alone.
 - **Rekey events**: WireGuard rekeys ~every 2 min; under loss they cluster (handshake
   retries) — a flap precursor. Emitted as JSON events + a cumulative counter metric.
 - **Path selection**: per `(site, vrf)`, score = `loss%*10 + latency_ms`; pick the
@@ -41,6 +53,10 @@ JSON event lines (stdout) for Loki/Fluentd: `{"event":"rekey",...}`,
 
 - `DIURNAL_PERIOD` (s): 24h cycle compression. Default `3600` (1 real hour = 1 day).
 - `TOPO_SPEC`: path to the spec. Default `../topology-spec.yaml`.
+- `MEASURE_RTT` (`0`/`1`): enable live ping measurement. Set to `1` on the `controller`
+  service in `telemetry/docker-compose.yml`. Requires `/var/run/docker.sock` mounted
+  (already done). Unset or `0` → graceful fallback (no pings; congestion model only).
+  `--selftest` always runs with measurement off.
 
 ## Metric + label schema (STABLE — Phase 2 depends on this)
 
@@ -53,9 +69,9 @@ SNMP `device`, log `device`, and flow `device` labels), enabling cross-signal jo
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | Modelled RTT (ms) |
-| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | Modelled jitter (ms) |
-| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | Modelled packet loss (%) |
+| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | Measured RTT + modelled congestion (ms) |
+| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | Measured ping spread + AR(1) walk (ms) |
+| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | max(measured, modelled floor) + micro-bursts (%) |
 | `sdwan_tunnel_rekeys_total` | counter | **device**, tunnel, site, site_type, hub | Cumulative WG rekeys |
 | `sdwan_path_active`       | gauge | **device**, site, site_type, vrf, hub | `1` on the active hub for that site/vrf |
 | `sdwan_path_changes_total` | counter | (none) | Cumulative path-selection changes |
@@ -84,6 +100,6 @@ counters climb. See `trafficgen/README.md` for backend details.
 
 ## Shortcuts (`# ponytail:` in code)
 
-- Metrics modelled, not ping-measured (air-gap-safe, fault-responsive). Upgrade: real
-  RTT via `docker exec ping` the WG peer IP.
+- RTT now measured via `docker exec ping` over wg0 (MEASURE_RTT=1). Congestion/jitter/loss
+  model is kept as an additive layer on top of measured baseline.
 - Netem read via `docker exec ... tc` over docker.sock (was broken `ip netns exec`).

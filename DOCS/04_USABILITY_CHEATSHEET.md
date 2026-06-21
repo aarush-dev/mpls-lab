@@ -714,7 +714,36 @@ docker logs tele-telegraf 2>&1 | grep "metric" | tail -1
 
 ---
 
-## 10. Quick Reference Card
+## 10. Check Link Latency / Measured RTT
+
+Per-site netem baselines are always active on `eth0` (transport interface toward the PE): branch ≈41 ms, hub ≈17 ms, DC ≈12 ms.
+
+### See the per-site netem impairment
+```bash
+# Branch (expect ~41ms netem delay)
+docker exec clab-sdwan_mpls_noc-ce_branch1 tc qdisc show dev eth0
+
+# DC (expect ~12ms netem delay)
+docker exec clab-sdwan_mpls_noc-ce_dc1 tc qdisc show dev eth0
+```
+
+### Measure real tunnel RTT over WireGuard
+```bash
+# Ping the hub tunnel endpoint from a branch CE
+# RTT ≈ branch netem (41ms) + hub netem (17ms) = ~58ms base
+docker exec clab-sdwan_mpls_noc-ce_branch1 ping -c5 -I wg0 172.16.0.1
+```
+
+### Confirm site-type latency tiers in metrics
+```bash
+# VictoriaMetrics PromQL: average tunnel latency grouped by site type
+# Expected: branch > hub > dc
+curl -sg 'http://172.20.20.50:8428/api/v1/query?query=avg+by+(site_type)(sdwan_tunnel_latency_ms)' | jq '.data.result'
+```
+
+---
+
+## 11. Quick Reference Card
 
 ### Services and Endpoints
 
