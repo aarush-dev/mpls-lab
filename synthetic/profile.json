@@ -1,0 +1,373 @@
+{
+  "source_parquet": "dataset_1782053619_1782054519_30s.parquet",
+  "source_rows": 4619,
+  "step_s": 30,
+  "octet_rate_by_site": {
+    "branch": {
+      "rate_in_median": 2669.0,
+      "rate_out_median": 1662.0,
+      "_src": "real"
+    },
+    "core": {
+      "rate_in_median": 3481.0,
+      "rate_out_median": 3538.0,
+      "_src": "real"
+    },
+    "dc": {
+      "rate_in_median": 66270.0,
+      "rate_out_median": 2856.0,
+      "_src": "real"
+    },
+    "hub": {
+      "rate_in_median": 66442.0,
+      "rate_out_median": 4057.0,
+      "_src": "real"
+    },
+    "pe": {
+      "rate_in_median": 66421.0,
+      "rate_out_median": 1806.0,
+      "_src": "real"
+    }
+  },
+  "tunnel_baseline": {
+    "tunnel_latency_ms": {
+      "mean": 20.320526795580108,
+      "std": 6.952592984013775,
+      "p50": 24.29025,
+      "min": 14.1134,
+      "max": 84.4526,
+      "_src": "real"
+    },
+    "tunnel_jitter_ms": {
+      "mean": 2.0105743093922652,
+      "std": 0.732391468954956,
+      "p50": 1.93,
+      "min": 1.7692,
+      "max": 10.9834,
+      "_src": "real"
+    },
+    "tunnel_loss_pct": {
+      "mean": 0.05481546961325968,
+      "std": 0.36150501003555097,
+      "p50": 0.0178,
+      "min": 0.0003,
+      "max": 4.4854,
+      "_src": "real"
+    },
+    "tunnel_rekeys": {
+      "mean": 7.262430939226519,
+      "std": 2.2540017111914454,
+      "p50": 7.0,
+      "min": 3.0,
+      "max": 12.0,
+      "_src": "real"
+    }
+  },
+  "fault_signatures": {
+    "congestion": {
+      "lat_peak": 94.0888,
+      "loss_peak": 5.2063,
+      "jit_peak": 12.6057,
+      "lead_s": 57.45,
+      "kind": "tunnel_ramp",
+      "_src": "real"
+    },
+    "bgp_flap": {
+      "lat_peak": 24.29025,
+      "loss_peak": 0.3,
+      "jit_peak": 1.93,
+      "lead_s": 2.0,
+      "kind": "iface_churn",
+      "_src": "real"
+    },
+    "tunnel_degrade": {
+      "lat_peak": 35.0,
+      "loss_peak": 5.0,
+      "jit_peak": 12.0,
+      "lead_s": 40.0,
+      "kind": "tunnel_ramp",
+      "_src": "default"
+    },
+    "policy_drift": {
+      "lat_peak": 29.2891,
+      "loss_peak": 0.3517,
+      "jit_peak": 2.5652,
+      "lead_s": 3.0,
+      "kind": "iface_churn",
+      "_src": "real"
+    },
+    "node_failure": {
+      "lat_peak": 24.29025,
+      "loss_peak": 1.0,
+      "jit_peak": 1.93,
+      "lead_s": 1.0,
+      "kind": "iface_down",
+      "_src": "default"
+    },
+    "asymmetric_loss": {
+      "lat_peak": 26.719275000000003,
+      "loss_peak": 4.0,
+      "jit_peak": 2.895,
+      "lead_s": 30.0,
+      "kind": "tunnel_ramp",
+      "_src": "default"
+    },
+    "brownout": {
+      "lat_peak": 45.0,
+      "loss_peak": 1.5,
+      "jit_peak": 6.0,
+      "lead_s": 55.0,
+      "kind": "tunnel_ramp",
+      "_src": "default"
+    }
+  },
+  "real_fault_fraction": 0.014721801255683049,
+  "inventory": {
+    "ce_branch1": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch1-ce_hub1",
+        "ce_branch1-ce_hub2"
+      ]
+    },
+    "ce_branch2": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch2-ce_hub1",
+        "ce_branch2-ce_hub2"
+      ]
+    },
+    "ce_branch3": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch3-ce_hub1",
+        "ce_branch3-ce_hub2"
+      ]
+    },
+    "ce_branch4": {
+      "site_type": "branch",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "lo",
+        "vrf_CORP",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_branch4-ce_hub1",
+        "ce_branch4-ce_hub2"
+      ]
+    },
+    "ce_dc1": {
+      "site_type": "dc",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_dc1-ce_hub1",
+        "ce_dc1-ce_hub2"
+      ]
+    },
+    "ce_dc2": {
+      "site_type": "dc",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": [
+        "ce_dc2-ce_hub1",
+        "ce_dc2-ce_hub2"
+      ]
+    },
+    "ce_hub1": {
+      "site_type": "hub",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": []
+    },
+    "ce_hub2": {
+      "site_type": "hub",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo",
+        "vrf_CORP",
+        "vrf_GUEST",
+        "vrf_VOICE",
+        "wg0"
+      ],
+      "tunnels": []
+    },
+    "p1": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p2": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p3": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "pe1": {
+      "site_type": "pe",
+      "interfaces": [
+        "CORP",
+        "GUEST",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "eth7",
+        "eth8",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "pe2": {
+      "site_type": "pe",
+      "interfaces": [
+        "CORP",
+        "GUEST",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "eth7",
+        "eth8",
+        "eth9",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "pe3": {
+      "site_type": "pe",
+      "interfaces": [
+        "CORP",
+        "GUEST",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    }
+  },
+  "octet_seed_by_site": {
+    "branch": 141336.0,
+    "core": 193826.0,
+    "dc": 1441659.5,
+    "hub": 1696950.5,
+    "pe": 4273323.0
+  }
+}

@@ -11,6 +11,13 @@ generator/.wg-keys.json
 # Generated fault label timelines (runtime output; schema documented in faults/README.md)
 faults/labels/
 
+# Generated datasets (Parquet exports — reproduce via dataapi/export.py / synthetic/generate.py)
+dataapi/datasets/
+synthetic/output/
+
+# Air-gap image bundles (large; produced by airgap/pull-and-save.sh)
+airgap/images/
+
 # Python / tooling cruft
 __pycache__/
 *.pyc

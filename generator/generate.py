@@ -494,10 +494,10 @@ def render(model):
                               mgmt_ip=model["mgmt_ip"].get(name, ""),
                               exec=model["node_exec"].get(name, [])))
 
-    # ponytail: pass frr_image="frr-node:latest" directly into the template
+    # ponytail: pass frr_image="frr-node:0.1" directly into the template
     # render instead of the fragile post-render string replace.
     clab_txt = t_clab.render(
-        lab_name="sdwan_mpls_noc", frr_image="frr-node:latest",
+        lab_name="sdwan_mpls_noc", frr_image="frr-node:0.1",
         host_image=k["host_image"], frr_nodes=frr_nodes,
         host_nodes=model["host_nodes"], links=model["links"])
     _w(os.path.join(OUT, "clab.yml"), clab_txt)

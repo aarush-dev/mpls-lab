@@ -1,0 +1,13 @@
+IMAGE                                                   DIGEST                                                                             SIZE  FILE
+==========================================================================================================================================================================
+frr-node:0.1                                            local:sha256:750ca55c0240...                                                        81M  frr-node_0.1.tar.xz
+noc-controller:0.1                                      local:sha256:9ff657df5ab5...                                                        52M  noc-controller_0.1.tar.xz
+noc-trafficgen:0.1                                      local:sha256:6b8be81d9372...                                                        52M  noc-trafficgen_0.1.tar.xz
+victoriametrics/victoria-metrics:v1.103.0               victoriametrics/victoria-metrics@sha256:4d7f1b98e9a73431a0c4ff156bf86fdf23679fc7cc06a4b3cbb042e5d03c101c    14M  victoriametrics_victoria-metrics_v1.103.0.tar.xz
+grafana/grafana:11.1.0                                  grafana/grafana@sha256:079600c9517b678c10cda6006b4487d3174512fd4c6cface37df7822756ed7a5    92M  grafana_grafana_11.1.0.tar.xz
+telegraf:1.31.1                                         telegraf@sha256:a6d46429979581953b7b81f5b245ee3d6ab45d110d3b9086380f27167f7e33f4   104M  telegraf_1.31.1.tar.xz
+pmacct/nfacctd:v1.7.9                                   pmacct/nfacctd@sha256:b29fc2213b9f46c99680d086f43016f39e0acc995bd2d462eb4e2ac4186a7261    73M  pmacct_nfacctd_v1.7.9.tar.xz
+grafana/loki:3.1.0                                      grafana/loki@sha256:d947e68a84d9e44915dfa08c3bec27e2124efd5ba6c83443eb53578101ec69e3    20M  grafana_loki_3.1.0.tar.xz
+grafana/promtail:3.1.0                                  grafana/promtail@sha256:b3db8e7b1cba0e8c45ce2ae72ebddfd88ebdcae86383f1680edf0074e9010ff6    43M  grafana_promtail_3.1.0.tar.xz
+wbitt/network-multitool:alpine-minimal                  wbitt/network-multitool@sha256:33914dbb8d3cf046d3971e71f77bd8af0cdd4f7e67a8a3449e0420242f55963c    19M  wbitt_network-multitool_alpine-minimal.tar.xz
+quay.io/frrouting/frr:10.5.1                            quay.io/frrouting/frr@sha256:848482643a8d6f56452b659ea68f6138472bb57414a4f295a7c4107a0416269c    74M  quay.io_frrouting_frr_10.5.1.tar.xz

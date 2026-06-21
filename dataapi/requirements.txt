@@ -1,0 +1,9 @@
+# Clean Data API deps. Build-time egress OK to install; for AIR-GAP these must
+# be PRE-STAGED (e.g. `pip download -r requirements.txt -d wheels/` on a connected
+# host, ship the wheels, then `pip install --no-index --find-links wheels/`).
+fastapi
+uvicorn
+pyarrow
+pandas
+httpx
+PyYAML

@@ -117,7 +117,7 @@ services:
   # `docker exec clab-sdwan_mpls_noc-<node> tc qdisc show dev eth1`.
   # Build: docker build -t noc-controller -f controller/Dockerfile . (from /root/LAB)
   controller:
-    image: noc-controller
+    image: noc-controller:0.1   # pinned for air-gap; pull_policy: never (pre-loaded via load-offline.sh)
     container_name: noc-controller
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -137,7 +137,7 @@ services:
   # nfacctd captures flows. Backend=nc; sim backend available for offline testing.
   # Build: docker build -t noc-trafficgen -f trafficgen/Dockerfile . (from /root/LAB)
   trafficgen:
-    image: noc-trafficgen
+    image: noc-trafficgen:0.1   # pinned for air-gap; pull_policy: never (pre-loaded via load-offline.sh)
     container_name: noc-trafficgen
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

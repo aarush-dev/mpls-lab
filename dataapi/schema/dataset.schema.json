@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NOC copilot ML dataset row",
+  "description": "One row per (device, entity, entity_type, ts-bucket) in the joined labeled Parquet emitted by export.py. Metric columns are nullable per entity_type.",
+  "type": "object",
+  "required": ["ts", "device", "entity", "entity_type", "is_fault"],
+  "properties": {
+    "ts":                {"type": "string", "description": "UTC ISO-8601 …Z bucket start"},
+    "device":            {"type": "string", "description": "node name — join key"},
+    "site_type":         {"type": ["string", "null"], "enum": ["branch", "hub", "dc", null]},
+    "vrf":               {"type": ["string", "null"]},
+    "entity":            {"type": "string", "description": "interface name or tunnel id"},
+    "entity_type":       {"type": "string", "enum": ["interface", "tunnel"]},
+    "if_in_octets":      {"type": ["number", "null"]},
+    "if_out_octets":     {"type": ["number", "null"]},
+    "if_oper_status":    {"type": ["number", "null"]},
+    "tunnel_latency_ms": {"type": ["number", "null"]},
+    "tunnel_jitter_ms":  {"type": ["number", "null"]},
+    "tunnel_loss_pct":   {"type": ["number", "null"]},
+    "tunnel_rekeys":     {"type": ["number", "null"]},
+    "flow_bytes":        {"type": ["number", "null"]},
+    "flow_packets":      {"type": ["number", "null"]},
+    "is_fault":          {"type": "boolean"},
+    "scenario_id":       {"type": ["string", "null"]},
+    "fault_type":        {"type": ["string", "null"]},
+    "severity":          {"type": ["string", "null"], "enum": ["low", "medium", "high", null]},
+    "lead_time_s":       {"type": ["number", "null"]},
+    "time_to_impact_s":  {"type": ["number", "null"]}
+  }
+}
