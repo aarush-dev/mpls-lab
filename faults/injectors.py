@@ -188,7 +188,18 @@ class LinkFlap:
 # ---------------------------------------------------------------------------
 class BgpFlap:
     """Reset BGP sessions via vtysh `clear bgp`. neighbor=None clears all;
-    otherwise clears a specific neighbor IP. For VRF CE peers pass vrf=...
+    otherwise clears a specific neighbor IP.
+
+    vrf=<name>  : target ONE specific VRF (original param kept for callers)
+    vrf=None    : DEFAULT — enumerate ALL BGP instances on the node (default
+                  instance + every VRF) and clear each. This is the only way
+                  to hit CE routers, which run BGP exclusively inside VRFs
+                  (vrf_CORP / vrf_VOICE / vrf_GUEST); `clear bgp *` against
+                  the default instance is a no-op on them.
+
+    # ponytail: discover VRFs dynamically via `show bgp vrf all summary`
+    #   (one exec, already needed for PolicyDrift) rather than hardcoding names;
+    #   we ignore errors for absent instances so PE/P (default only) just work.
 
     This is non-destructive (sessions re-establish) but produces ADJCHANGE
     syslog (-> Loki) and a routing churn signature."""
@@ -196,25 +207,43 @@ class BgpFlap:
     def __init__(self, device, neighbor=None, vrf=None, count=1, gap_seconds=8.0):
         self.device = device
         self.neighbor = neighbor
-        self.vrf = vrf
+        self.vrf = vrf      # None = all instances; str = one VRF only
         self.count = count
         self.gap_seconds = gap_seconds
 
-    def _clear_cmd(self):
+    def _discover_vrfs(self):
+        """Return list of VRF names present on the node (empty = default only)."""
+        out = dexec(self.device, "vtysh", "-c", "show bgp vrf all summary").stdout
+        vrfs = []
+        for ln in out.splitlines():
+            # Line: "BGP router identifier ... local AS number <n> VRF <name> vrf-id ..."
+            if "local AS number" in ln and " VRF " in ln:
+                vrf = ln.split(" VRF ")[1].split()[0]
+                vrfs.append(vrf)
+        return vrfs
+
+    def _clear_cmds(self):
+        """Return list of vtysh clear commands to issue."""
+        tgt = self.neighbor or "*"
         if self.vrf:
-            tgt = self.neighbor or "*"
-            return f"clear bgp vrf {self.vrf} {tgt}"
-        return f"clear bgp {self.neighbor}" if self.neighbor else "clear bgp *"
+            # Caller pinned one VRF explicitly.
+            return [f"clear bgp vrf {self.vrf} {tgt}"]
+        # Enumerate: try the default instance first, then every VRF found.
+        cmds = [f"clear bgp {tgt}"]   # no-op on CE (default absent), harmless
+        for vrf in self._discover_vrfs():
+            cmds.append(f"clear bgp vrf {vrf} {tgt}")
+        return cmds
 
     def apply(self):
-        cmd = self._clear_cmd()
+        cmds = self._clear_cmds()
         for i in range(self.count):
-            dexec(self.device, "vtysh", "-c", cmd)
+            for cmd in cmds:
+                dexec(self.device, "vtysh", "-c", cmd)  # ignore rc; absent instance returns error but doesn't abort
             if i < self.count - 1:
                 time.sleep(self.gap_seconds)
         return {"injector": "bgp_flap", "device": self.device,
                 "neighbor": self.neighbor, "vrf": self.vrf,
-                "count": self.count, "cmd": cmd}
+                "count": self.count, "cmds": cmds}
 
     def revert(self):
         # BGP re-converges on its own; nothing to undo. Touch to confirm liveness.
