@@ -4,7 +4,7 @@
 
 **See also:** [01 Project Overview](01_PROJECT_OVERVIEW.md) — context and motivation | [05 Technical Glossary](05_TECHNICAL_GLOSSARY.md) — term definitions
 
-If you have ever wondered what the heck "MPLS" or "BGP VPNv4" means and why anyone would run 90 containers to simulate it — this document is for you. Every concept is introduced as something familiar first. The networking jargon comes second, as a label you can attach to the mental model you already built.
+If you have ever wondered what the heck "MPLS" or "BGP VPNv4" means and why anyone would run 130 containers to simulate it — this document is for you. Every concept is introduced as something familiar first. The networking jargon comes second, as a label you can attach to the mental model you already built.
 
 ---
 
@@ -14,7 +14,7 @@ Before diving into individual pieces, here is the whole system in one diagram. R
 
 ```
   ┌──────────────────────────────────────────────────────────────────────┐
-  │                    THE 90-CONTAINER LAB (single Linux host)          │
+  │                    THE 130-CONTAINER LAB (single Linux host)         │
   │                                                                      │
   │   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   │
   │   │  p1    │───│  p2    │───│  p3    │───│  p4    │───│  p5    │   │
@@ -99,15 +99,15 @@ The topology is declared in a single file (`topology-spec.yaml`) with plain nume
 
 ```yaml
 knobs:
-  p_count:      5    # highway core routers
-  pe_count:     5    # on-ramp routers
-  branch_count: 16   # small branch offices
-  hub_count:    4    # regional hubs
+  p_count:      8    # highway core routers
+  pe_count:     10   # on-ramp routers (pe1+pe2 = Route Reflectors)
+  branch_count: 24   # small branch offices
+  hub_count:    6    # regional hubs
   dc_count:     4    # datacenters
-# Total containers: 5 + 5 + 24 + 56 = 90
+# Total containers: 8 + 10 + 34 + 78 = 130
 ```
 
-A Jinja2 generator reads those numbers and automatically derives every IP address, BGP AS number, and config file for all 90 nodes. Change one number, regenerate, redeploy — the whole city resizes.
+A Jinja2 generator reads those numbers and automatically derives every IP address, BGP AS number, and config file for all 130 nodes. Change one number, regenerate, redeploy — the whole city resizes.
 
 ---
 
@@ -161,7 +161,7 @@ In networking terms, this is **MPLS L3VPN** with **MP-BGP VPNv4**:
 - The VRF is like a separate routing table — a completely isolated IP address space. The same IP address can appear in CORP and VOICE without conflict, because they live in different VRFs.
 - **Route Distinguisher (RD):** Every VPN route gets an extra tag prepended to make it globally unique, even if two customers use the same IP range. `65000:10` for CORP, `65000:20` for VOICE, `65000:30` for GUEST.
 - **Route Target (RT):** Controls which VRFs "import" which routes — which trucks are allowed to follow which exit signs. A CORP route is only imported by CORP VRFs at other PE routers.
-- **MP-BGP VPNv4:** The protocol that carries VPN routes between PE routers across the MPLS core. All 5 PE routers maintain a full mesh of BGP sessions with each other (10 sessions total, since C(5,2) = 10), exchanging VPNv4 prefixes.
+- **MP-BGP VPNv4:** The protocol that carries VPN routes between PE routers across the MPLS core. All 10 PE routers exchange VPNv4 prefixes via Route Reflectors: pe1+pe2 act as RR servers; pe3–pe10 are RR clients that peer only with pe1+pe2 — 17 sessions instead of 45 in a full mesh.
 
 ```
 PE1 VRF CORP: knows 192.168.0.0/24 (branch1) and 192.168.4.0/24 (branch2)...
@@ -197,7 +197,7 @@ That negotiation — "I can reach X, go through me" — plus the policies about 
 
 BGP has two flavors in our lab:
 
-**iBGP (internal BGP):** Sessions between routers within the provider's own network (all in AS 65000). All 5 PE routers have iBGP sessions with each other. This is how they share VPNv4 routes — PE1 tells PE3: "I know how to reach the CORP subnet at branch1."
+**iBGP (internal BGP):** Sessions between routers within the provider's own network (all in AS 65000). PE routers share VPNv4 routes via Route Reflectors (pe1+pe2 as RR servers, pe3–pe10 as clients) — PE1 tells PE3: "I know how to reach the CORP subnet at branch1."
 
 **eBGP (external BGP):** Sessions between different autonomous systems. Each CE router has its own BGP AS number (branch sites: AS 65101–65116, hubs: AS 65201–65204, datacenters: AS 65301–65304). When ce_branch1 (AS 65101) wants to tell the provider's pe1 (AS 65000) about its local subnet, it sends an eBGP advertisement: "I can reach 192.168.0.0/24, come through me."
 

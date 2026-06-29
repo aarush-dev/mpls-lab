@@ -12,7 +12,7 @@
 Everything flows in one direction: physical network containers emit signals, a telemetry stack collects and stores them, a data API joins and labels them, and your ML model consumes the result.
 
 ```
-90 Docker containers (FRR routers + hosts)
+130 Docker containers (FRR routers + hosts)
         |
         | SNMP polls every 30s        → Telegraf → VictoriaMetrics (PromQL)
         | Syslog (BGP events)         → Promtail → Loki (LogQL)
@@ -37,7 +37,7 @@ The join key across every signal is the string `device` (for example `"ce_branch
 # 1. Start the telemetry collectors (VictoriaMetrics, Loki, Grafana, Telegraf, nfacctd)
 cd /root/LAB/telemetry && docker compose up -d
 
-# 2. Deploy the 90-container network lab
+# 2. Deploy the 130-container network lab
 cd /root/LAB && clab deploy -t topology/clab.yml
 
 # 3. Start the data API

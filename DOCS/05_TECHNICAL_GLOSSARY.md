@@ -54,7 +54,7 @@ The pre-computed path through the MPLS core that a packet will traverse. An LSP 
 A logical router inside a single physical router. It's a separate routing table, isolated from other VRFs, so customers don't see each other's routes. In this lab, there are 3 VRFs: **CORP** (business), **VOICE** (real-time), and **GUEST** (untrusted) — each site may have 1–3 VRFs depending on service type (branches have only CORP + VOICE; hubs and datacenters have all 3). Routes in one VRF never leak into another unless explicitly imported. Think of VRFs as separate apartment buildings on the same street — mail (routes) stays within the building.
 
 **MP-BGP (Multi-Protocol BGP)**  
-An extension to BGP that carries not just IPv4 routes but also VPN routes, MPLS labels, and other address families. In this lab, MP-BGP runs between all PE routers in a full mesh (iBGP, internal BGP — all PEs are in AS 65000) and exchanges **VPNv4** routes, the address family that carries customer routes with VPN identifiers so they can be demultiplexed into the right VRF at the destination.
+An extension to BGP that carries not just IPv4 routes but also VPN routes, MPLS labels, and other address families. In this lab, MP-BGP runs between all PE routers in a full mesh (iBGP, internal BGP — all PEs are in AS 65000, with Route Reflectors (pe1+pe2) reducing 45-session full mesh to 17 sessions) and exchanges **VPNv4** routes, the address family that carries customer routes with VPN identifiers so they can be demultiplexed into the right VRF at the destination.
 
 **VPNv4**  
 An address family (a type of route) that carries IPv4 routes WITH a VPN identifier attached. When a customer advertises a route `192.168.1.0/24` in the CORP VRF, the PE sends it as a VPNv4 route (e.g., `192.168.1.0/24 RD 65000:10`) across MP-BGP to other PEs. Other PEs import this route into their CORP VRFs and make it available to their own customers. The RD and RT ensure routes don't collide and get imported into the right place.
@@ -72,7 +72,7 @@ A VPN service that isolates customers at the IP routing layer using VRFs, MPLS l
 The internet's routing protocol. BGP is used in three ways here: (1) **iBGP** between PEs (MP-BGP, for VPN routes), (2) **eBGP** between a CE and its PE (for customer routes), and (3) **iBGP** between branch CEs and the regional hub (over the SD-WAN overlay). BGP is slow to converge but can handle complex policies. The classic BGP failure mode is a "flap" — a route appears, disappears, reappears, making the network unstable.
 
 **iBGP (internal BGP)**  
-BGP peering between routers in the same Autonomous System (AS). In this lab, all PEs are in AS 65000 and peer with each other via iBGP for MP-BGP VPNv4 routes. iBGP requires either a full mesh (every router peers with every other) or a route reflector (a central hub that all others peer to). This lab uses a full mesh at 5 PEs (C(5,2)=10 sessions); beyond 8 PEs a route reflector would be more efficient.
+BGP peering between routers in the same Autonomous System (AS). In this lab, all PEs are in AS 65000 and peer with each other via iBGP for MP-BGP VPNv4 routes. iBGP requires either a full mesh (every router peers with every other) or a route reflector (a central hub that all others peer to). This lab uses Route Reflectors: pe1+pe2 act as RR servers (cluster-id = their loopback); pe3–pe10 are RR clients that peer only with pe1+pe2 — 17 sessions instead of 45 in a full mesh.
 
 **eBGP (external BGP)**  
 BGP peering between routers in different ASes. In this lab, each CE is in its own private AS (branch CEs in 65101–65116, hubs in 65201–65204, DCs in 65301–65304) and peers via eBGP with its PE (which is in AS 65000). eBGP allows the customer to advertise routes to the provider and receive routes from the provider, but with natural firewalling — the AS boundary prevents accidental or malicious route injection.
@@ -193,7 +193,7 @@ The common identifier used to link data from different sources. In this lab, the
 ## Group 7: Containerlab & Lab Infrastructure
 
 **Containerlab**  
-A tool that orchestrates Docker containers as network nodes and wires them together with virtual Ethernet cables (veths). Rather than running routers on physical hardware, Containerlab runs them as lightweight containers, making it easy to create large topologies on a single machine. Containerlab reads a YAML file (`clab.yml`) that describes the nodes, links, and images, then uses Docker to spin them up and `ip link` to connect them. In this lab, all 90 nodes (5P + 5PE + 80 CEs and hosts) are Containerlab containers.
+A tool that orchestrates Docker containers as network nodes and wires them together with virtual Ethernet cables (veths). Rather than running routers on physical hardware, Containerlab runs them as lightweight containers, making it easy to create large topologies on a single machine. Containerlab reads a YAML file (`clab.yml`) that describes the nodes, links, and images, then uses Docker to spin them up and `ip link` to connect them. In this lab, all 130 nodes (8P + 10PE + 34 CEs + 78 hosts) are Containerlab containers.
 
 **Docker**  
 A container runtime — a lightweight virtualization technology. Each container is an isolated Linux user space with its own filesystem, processes, and network namespace. A Docker image is a template (like a frozen VM disk image) that can be instantiated into many containers. In this lab, the FRR image (`quay.io/frrouting/frr:9.1`) is used for 34 router containers; the multitool image is used for 56 host containers. Containers are much lighter than VMs (seconds to boot, MB of RAM per container).
@@ -278,7 +278,7 @@ An efficient, columnar file format for storing tabular data. Unlike CSV (row-ori
 
 The entire system forms a data pipeline: **network simulation → fault injection → telemetry collection → data export → ML training**. Here's the flow:
 
-**Network simulation** begins with a single YAML file (`topology-spec.yaml`) specifying node counts and site types. A generator (Jinja2 + Python) emits 90 Containerlab node definitions, 34 FRR configs (OSPF/LDP/MP-BGP/VRFs), 56 host configs, 80 SD-WAN tunnel configs, and QoS rules. Containerlab deploys all 90 containers on a single Linux machine, wiring them with virtual Ethernet veths. The MPLS core (P and PE routers running FRR) comes up with LDP, discovering LSPs. Each site gets isolated VRFs (CORP/VOICE/GUEST), connected via CE routers. The SD-WAN controller (Python service) comes online and monitors tunnel latency/jitter/loss from all CE nodes, publishing decisions to a Prometheus endpoint.
+**Network simulation** begins with a single YAML file (`topology-spec.yaml`) specifying node counts and site types. A generator (Jinja2 + Python) emits 130 Containerlab node definitions, 52 FRR configs (OSPF/LDP/MP-BGP/VRFs), 78 host configs, ~168 SD-WAN tunnel configs, and QoS rules. Containerlab deploys all 130 containers on a single Linux machine, wiring them with virtual Ethernet veths. The MPLS core (P and PE routers running FRR) comes up with LDP, discovering LSPs. Each site gets isolated VRFs (CORP/VOICE/GUEST), connected via CE routers. The SD-WAN controller (Python service) comes online and monitors tunnel latency/jitter/loss from all CE nodes, publishing decisions to a Prometheus endpoint.
 
 **Traffic simulation** starts: the trafficgen service (Python + Docker) drives realistic, diurnal flows across the network using `nc` or iperf3, causing interface counters to climb and nfacctd to see flows. Latency and jitter naturally increase as load increases, simulating realistic congestion curves.
 
@@ -319,8 +319,8 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ NETWORK SIMULATION (Containerlab + FRR)                                 │
-│  - 5 P routers (OSPF/LDP, MPLS core)                                    │
-│  - 5 PE routers (BGP VPNv4, L3VPN, iBGP mesh)                          │
+│  - 8 P routers (OSPF/LDP/BFD, MPLS core, dual-homed PEs)               │
+│  - 10 PE routers (MP-BGP VPNv4, L3VPN, RR: pe1+pe2)                   │
 │  - 80 CE + host containers (3 VRFs: CORP/VOICE/GUEST, SD-WAN overlay)  │
 └────────────────────┬────────────────────────────────────────────────────┘
                      │
@@ -387,7 +387,7 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 - **faults/README.md** — Fault scenarios, label schema, injector details.
 - **dataapi/schema/** — Parquet schema definitions (columns, types, units).
 - **telemetry/docker-compose.yml** — Telemetry stack (VictoriaMetrics, Grafana, Loki, Telegraf, nfacctd).
-- **DOCS/01_TOPOLOGY_OVERVIEW.md** — Physical/logical topology of the 90-container lab.
+- **DOCS/01_TOPOLOGY_OVERVIEW.md** — Physical/logical topology of the 130-container lab.
 - **DOCS/02_ROUTING_AND_VPNS.md** — MPLS/L3VPN/BGP deep dive.
 - **DOCS/03_TELEMETRY_PIPELINE.md** — Signal flow, schema, query examples.
 - **DOCS/04_FAULT_SCENARIOS.md** — Fault mechanics, precursor signals, expected telemetry.
