@@ -163,13 +163,15 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     tti_col   = np.full(len(df), np.nan)
 
     ftypes = list(sigs)
+    targets = list(inv.keys())
     times_arr = np.array(times, dtype=np.int64)
     for _ in range(n_ep):
         ft = rng.choice(ftypes)
         sig = sigs[ft]
         kind = sig["kind"]
         target = rng.choice(pe_devs if ft in ("bgp_flap", "node_failure") and pe_devs else ce_devs)
-        lead = float(sig["lead_s"])
+        lead = float(rng.gamma(2.0, max(sig["lead_s"] / 2.0, 0.5)))
+        # Gamma(k=2, scale=lead_s/2) → mean≈lead_s, CV≈0.71; always positive
         dur_impact = float(rng.uniform(60, 240))
         t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
         t_impact = t_start + lead
@@ -227,6 +229,56 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
             dmask = win & (etype == "interface") & (epoch > t_impact) & (ent_arr != "lo")
             if dmask.any():
                 ops_arr[dmask] = 0.0
+
+        # ponytail: cascade — 12% of episodes trigger a second fault
+        if rng.random() < 0.12 and len(targets) > 1:
+            target2 = rng.choice([t for t in targets if t != target])
+            cascade_sig_key = rng.choice(list(sigs.keys()))
+            cascade_sig = sigs[cascade_sig_key]
+            cascade_t_start = t_start + lead * 0.5
+            cascade_lead = float(rng.gamma(2.0, max(cascade_sig["lead_s"] / 2.0, 0.5)))
+            cascade_dur = float(rng.uniform(60, 240))
+            cascade_t_impact = cascade_t_start + cascade_lead
+            cascade_t_end = cascade_t_impact + cascade_dur
+            cascade_sid = f"{cascade_sig_key}-{target2}-{uuid.uuid4().hex[:8]}-casc"
+            cascade_sev = rng.choice(["low", "medium", "high"], p=[0.3, 0.4, 0.3])
+            cascade_sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(cascade_sev)]
+            cascade_kind = cascade_sig["kind"]
+            cwin = (dev_arr == target2) & (epoch >= cascade_t_start) & (epoch <= cascade_t_end)
+            if cwin.any():
+                fault_col[cwin] = True
+                sid_col[cwin]   = cascade_sid
+                ftype_col[cwin] = cascade_sig_key
+                sev_col[cwin]   = str(cascade_sev)
+                lead_col[cwin]  = cascade_lead
+                tti_col[cwin]   = np.round(cascade_t_impact - epoch[cwin], 1)
+                if cascade_kind == "tunnel_ramp":
+                    ctmask = cwin & (etype == "tunnel")
+                    if ctmask.any():
+                        ep_ct = epoch[ctmask].astype(float)
+                        p_ct = np.where(ep_ct <= cascade_t_impact,
+                                        (ep_ct - cascade_t_start) / max(cascade_lead, step),
+                                        np.maximum(0.0, 1.0 - (ep_ct - cascade_t_impact) / max(cascade_dur, step)))
+                        p_ct = np.clip(p_ct, 0.0, 1.0) * cascade_sevmul
+                        lat_arr[ctmask]  = np.round(lat_arr[ctmask]  + p_ct * (cascade_sig["lat_peak"]  - lat_arr[ctmask]),  4)
+                        jit_arr[ctmask]  = np.round(jit_arr[ctmask]  + p_ct * (cascade_sig["jit_peak"]  - jit_arr[ctmask]),  4)
+                        loss_arr[ctmask] = np.round(loss_arr[ctmask] + p_ct * cascade_sig["loss_peak"],                      4)
+                elif cascade_kind == "iface_churn":
+                    cimask = cwin & (etype == "interface")
+                    if cimask.any():
+                        ep_ci = epoch[cimask].astype(float)
+                        p_ci = np.where(ep_ci <= cascade_t_impact,
+                                        (ep_ci - cascade_t_start) / max(cascade_lead, step),
+                                        np.maximum(0.0, 1.0 - (ep_ci - cascade_t_impact) / max(cascade_dur, step)))
+                        p_ci = np.clip(p_ci, 0.0, 1.0) * cascade_sevmul
+                        valid = ~np.isnan(iin_arr[cimask])
+                        tmp = iin_arr[cimask].copy()
+                        tmp[valid] = np.round(tmp[valid] * (1 + p_ci[valid] * 0.4), 1)
+                        iin_arr[cimask] = tmp
+                elif cascade_kind == "iface_down":
+                    cdmask = cwin & (etype == "interface") & (epoch > cascade_t_impact) & (ent_arr != "lo")
+                    if cdmask.any():
+                        ops_arr[cdmask] = 0.0
 
     # write arrays back to df once
     df["tunnel_latency_ms"] = lat_arr

@@ -394,3 +394,67 @@ class PolicyDrift:
         dexec(self.device, "vtysh", "-c",
               f"clear bgp vrf {self.vrf} {nb} soft in")
         return {"reverted": "policy_drift", "device": self.device, "vrf": self.vrf}
+
+
+# ---------------------------------------------------------------------------
+# 7. MPLS underlay failure — take a P-router core interface toward a PE down.
+# ---------------------------------------------------------------------------
+class MplsUnderlayFailure:
+    """Take a P-router core interface down; simulates MPLS underlay failure.
+
+    Targets a P-PE link on the P side. With BFD+dual-homing, the affected PE
+    reconverges via its secondary P uplink within ~1s.
+    """
+    def __init__(self, device, iface, down_seconds=30.0):
+        self.device = device
+        self.iface = iface
+        self.down_seconds = down_seconds
+
+    def apply(self):
+        dexec(self.device, "ip", "link", "set", self.iface, "down")
+        return {"applied": "mpls_underlay_failure", "device": self.device,
+                "iface": self.iface, "down_seconds": self.down_seconds}
+
+    def revert(self):
+        dexec(self.device, "ip", "link", "set", self.iface, "up")
+        return {"reverted": "mpls_underlay_failure", "device": self.device, "iface": self.iface}
+
+
+# ---------------------------------------------------------------------------
+# 8. LDP session flap — clear an LDP neighbor; self-recovers in ~2-5s.
+# ---------------------------------------------------------------------------
+class LdpSessionFlap:
+    """Clear an LDP neighbor session; self-recovers in ~2-5s.
+
+    Generates ldp_event=Down/Up entries in Loki structured logs.
+    revert() is a no-op (session self-recovers).
+    """
+    def __init__(self, device, neighbor_ip, count=1, gap_seconds=6.0):
+        self.device = device
+        self.neighbor_ip = neighbor_ip
+        self.count = count
+        self.gap_seconds = gap_seconds
+
+    def apply(self):
+        import time
+        for i in range(self.count):
+            dexec(self.device, "vtysh", "-c",
+                  f"clear mpls ldp neighbor {self.neighbor_ip}")
+            if i < self.count - 1:
+                time.sleep(self.gap_seconds)
+        return {"applied": "ldp_session_flap", "device": self.device,
+                "neighbor": self.neighbor_ip, "count": self.count}
+
+    def revert(self):
+        # ponytail: session self-recovers; no action needed
+        return {"reverted": "ldp_session_flap", "device": self.device,
+                "neighbor": self.neighbor_ip}
+
+
+if __name__ == "__main__":
+    # quick import + instantiation selftest
+    inj = MplsUnderlayFailure("p1", "eth1", down_seconds=5.0)
+    assert inj.device == "p1" and inj.iface == "eth1"
+    inj2 = LdpSessionFlap("pe1", "10.255.1.1", count=2, gap_seconds=3.0)
+    assert inj2.count == 2
+    print("injectors selftest: OK")

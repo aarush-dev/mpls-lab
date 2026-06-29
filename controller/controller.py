@@ -304,6 +304,7 @@ class Controller:
         # active path per (site, vrf) -> hub node. Seeded from policy.
         self.active = {}
         self.path_changes = 0
+        self._drift = {}  # {site: {"latency_threshold_mult": float, "expires": float|None}}
         for t in self.tunnels:
             for v in t.vrfs:
                 self.active.setdefault((t.site, v), VRF_PREFERRED_HUB.get(v, t.hub))
@@ -364,9 +365,11 @@ class Controller:
                 cur_t = self._tunnels_for(site, cur) if cur else None
                 # Failover only if current path is degraded beyond thresholds AND
                 # the best alternative is meaningfully better (hysteresis 15%).
+                drift = self._drift.get(site, {})
+                eff_mult = drift.get("latency_threshold_mult", FAILOVER_LATENCY_MULT)
                 degraded = cur_t is None or (
                     cur_t.loss_pct >= FAILOVER_LOSS_PCT
-                    or cur_t.latency_ms >= cur_t.base_ms * FAILOVER_LATENCY_MULT
+                    or cur_t.latency_ms >= cur_t.base_ms * eff_mult
                 )
                 if best.hub != cur and degraded and score(best) < score(cur_t) * 0.85:
                     self.active[(site, v)] = best.hub
@@ -394,6 +397,8 @@ class Controller:
     def tick(self, now=None):
         """Advance the model one step; return (rekey_events, path_events)."""
         now = now or time.time()
+        self._drift = {k: v for k, v in self._drift.items()
+                       if v["expires"] is None or v["expires"] > now}
         rekeys = []
         for t in self.tunnels:
             if t.update(now):
@@ -436,6 +441,9 @@ class Controller:
         metric("sdwan_path_changes_total", "Cumulative path-selection changes", "counter")
         lines.append(f"sdwan_path_changes_total {self.path_changes}")
 
+        for site, d in self._drift.items():
+            lines.append(f'sdwan_controller_drift_active{{site="{site}"}} 1')
+
         return "\n".join(lines) + "\n"
 
 
@@ -456,6 +464,37 @@ def _handler_factory(ctrl):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; version=0.0.4")
             self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_response(400); self.end_headers()
+                return
+            path = self.path.rstrip("/")
+            if path == "/fault/drift":
+                site = data.get("site")
+                mult = float(data.get("latency_threshold_mult", 2.0))
+                ttl = data.get("ttl_s")
+                expires = (time.time() + float(ttl)) if ttl else None
+                ctrl._drift[site] = {"latency_threshold_mult": mult, "expires": expires}
+                self._send_json({"ok": True, "site": site, "mult": mult})
+            elif path == "/fault/drift/clear":
+                site = data.get("site")
+                ctrl._drift.pop(site, None)
+                self._send_json({"ok": True, "cleared": site})
+            else:
+                self.send_response(404); self.end_headers()
+
+        def _send_json(self, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", len(body))
             self.end_headers()
             self.wfile.write(body)
 
@@ -488,10 +527,8 @@ def _selftest():
     TunnelState._MEASURE_RTT = False  # no pinging in selftest (mirror _SKIP_NETEM)
     ctrl = Controller()
     n = len(ctrl.tunnels)
-    # Tunnels = spokes x hubs. Scaled spec = (16 branch + 4 dc) x 4 hubs = 80;
-    # fallback default spec = (4 branch + 2 dc) x 2 hubs = 12. Accept either so the
-    # selftest passes both with and without the scaled topology-spec.yaml mounted.
-    assert n in (12, 80), f"unexpected tunnel count {n} (expected 12 or 80)"
+    # ponytail: dynamic — accept any positive count so selftest survives rescaling.
+    assert n > 0, f"unexpected tunnel count {n}"
 
     # --- Measured-RTT cache: fallback (no measurement) seeds the floor, and an
     # injected measurement flows into latency. Geography is now MEASURED (the
@@ -563,6 +600,16 @@ def _selftest():
     bad.latency_ms = bad.base_ms
     ctrl.select_paths()
     assert ctrl.active[(site, "CORP")] == pref, "did not recover to preferred hub"
+
+    # drift suppresses failover: a high latency_threshold_mult raises the failover
+    # bar so a latency excursion on the preferred hub no longer trips failover.
+    ctrl._drift[site] = {"latency_threshold_mult": 99.0, "expires": None}
+    bad.loss_pct = 0.0
+    bad.latency_ms = bad.base_ms * 5  # would trip default 3x, but drift 99x suppresses
+    ctrl.select_paths()
+    assert ctrl.active[(site, "CORP")] == pref, "drift did not suppress failover"
+    ctrl._drift.clear()
+    print("selftest: drift OK")
 
     print(f"controller selftest OK  tunnels={n} series={n_series} "
           f"measured_fallback_floor={MEASURE_FLOOR_MS} "

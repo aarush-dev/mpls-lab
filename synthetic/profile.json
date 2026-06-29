@@ -194,6 +194,20 @@
       "lead_s": 2.0,
       "kind": "tunnel_ramp",
       "_src": "real"
+    },
+    "ldp_session_flap": {
+      "lat_peak": 45.0,
+      "loss_peak": 3.5,
+      "jit_peak": 5.2,
+      "lead_s": 4.0,
+      "kind": "tunnel_ramp"
+    },
+    "mpls_underlay_failure": {
+      "lat_peak": 0.0,
+      "loss_peak": 0.0,
+      "jit_peak": 0.0,
+      "lead_s": 2.0,
+      "kind": "iface_down"
     }
   },
   "real_fault_fraction": 0.0077216080818117835,
