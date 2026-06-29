@@ -17,7 +17,7 @@ for node in $PE_NODES; do
   output=$(docker exec "${CLAB_PREFIX}-${node}" vtysh -c "show mpls ldp neighbor" 2>/dev/null) || continue
   while IFS= read -r line; do
     # Match: IPv4 10.255.1.1:0  OPERATIONAL ...
-    if [[ "$line" =~ ^IPv4[[:space:]]+([0-9.]+):0[[:space:]]+([A-Z_]+) ]]; then
+    if [[ "$line" =~ ^ipv4[[:space:]]+([0-9.]+)[[:space:]]+([A-Z_]+) ]]; then
       peer="${BASH_REMATCH[1]}"
       state_str="${BASH_REMATCH[2]}"
       state=1
