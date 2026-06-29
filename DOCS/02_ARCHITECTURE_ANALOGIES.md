@@ -17,19 +17,19 @@ Before diving into individual pieces, here is the whole system in one diagram. R
   │                    THE 130-CONTAINER LAB (single Linux host)         │
   │                                                                      │
   │   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   │
-  │   │  p1    │───│  p2    │───│  p3    │───│  p4    │───│  p5    │   │
+  │   │  p1    │───│  p2    │───│  p3    │───│  p4    │───│p5..p8  │   │
   │   │ (MPLS  │   │ core   │   │ core   │   │ core   │   │ core)  │   │
   │   └───┬────┘   └───┬────┘   └───┬────┘   └───┬────┘   └───┬────┘   │
   │       │            │            │            │            │          │
   │   ┌───┴────────────┴────────────┴────────────┴────────────┴────┐    │
-  │   │              pe1  pe2  pe3  pe4  pe5  (MP-BGP VPNv4 mesh)  │    │
+  │   │          pe1  pe2  pe3  ...  pe10  (MP-BGP VPNv4 RR mesh)  │    │
   │   └───┬──────────────────────────────────────────────────────┬─┘    │
   │       │  eBGP per VRF                                        │      │
   │  ┌────┴─────────────────────────────────────────────────┐    │      │
-  │  │  16x ce_branch  4x ce_hub  4x ce_dc   (CE routers)  │    │      │
-  │  │  + 56 host containers (one per site+VRF combination) │    │      │
+  │  │  24x ce_branch  6x ce_hub  4x ce_dc   (CE routers)  │    │      │
+  │  │  + 78 host containers (one per site+VRF combination) │    │      │
   │  └────────────────────────────────────────────────────┬─┘    │      │
-  │              WireGuard SD-WAN overlay (80 tunnels)    │      │      │
+  │              WireGuard SD-WAN overlay (~168 tunnels)  │      │      │
   │                        hub-spoke topology             │      │      │
   └───────────────────────────────────────────────────────┼──────┘      │
                                                           │
@@ -75,9 +75,9 @@ Imagine a metropolitan area: a downtown core, regional hubs, suburban branch off
 
 In our lab:
 
-- **The highway system (P routers — p1 through p5):** Five routers that form the high-speed core. They only care about moving traffic as fast as possible. They do not know anything about which company the traffic belongs to or where it is ultimately going. They just pass packets forward.
+- **The highway system (P routers — p1 through p8):** Eight routers that form the high-speed core. They only care about moving traffic as fast as possible. They do not know anything about which company the traffic belongs to or where it is ultimately going. They just pass packets forward.
 
-- **The highway on-ramps (PE routers — pe1 through pe5):** Five routers that sit at the boundary between the highway system and the customer's private road network. When your company's traffic enters here, the on-ramp stamps it with a label ("this belongs to Company A, destination downtown") and hands it to the highway.
+- **The highway on-ramps (PE routers — pe1 through pe10):** Ten routers that sit at the boundary between the highway system and the customer's private road network. When your company's traffic enters here, the on-ramp stamps it with a label ("this belongs to Company A, destination downtown") and hands it to the highway.
 
 - **The office buildings (CE routers — 24 of them):** Customer Edge routers, one per site. These are the company's own equipment — the building's front door. 16 branch offices, 4 regional hubs, 4 datacenters. Each CE connects to one PE via a private link.
 
@@ -248,7 +248,11 @@ OSPF Area 0 participants:
   p3  (10.255.1.3/32)
   p4  (10.255.1.4/32)
   p5  (10.255.1.5/32)
-  pe1 (10.255.2.1/32) ─── iBGP uses this loopback to reach pe2, pe3, pe4, pe5
+  p6  (10.255.1.6/32)
+  p7  (10.255.1.7/32)
+  p8  (10.255.1.8/32)
+  pe1 (10.255.2.1/32) ─── RR server; pe3–pe10 peer here (17 iBGP sessions total)
+  pe2 (10.255.2.2/32) ─── RR server
   ...
 ```
 
@@ -264,9 +268,9 @@ That is exactly what the **SD-WAN overlay** is. It is a second network that runs
 
 In our lab:
 
-- **WireGuard tunnels** are the express lanes — encrypted point-to-point tunnels between sites. There are **80 tunnels** in a hub-spoke arrangement.
-- The **4 hub CEs** (ce_hub1 through ce_hub4) act as regional airports: every branch and datacenter connects through them.
-- Each spoke (branch or datacenter) connects to **both** hub1 and hub2, giving redundancy.
+- **WireGuard tunnels** are the express lanes — encrypted point-to-point tunnels between sites. There are **~168 tunnels** in a hub-spoke arrangement, plus hub-hub direct links between adjacent hub pairs (hub1↔hub2, hub3↔hub4, hub5↔hub6).
+- The **6 hub CEs** (ce_hub1 through ce_hub6) act as regional airports: every branch and datacenter connects through them.
+- Each spoke (branch or datacenter) connects to **2 hubs** (round-robin assignment), giving redundancy.
 - The **SD-WAN controller** (`controller/controller.py`) is the traffic management system. Every 5 seconds it measures latency, jitter, and packet loss on every tunnel, then decides which hub path each VRF should use.
 
 ```
@@ -279,8 +283,8 @@ Hub-spoke topology:
    ce_dc1    ─────►  (secondary)  │
    ...                            │
                     └──────────────┘
-  Each spoke has TWO tunnels (one per hub) for redundancy
-  80 tunnels total = (16 branches + 4 DCs) × 4 hubs
+  Each spoke has TWO tunnels (round-robin hub assignment) for redundancy
+  ~168 tunnels total = (24 branches + 4 DCs) × 2 hubs + 6 hub-hub links
 ```
 
 The controller's path selection logic applies hysteresis (to avoid flapping between paths) and per-VRF preferences:
