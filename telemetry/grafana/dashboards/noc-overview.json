@@ -75,6 +75,63 @@
           "legendFormat": "{{tunnel}} -> {{hub}}"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "MPLS LDP session state",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "min": 0, "max": 5 } },
+      "options": {},
+      "targets": [
+        {
+          "expr": "mpls_ldp_session_state",
+          "legendFormat": "{{device}} → {{peer}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "BGP VRF prefix count per PE",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": {} },
+      "options": {},
+      "targets": [
+        {
+          "expr": "bgp_vrf_prefix_count",
+          "legendFormat": "{{device}} {{vrf}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Controller drift active",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 26, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "sum(sdwan_controller_drift_active)",
+          "legendFormat": "drifting sites"
+        }
+      ]
     }
   ]
 }

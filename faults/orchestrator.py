@@ -223,6 +223,105 @@ def scen_brownout(target, severity, duration):
     }
 
 
+def scen_mpls_underlay_failure(target, severity, duration):
+    """Bring down a P-router core interface toward a PE; LDP reconverges via dual-homing."""
+    from faults.injectors import MplsUnderlayFailure
+    # P routers have PE-facing ifaces after P-P links.
+    # At p_count=8: first PE-facing iface is eth8 (eth1..eth7 = P-P links + loopback).
+    # ponytail: use eth8 as a safe default; P1 connects to PE1 on eth8.
+    iface = "eth8"
+    injector = MplsUnderlayFailure(target, iface, down_seconds=float(duration))
+    return {
+        "type": "mpls_underlay_failure", "target": target, "severity": severity,
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "threshold": None, "impact_method": "modelled",
+        "signature": "P-PE link down; LDP must reconverge to secondary path (~1s with BFD)",
+    }
+
+
+def scen_ldp_session_flap(target, severity, duration):
+    """Flap an LDP session on a PE; self-recovers; generates LDP events in Loki."""
+    from faults.injectors import LdpSessionFlap
+    sev_count = {"low": 1, "medium": 2, "high": 3}.get(str(severity), 1)
+    # PE loopback peer: pe1 -> 10.255.1.1 (p-router side). Use first P loopback.
+    neighbor_ip = "10.255.1.1"
+    injector = LdpSessionFlap(target, neighbor_ip, count=sev_count, gap_seconds=6.0)
+    return {
+        "type": "ldp_session_flap", "target": target, "severity": severity,
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "threshold": None, "impact_method": "modelled",
+        "signature": "LDP session cleared N times; session self-recovers; Loki logs ldp_event=Down/Up",
+    }
+
+
+def scen_hub_spoke_congest(target, severity, duration):
+    """Ramp netem congestion on hub uplink; all spokes routed through this hub degrade."""
+    from faults.injectors import NetemImpair
+    sev_kwargs = {
+        "low":    {"delay_ms": 20,  "jitter_ms": 4,  "loss_pct": 0.5},
+        "medium": {"delay_ms": 80,  "jitter_ms": 15, "loss_pct": 2.0},
+        "high":   {"delay_ms": 200, "jitter_ms": 40, "loss_pct": 8.0},
+    }.get(str(severity), {"delay_ms": 80, "jitter_ms": 15, "loss_pct": 2.0})
+    injector = NetemImpair(target, "eth1", **sev_kwargs)
+    probe = f'max(sdwan_tunnel_latency_ms{{source="{target}"}})'
+    return {
+        "type": "hub_spoke_congest", "target": target, "severity": severity,
+        "injector": injector, "ramp": True, "duration": duration,
+        "probe": probe, "threshold": 50.0, "impact_method": "vm_threshold",
+        "signature": "hub uplink congestion; all spoke tunnel latencies rise",
+    }
+
+
+def scen_bgp_cascade(target, severity, duration):
+    """Cascade BGP flaps on a hub CE; forces multiple path-switches; stresses RIB churn."""
+    from faults.injectors import BgpFlap
+    sev_count = {"low": 1, "medium": 3, "high": 5}.get(str(severity), 3)
+    injector = BgpFlap(target, count=sev_count, gap_seconds=8.0)
+    probe = "sdwan_path_changes_total"
+    return {
+        "type": "bgp_cascade", "target": target, "severity": severity,
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": probe, "threshold": 1.0, "impact_method": "vm_threshold",
+        "signature": "repeated BGP session clears; multiple path-switches; sdwan_path_changes_total increments",
+    }
+
+
+class _DriftInjector:
+    """Inline injector for controller drift (no new dep — uses urllib.request)."""
+    CTRL_URL = "http://172.20.20.56"
+
+    def __init__(self, site, mult, ttl_s):
+        self.site = site
+        self.mult = mult
+        self.ttl_s = ttl_s
+
+    def apply(self):
+        import json as _json, urllib.request as _req
+        body = _json.dumps({"site": self.site, "latency_threshold_mult": self.mult,
+                            "ttl_s": self.ttl_s}).encode()
+        _req.urlopen(f"{self.CTRL_URL}/fault/drift", data=body,
+                     timeout=5)
+        return {"applied": "controller_drift", "site": self.site, "mult": self.mult}
+
+    def revert(self):
+        import json as _json, urllib.request as _req
+        body = _json.dumps({"site": self.site}).encode()
+        _req.urlopen(f"{self.CTRL_URL}/fault/drift/clear", data=body, timeout=5)
+        return {"reverted": "controller_drift", "site": self.site}
+
+
+def scen_controller_drift(target, severity, duration):
+    """Post drift suppression to the SD-WAN controller; prevents failover for the site."""
+    mult = {"low": 5.0, "medium": 10.0, "high": 99.0}.get(str(severity), 10.0)
+    injector = _DriftInjector(target, mult=mult, ttl_s=duration + 30)
+    return {
+        "type": "controller_drift", "target": target, "severity": severity,
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "threshold": None, "impact_method": "modelled",
+        "signature": "controller drift suppresses failover; sdwan_controller_drift_active rises",
+    }
+
+
 SCENARIOS = {
     "congestion": scen_congestion,            # (a) mandated
     "bgp_flap": scen_bgp_flap,                # (b) mandated
@@ -231,6 +330,11 @@ SCENARIOS = {
     "node_failure": scen_node_failure,        # adversarial extra
     "asymmetric_loss": scen_asymmetric_loss,  # adversarial extra
     "brownout": scen_brownout,                # adversarial extra
+    "mpls_underlay_failure": scen_mpls_underlay_failure,
+    "ldp_session_flap":      scen_ldp_session_flap,
+    "hub_spoke_congest":     scen_hub_spoke_congest,
+    "bgp_cascade":           scen_bgp_cascade,
+    "controller_drift":      scen_controller_drift,
 }
 
 
@@ -352,11 +456,12 @@ def demo():
 #   try/finally + SIGINT handler guarantee every injected fault is reverted.
 
 # Valid targets per scenario class.  Non-critical means: not P-core (p1-p5).
-_CE_BRANCHES = [f"ce_branch{i}" for i in range(1, 17)]
-_CE_HUBS     = [f"ce_hub{i}"    for i in range(1, 5)]
-_CE_DCS      = [f"ce_dc{i}"     for i in range(1, 5)]
-_CE_ALL      = _CE_BRANCHES + _CE_HUBS + _CE_DCS   # 24 CEs
-_PE_ALL      = [f"pe{i}"        for i in range(1, 6)]  # 5 PEs
+_CE_BRANCHES = [f"ce_branch{i}" for i in range(1, 25)]   # 24 branches
+_CE_HUBS     = [f"ce_hub{i}"    for i in range(1, 7)]    # 6 hubs
+_CE_DCS      = [f"ce_dc{i}"     for i in range(1, 5)]    # 4 DCs
+_CE_ALL      = _CE_BRANCHES + _CE_HUBS + _CE_DCS          # 34 CEs
+_PE_ALL      = [f"pe{i}"        for i in range(1, 11)]   # 10 PEs
+_P_ALL       = [f"p{i}"         for i in range(1, 9)]    # 8 P routers
 
 # ponytail: scenario pools defined once here; avoids re-deriving them later.
 CAMPAIGN_POOLS = {
@@ -371,6 +476,11 @@ CAMPAIGN_POOLS = {
     # node_failure (bgpd kill) — avoid PE core nodes to keep core stable;
     # actually fine on CEs and PE spokes; skip P-core entirely
     "node_failure":    _CE_ALL + _PE_ALL,
+    "mpls_underlay_failure": _P_ALL,
+    "ldp_session_flap":      _PE_ALL,
+    "hub_spoke_congest":     _CE_HUBS,
+    "bgp_cascade":           _CE_HUBS,
+    "controller_drift":      _CE_HUBS,
 }
 
 # Fault duration bounds (seconds) per scenario, independent of --duration.
@@ -383,6 +493,11 @@ _DURATION_BOUNDS = {
     "bgp_flap":        (15, 45),
     "policy_drift":    (20, 60),
     "node_failure":    (10, 30),
+    "mpls_underlay_failure": (15, 45),
+    "ldp_session_flap":      (10, 30),
+    "hub_spoke_congest":     (30, 90),
+    "bgp_cascade":           (20, 60),
+    "controller_drift":      (60, 180),
 }
 
 
