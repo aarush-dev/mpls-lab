@@ -11,7 +11,7 @@
 ## 0. Prerequisites
 
 The lab requires:
-- Linux host: ~108 GB RAM, 19 cores (90 containers × ~1.2 GB each)
+- Linux host: ~108 GB RAM, 19 cores (130 containers × ~1.2 GB each)
 - MPLS kernel modules: `mpls_router`, `mpls_gso`, `mpls_iptunnel`
 - Tools: `containerlab`, `docker`, `docker-compose`, `python3` with `pandas`, `fastapi`, `uvicorn`
 
@@ -36,7 +36,7 @@ python3 generate.py
 # Expected: "Wrote 90 nodes to clab.yml" + "WireGuard keys cached"
 ```
 
-### Step 2: Deploy the 90-container network
+### Step 2: Deploy the 130-container network
 ```bash
 cd /root/LAB/topology
 sudo containerlab deploy --topo clab.yml --recycle
@@ -324,7 +324,7 @@ curl 'http://127.0.0.1:8000/labels' | jq '.rows[] | select(.device == "ce_branch
 ```bash
 # Get the full topology as JSON
 curl 'http://127.0.0.1:8000/topology' | jq '.nodes | length'
-# Expected: 90 (34 routers + 56 hosts)
+# Expected: 130 (52 routers + 78 hosts)
 
 curl 'http://127.0.0.1:8000/topology' | jq '.nodes[] | select(.role == "PE") | .name'
 # pe1, pe2, pe3, pe4, pe5
@@ -508,15 +508,15 @@ print(f"Combined: {len(df_combined)} rows")
 
 All topology parameters are in one file: `/root/LAB/topology-spec.yaml`
 
-### Current scale (90 containers, stable)
+### Current scale (130 containers, stable)
 ```yaml
 knobs:
-  p_count:  5
-  pe_count: 5
-  branch_count: 16
-  hub_count:    4
+  p_count:      8
+  pe_count:     10
+  branch_count: 24
+  hub_count:    6
   dc_count:     4
-  # Total: 5 + 5 + (16+4+4) + 56 hosts = 90 containers
+  # Total: 8 + 10 + (24+6+4) + 78 hosts = 130 containers
 ```
 
 ### Scale down (20 containers, dev/testing)

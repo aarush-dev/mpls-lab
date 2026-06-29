@@ -108,7 +108,7 @@ The three VRFs are:
   branch  branch hub  dc  hub  dc branch branch
   CE1-16   ...  CE1-4 CE1-4 ...  ...   ...  ...
      │            │
-     │  WireGuard │  (hub-spoke overlay, 80 tunnels)
+     │  WireGuard │  (hub-spoke overlay, ~168 tunnels)
      └────────────┘
      
   Each CE site:
