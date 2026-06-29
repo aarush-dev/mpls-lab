@@ -22,6 +22,20 @@ python3 generate.py --check  # render + self-test only (asserts no IP collisions
 to rescale; every address is derived from indices per `../DOCS/SPEC-NOTES.md`
 (nothing hardcoded per node).
 
+Current scale: **130 containers** — 8 P + 10 PE + 34 CE + 78 host containers
+(formula: `p_count + pe_count + (branch+hub+dc) + hosts`; see comment in
+`topology-spec.yaml`).
+
+### Key boolean/structural knobs
+
+| knob | type | effect |
+|------|------|--------|
+| `pe_dual_homing` | bool | each branch CE attaches to two PEs (dual uplinks in `clab.yml`); PE-CE BGP peers on both |
+| `bfd_core` | bool | enables BFD on all P-PE and PE-PE OSPF adjacencies; accelerates reconvergence to ~1 s |
+| `hub_hub_wg` | bool | emits a WireGuard full-mesh among hub CEs in addition to hub-spoke; cross-injects keys |
+| `route_reflector` | bool | disables full-mesh iBGP; PEs in `rr_nodes` become RR servers, rest become clients |
+| `rr_nodes` | list | names of PE nodes acting as route reflectors (e.g. `[pe1, pe2]`); ignored when `route_reflector: false` |
+
 ## Output (`../topology/`)
 
 ```
@@ -51,3 +65,8 @@ in `clab.yml`, so the deployed lab is self-contained (no post-deploy script).
 
 `generate.py` only emits config. It does NOT deploy. Deploy with
 `containerlab deploy -t ../topology/clab.yml` once the `frr-node:latest` image is built.
+
+Output directories are created with `os.makedirs(..., exist_ok=True)` — **no
+`shutil.rmtree`**. This inode-safe overwrite preserves bind-mount inodes inside
+running containers, so a re-generate updates config files in-place without
+requiring a container restart.

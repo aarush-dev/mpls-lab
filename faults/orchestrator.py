@@ -288,7 +288,7 @@ def scen_bgp_cascade(target, severity, duration):
 
 class _DriftInjector:
     """Inline injector for controller drift (no new dep — uses urllib.request)."""
-    CTRL_URL = "http://172.20.20.56"
+    CTRL_URL = "http://172.20.20.56:9362"
 
     def __init__(self, site, mult, ttl_s):
         self.site = site

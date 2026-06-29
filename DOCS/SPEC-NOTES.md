@@ -323,6 +323,38 @@ Bounds enforced: delay ≤ 60 ms, jitter ≤ 0.3 × delay, loss ≤ 1%. Within e
 
 **Single source of truth:** `site_netem()` in `generate.py` sets the physical impairment. The controller **measures** it (ping over wg0) but does not define it. The previously-duplicated geography baseline model inside the controller has been removed.
 
+## MPLS depth additions
+
+### New topology-spec.yaml knobs
+
+| Knob | Type | Effect |
+|------|------|--------|
+| `pe_dual_homing` | bool | Each PE connects to two P routers (primary + secondary) for redundancy |
+| `bfd_core` | bool | Enables BFD on all P-PE and P-P core links (FRR `bfd` stanza per interface) |
+| `hub_hub_wg` | bool | Adds a direct WireGuard peering between hub CEs (hub1↔hub2) for spoke-to-spoke fast-path |
+| `route_reflector` | bool | Enables RR mode: two PEs act as route-reflectors; remaining PEs are clients |
+| `rr_nodes` | list[str] | Which PE nodes serve as RRs when `route_reflector: true` (e.g. `["pe1","pe2"]`) |
+
+`route_reflector` is auto-enabled by generate.py when `pe_count > 5`; set it explicitly to force RR mode at any scale.
+
+### MPLS telemetry sidecar
+
+`noc-ldp-metrics` (container `172.20.20.58`) is a lightweight exporter that polls each PE's LDP state via vtysh and pushes Prometheus-format metrics to VictoriaMetrics at:
+
+```
+POST http://172.20.20.50:8428/api/v1/import/prometheus
+```
+
+Metrics emitted: `mpls_ldp_session_state{device,neighbor}`, `mpls_ldp_session_uptime_seconds`, `mpls_label_table_entries{device}`.
+
+### Route-reflector topology
+
+When `route_reflector: true` and `rr_nodes: ["pe1","pe2"]`:
+
+- **pe1 and pe2** become RR servers with `cluster-id` = their own loopback address (10.255.2.1 and 10.255.2.2 respectively). They peer to each other as standard iBGP (no RR relationship between servers).
+- **pe3–pe10** (all non-RR PEs) are configured as RR clients: each peers only to pe1 and pe2 (`neighbor 10.255.2.1 route-reflector-client` on the RR side). Clients have no direct iBGP sessions between themselves.
+- Full-mesh iBGP is only used when `pe_count ≤ 5` and `route_reflector: false`.
+
 ## Validation checklist for generate.py output
 
 After generation, verify manually or via script:

@@ -30,6 +30,15 @@ python3 orchestrator.py --scenario policy_drift --target ce_branch1 --duration 6
 python3 orchestrator.py --scenario congestion --target ce_branch1 --dry-run   # label only, lab untouched
 ```
 
+> **PYTHONPATH note:** scenarios that import injector classes from the `faults`
+> package (e.g. `mpls_underlay_failure`, `ldp_session_flap`, `hub_spoke_congest`,
+> `bgp_cascade`) must be run with `PYTHONPATH=/root/LAB` set, or from inside the
+> repo root where `faults/` is a package on `sys.path`.
+>
+> ```bash
+> PYTHONPATH=/root/LAB python3 orchestrator.py --scenario mpls_underlay_failure --target p1
+> ```
+
 `--target` is a **device name** (node): `p1..p3`, `pe1..pe3`,
 `ce_branch1..4`, `ce_hub1..2`, `ce_dc1..2`. Severity ∈ `low|medium|high`
 (scales impairment magnitude). `--duration` is total seconds.
@@ -88,7 +97,7 @@ must predict within.
 ## Scenarios
 
 The **4 mandated** scenarios cover the signals the PLAN names, plus **3
-adversarial extras**.
+adversarial extras** and **5 extended scenarios** — **12 total**.
 
 | scenario | mechanism (native tool) | target | `t_impact` | expected telemetry signature |
 |----------|------------------------|--------|-----------|------------------------------|
@@ -99,6 +108,11 @@ adversarial extras**.
 | `node_failure` (extra) | `kill -9 bgpd` (watchfrr respawns) | `pe*`/`ce_*` | modelled (+1 s) | bgpd gap → prefix withdrawal until watchfrr restart; recoverable outage |
 | `asymmetric_loss` (extra) | netem **egress-only loss** on CE uplink | `ce_*` | vm_threshold (`sdwan_tunnel_loss_pct`) | one-directional loss → loss% up while latency stays ~normal (hard-to-diagnose asymmetry) |
 | `brownout` (extra) | netem **rate cap** on CE uplink (bandwidth starvation) | `ce_*` | vm_threshold (`sdwan_tunnel_latency_ms`) | queueing latency climbs under load, loss arrives late — slow brownout, not a hard failure |
+| `mpls_underlay_failure` | `ip link set <iface> down` on a P-router CE-facing interface | `p*` | modelled (+1 s) | P-PE link down; LDP reconverges to secondary path; ~1 s with BFD enabled |
+| `ldp_session_flap` | `vtysh clear mpls ldp neighbor` N times (severity scales count) | `pe*` | modelled | LDP session torn/re-established; Loki logs `ldp_event=Down/Up`; self-recovers per cycle |
+| `hub_spoke_congest` | netem **delay+jitter+loss ramp** on hub CE uplink (eth1) | `ce_hub*` | vm_threshold (`sdwan_tunnel_latency_ms`) | hub uplink saturates; all spoke tunnels routed through this hub show rising latency |
+| `bgp_cascade` | `vtysh clear bgp *` repeated N times (severity scales count, 8 s gaps) | `ce_hub*`/`pe*` | vm_threshold (`sdwan_path_changes_total`) | repeated session clears; multiple path-switches; `sdwan_path_changes_total` increments |
+| `controller_drift` | HTTP POST to SD-WAN controller `/fault/drift` (raises latency threshold multiplier) | `ce_*` (site) | modelled | controller suppresses failover for the site; `sdwan_controller_drift_active` rises; clears via `/fault/drift/clear` |
 
 ### Injectors (`injectors.py`)
 
@@ -114,6 +128,11 @@ tools only:
 - `ProcessKill` — `kill -9 $(pidof bgpd)`; watchfrr restarts; revert verifies.
 - `WgRekeyAnomaly` — bounce `wg0` to force WireGuard handshake churn.
 - `PolicyDrift` — inject/remove a CE VRF route-map altering local-preference.
+- `MplsUnderlayFailure` — `ip link set <iface> down/up` on a P-router core interface.
+- `LdpSessionFlap` — `vtysh clear mpls ldp neighbor <ip>` N times with a configurable gap.
+- `_DriftInjector` — inline injector (no extra class file); calls the controller HTTP API:
+  - **apply**: `POST http://172.20.20.56/fault/drift` `{"site": ..., "latency_threshold_mult": N, "ttl_s": T}`
+  - **revert**: `POST http://172.20.20.56/fault/drift/clear` `{"site": ...}`
 
 > **Important netem detail:** `containerlab tools netem set` requires a netem
 > *root* qdisc and **fails on CE uplinks** because they already have an HTB root

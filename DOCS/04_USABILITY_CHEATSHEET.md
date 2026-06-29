@@ -224,6 +224,15 @@ python3 orchestrator.py --campaign --duration 600 --mean-gap 120 --seed 42
 # seed=42 → reproducible (same targets/timings every run with same seed)
 ```
 
+### MPLS depth fault scenarios
+```bash
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario mpls_underlay_failure --target p1 --severity medium --duration 30
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario ldp_session_flap --target pe1 --severity medium --duration 20
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario hub_spoke_congest --target ce_hub1 --severity medium --duration 60
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario bgp_cascade --target ce_hub2 --severity high --duration 45
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario controller_drift --target ce_hub1 --duration 120
+```
+
 ### Revert a stuck fault manually (if needed)
 ```bash
 # If a fault didn't revert cleanly, restore baseline netem on a device
@@ -743,7 +752,31 @@ curl -sg 'http://172.20.20.50:8428/api/v1/query?query=avg+by+(site_type)(sdwan_t
 
 ---
 
-## 11. Quick Reference Card
+## 11. MPLS Depth
+
+### Verify BFD sessions
+```bash
+docker exec clab-sdwan_mpls_noc-pe1 vtysh -c "show bfd peers brief"
+```
+
+### Verify route-reflector clients (pe3–pe10 should peer only to pe1+pe2)
+```bash
+docker exec clab-sdwan_mpls_noc-pe3 vtysh -c "show bgp summary" | grep "10.255.2"  # should only show pe1+pe2
+```
+
+### LDP session metrics
+```bash
+curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_ldp_session_state" | python3 -m json.tool | head -20
+```
+
+### BGP VRF prefix counts
+```bash
+curl -s "http://172.20.20.50:8428/api/v1/query?query=bgp_vrf_prefix_count" | python3 -m json.tool | head -20
+```
+
+---
+
+## 12. Quick Reference Card
 
 ### Services and Endpoints
 

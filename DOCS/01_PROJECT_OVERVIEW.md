@@ -40,15 +40,15 @@ Think of this as building a synthetic but realistic training environment, equiva
 
 Five major components were built:
 
-**A simulated network of 90 containers.** Thirty-four of these are FRR (FRRouting — an open-source network operating system) router containers running real routing protocols. Fifty-six are host containers representing end-user machines at branch offices, regional hubs, and data centers. Together they form a realistic enterprise-grade network that generates genuine SNMP (Simple Network Management Protocol) counters, routing protocol events, and flow records — the same data a real NOC would see.
+**A simulated network of 130 containers.** Fifty-two of these are FRR (FRRouting — an open-source network operating system) router containers running real routing protocols. Seventy-eight are host containers representing end-user machines at branch offices, regional hubs, and data centers. Together they form a realistic enterprise-grade network that generates genuine SNMP (Simple Network Management Protocol) counters, routing protocol events, and flow records — the same data a real NOC would see.
 
 **A full telemetry pipeline.** Every metric from every container is collected, normalized, and stored. Interface utilization (bytes in/out per second) goes through SNMP into Telegraf into VictoriaMetrics (a time-series database compatible with Prometheus). Routing events (BGP session changes, OSPF adjacency updates) go through syslog into Promtail into Loki (a log aggregation system). Flow records (which source IP talked to which destination, how many bytes) go through IPFIX (a standard network flow protocol) into nfacctd. All signals share a common `device` label as the join key.
 
-**A fault injection system with ground-truth labels.** Seven named fault scenarios can be injected into any target device on demand or in a randomized campaign. Each injection writes a JSON label record containing the scenario type, target device, severity level, `t_start`, `t_impact`, and `lead_time_s`. These label files are the supervision signal for model training.
+**A fault injection system with ground-truth labels.** Twelve named fault scenarios can be injected into any target device on demand or in a randomized campaign. Each injection writes a JSON label record containing the scenario type, target device, severity level, `t_start`, `t_impact`, and `lead_time_s`. These label files are the supervision signal for model training.
 
 **A FastAPI data API.** A local HTTP server at port 8000 gives the ML team a clean, versioned interface to all of the above. They can query raw metrics, retrieve log events, download flow records, read fault labels, inspect the network topology as a graph, and — most importantly — download a pre-joined, labeled Parquet file that combines all four signal types into a single DataFrame ready for model training.
 
-**A synthetic dataset and air-gap packaging.** Because 90 containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures to 8.89 million rows while preserving realistic statistical properties. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
+**A synthetic dataset and air-gap packaging.** Because 130 containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures to 8.89 million rows while preserving realistic statistical properties. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
 
 ---
 
@@ -58,9 +58,9 @@ Five major components were built:
 
 Enterprise networks are typically organized into three layers, and this simulation faithfully reproduces all three.
 
-**Provider core (P and PE routers).** The backbone of the network consists of five P routers (P stands for Provider — these are the core switches of the carrier network) and five PE routers (PE stands for Provider Edge — these sit at the boundary between the carrier and the customer). The P routers form a mesh connected by point-to-point links. The PE routers connect to that mesh and also connect outward to customer sites.
+**Provider core (P and PE routers).** The backbone of the network consists of eight P routers (P stands for Provider — these are the core switches of the carrier network) and ten PE routers (PE stands for Provider Edge — these sit at the boundary between the carrier and the customer). The P routers form a mesh connected by point-to-point links. The PE routers connect to that mesh and also connect outward to customer sites. Each PE has two P uplinks for MPLS underlay failure coverage (dual-homing). BFD (Bidirectional Forwarding Detection) runs at 300ms detect intervals on all core OSPF links, with bfdd active on every P and PE node. MP-BGP uses a route-reflector design: pe1 and pe2 act as route reflectors; pe3–pe10 are clients. This reduces the BGP session count from a 45-session full mesh to 17 sessions.
 
-**Customer Edge routers (CE routers).** These sit at each customer location: 16 branch offices (small, single uplink), 4 regional hubs (larger, higher capacity), and 4 data center sites (server farms). Each CE connects to exactly one PE.
+**Customer Edge routers (CE routers).** These sit at each customer location: 24 branch offices (small, single uplink), 6 regional hubs (larger, higher capacity), and 4 data center sites (server farms). Each CE connects to exactly one PE.
 
 **Host containers.** Behind every CE router are one or more host containers representing the actual end-user machines — PCs, phones, servers — on that site's local network. Each host is isolated in its own VRF (see below), so a CORP-network PC and a VOICE-network phone at the same branch office cannot talk to each other at the IP layer, exactly as in a real enterprise deployment.
 
@@ -72,7 +72,7 @@ This makes the core fast and deterministic. The routing protocols that make MPLS
 
 ### WireGuard SD-WAN Overlay: The Secure Second Road
 
-On top of the MPLS underlay, the network runs a WireGuard-based SD-WAN (Software-Defined Wide Area Network) overlay. WireGuard is a modern, lightweight VPN (Virtual Private Network) protocol. Every branch and data center CE establishes encrypted WireGuard tunnels to both hub CEs, giving the network 80 overlay tunnels total. The SD-WAN controller — a Python process — monitors the health of each tunnel in real time, measures per-tunnel latency, jitter, and packet loss, and selects which tunnel each traffic class should use.
+On top of the MPLS underlay, the network runs a WireGuard-based SD-WAN (Software-Defined Wide Area Network) overlay. WireGuard is a modern, lightweight VPN (Virtual Private Network) protocol. Every branch and data center CE establishes encrypted WireGuard tunnels to the hub CEs, giving the network ~168 overlay tunnels. Adjacent hub pairs (hub1↔hub2, hub3↔hub4, hub5↔hub6) also get direct hub-hub WireGuard links for resilience. The SD-WAN controller — a Python process — monitors the health of each tunnel in real time, measures per-tunnel latency, jitter, and packet loss, and selects which tunnel each traffic class should use.
 
 This two-layer architecture (MPLS underlay + WireGuard overlay) is the defining characteristic of modern enterprise SD-WAN and is explicitly named in the competition problem statement. The interaction between underlay failures and overlay degradation is where some of the most interesting predictive signals live.
 
@@ -196,7 +196,7 @@ The Parquet schema has 21 columns per row. Each row represents one 30-second tim
 | `flow_packets` | float | Total packets in IPFIX flow records |
 | `is_fault` | bool | True if a fault scenario was active at this timestamp |
 | `scenario_id` | string | Unique identifier for the fault run |
-| `fault_type` | string | One of the seven scenario names |
+| `fault_type` | string | One of the twelve scenario names |
 | `severity` | string | `low`, `medium`, or `high` |
 | `lead_time_s` | float | Seconds from fault injection start to `t_impact` |
 | `time_to_impact_s` | float | Seconds remaining until impact at this timestamp |
