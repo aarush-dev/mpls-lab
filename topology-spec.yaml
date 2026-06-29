@@ -10,9 +10,16 @@
 # TOP-LEVEL KNOBS — change these to rescale the lab
 # -----------------------------------------------------------------------------
 knobs:
-  # Provider core
-  p_count:  8          # P routers (LDP LSRs, OSPF-only, no BGP)
-  pe_count: 10         # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs)
+  # Provider core — POP-structured multi-area MPLS backbone
+  p_count:  24         # P routers (LDP LSRs, OSPF-only, no BGP) = pop_count * p_per_pop
+  pe_count: 12         # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs), 2 per POP
+  pop_count: 6         # geographic POPs (each = one OSPF non-backbone area 1..pop_count)
+  p_per_pop: 4         # P routers per POP: first 2 = ABRs (border, area 0), last 2 = PE-facing
+  multi_area: true     # area-per-POP + area-0 inter-POP backbone (false = legacy single area 0)
+  igp_cost_intra: 10   # OSPF cost on intra-POP links (cheap → SPF stays in-POP)
+  igp_cost_inter: 100  # OSPF cost on inter-POP long-haul links (expensive transit)
+  inter_pop_redundancy: 2          # parallel links per inter-POP adjacency (1 SRLG conduit)
+  inter_pop_chords: [[1,4],[2,5],[3,6]]  # extra inter-POP adjacencies beyond the ring (diameter)
 
   # Customer sites — total CE nodes = branch + hub + dc
   branch_count: 24     # branch CEs  (small, single uplink, CORP+VOICE)
@@ -21,8 +28,8 @@ knobs:
   pe_dual_homing: true
   bfd_core: true
   hub_hub_wg: true
-  route_reflector: true      # RR at pe_count=10 — C(10,2)=45 full-mesh → 17 RR sessions
-  rr_nodes: [pe1, pe2]       # pe3..pe10 are RR clients
+  route_reflector: true      # RR at pe_count=12 — C(12,2)=66 full-mesh → 23 RR sessions
+  rr_nodes: [pe1, pe2]       # pe3..pe12 are RR clients
   # Option A — true per-VRF host separation: ONE host container per (site, VRF).
   #   branch=CORP,VOICE (2 hosts); hub/dc=CORP,VOICE,GUEST (3 hosts).
   #   hosts = branch*2 + hub*3 + dc*3 = 16*2 + 4*3 + 4*3 = 56.

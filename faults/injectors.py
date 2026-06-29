@@ -451,10 +451,79 @@ class LdpSessionFlap:
                 "neighbor": self.neighbor_ip}
 
 
+# ---------------------------------------------------------------------------
+# 9. Multi-link fault — down a SET of (device, iface) links at once (correlated).
+# ---------------------------------------------------------------------------
+class MultiLinkFault:
+    """Down a SET of links atomically, then bring them all back on revert().
+
+    Powers the catastrophic/correlated core faults — the link-set is computed by
+    the orchestrator from topology-meta.json:
+      - p_node_failure : all core ifaces of one P
+      - pop_isolation  : all inter-POP links of one POP's ABRs
+      - core_partition : two opposite ring conduits
+      - srlg_cut       : one SRLG conduit (shared-fibre cut)
+    apply() only downs (orchestrator holds the duration, then calls revert()).
+    revert() brings every link back up (idempotent)."""
+
+    def __init__(self, links, down_seconds=30.0):
+        self.links = [tuple(l) for l in links]   # [(device, iface), ...]
+        self.down_seconds = down_seconds
+
+    def _set(self, state):
+        for dev, iface in self.links:
+            dexec(dev, "ip", "link", "set", iface, state)
+
+    def apply(self):
+        self._set("down")
+        return {"injector": "multi_link_fault", "links": self.links,
+                "n_links": len(self.links), "down_seconds": self.down_seconds}
+
+    def revert(self):
+        self._set("up")
+        return {"reverted": "multi_link_fault", "n_links": len(self.links)}
+
+
+# ---------------------------------------------------------------------------
+# 10. OSPF cost shift — raise cost on ONE direction → path asymmetry.
+# ---------------------------------------------------------------------------
+class OspfCostShift:
+    """Raise OSPF cost on one direction of a core link via vtysh, so forward and
+    return paths diverge (path asymmetry — a problem-statement precursor).
+    revert() restores orig_cost (or clears to FRR default if unknown)."""
+
+    def __init__(self, device, iface, cost=1000, orig_cost=None):
+        self.device = device
+        self.iface = iface
+        self.cost = cost
+        self.orig_cost = orig_cost
+
+    def _set_cost(self, line):
+        cfg = "\n".join(["configure terminal", f"interface {self.iface}",
+                         f" {line}", "exit", "exit"])
+        dexec(self.device, "vtysh", "-c", cfg)
+
+    def apply(self):
+        self._set_cost(f"ip ospf cost {self.cost}")
+        return {"injector": "ospf_cost_shift", "device": self.device,
+                "iface": self.iface, "cost": self.cost, "orig_cost": self.orig_cost}
+
+    def revert(self):
+        if self.orig_cost is not None:
+            self._set_cost(f"ip ospf cost {self.orig_cost}")
+        else:
+            self._set_cost("no ip ospf cost")
+        return {"reverted": "ospf_cost_shift", "device": self.device, "iface": self.iface}
+
+
 if __name__ == "__main__":
     # quick import + instantiation selftest
     inj = MplsUnderlayFailure("p1", "eth1", down_seconds=5.0)
     assert inj.device == "p1" and inj.iface == "eth1"
     inj2 = LdpSessionFlap("pe1", "10.255.1.1", count=2, gap_seconds=3.0)
     assert inj2.count == 2
+    mlf = MultiLinkFault([("p1", "eth4"), ("p2", "eth4")], down_seconds=20.0)
+    assert len(mlf.links) == 2 and mlf.links[0] == ("p1", "eth4")
+    ocs = OspfCostShift("p1", "eth4", cost=1000, orig_cost=100)
+    assert ocs.cost == 1000 and ocs.orig_cost == 100
     print("injectors selftest: OK")

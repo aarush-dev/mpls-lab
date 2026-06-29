@@ -93,6 +93,47 @@ def write_label(row):
     return row
 
 
+# --------------------------------------------------------------------------- topology meta
+# POP / area / SRLG map emitted by generator/generate.py -> topology/topology-meta.json.
+# The core/catastrophic scenarios compute their link-sets from this (nothing hardcoded).
+_META = None
+
+
+def meta():
+    global _META
+    if _META is None:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "topology", "topology-meta.json")
+        with open(p) as f:
+            _META = json.load(f)
+    return _META
+
+
+def _p_inter_ifaces(p):
+    """Inter-POP (area-0 backbone) ifaces on P router `p` (empty if not an ABR)."""
+    out = []
+    for rec in meta()["inter_pop_links"]:
+        out += [i for (d, i) in rec["links"] if d == p]
+    return out
+
+
+def _backbone_iface(p):
+    """One representative backbone iface on `p`: an inter-POP link if it's an ABR,
+    else its last core iface (a P-PE link)."""
+    inter = _p_inter_ifaces(p)
+    return inter[0] if inter else meta()["p_core_ifaces"][p][-1]
+
+
+def _pe_primary_p_loopback(pe):
+    """Loopback IP of the PE's primary (PE-facing) P uplink, from the POP map."""
+    m = meta()
+    pop = m["pe_pop"][pe]
+    internals = m["pops"][f"pop{pop}"][2:]          # PE-facing P in this POP
+    i = int(pe.replace("pe", ""))
+    primary = internals[(i - 1) % len(internals)]    # matches generator attachment
+    return f"10.255.1.{int(primary.replace('p', ''))}"
+
+
 # --------------------------------------------------------------------------- scenarios
 # Each scenario is a builder: given target+severity+duration it returns a dict
 # with the injector, the t_impact probe (PromQL + threshold), and metadata.
@@ -226,10 +267,9 @@ def scen_brownout(target, severity, duration):
 def scen_mpls_underlay_failure(target, severity, duration):
     """Bring down a P-router core interface toward a PE; LDP reconverges via dual-homing."""
     from faults.injectors import MplsUnderlayFailure
-    # P routers have PE-facing ifaces after P-P links.
-    # At p_count=8: first PE-facing iface is eth8 (eth1..eth7 = P-P links + loopback).
-    # ponytail: use eth8 as a safe default; P1 connects to PE1 on eth8.
-    iface = "eth8"
+    # PE-facing link = the P's last core iface (P-PE links are wired after the
+    # intra/inter-POP fabric). Resolved from topology-meta so it scales with the POP layout.
+    iface = meta()["p_core_ifaces"][target][-1]
     injector = MplsUnderlayFailure(target, iface, down_seconds=float(duration))
     return {
         "type": "mpls_underlay_failure", "target": target, "severity": severity,
@@ -243,8 +283,9 @@ def scen_ldp_session_flap(target, severity, duration):
     """Flap an LDP session on a PE; self-recovers; generates LDP events in Loki."""
     from faults.injectors import LdpSessionFlap
     sev_count = {"low": 1, "medium": 2, "high": 3}.get(str(severity), 1)
-    # PE loopback peer: pe1 -> 10.255.1.1 (p-router side). Use first P loopback.
-    neighbor_ip = "10.255.1.1"
+    # LDP peer = the PE's primary P uplink loopback (from the POP map, so it's a
+    # real neighbour for any PE in any POP — not a hardcoded p1).
+    neighbor_ip = _pe_primary_p_loopback(target)
     injector = LdpSessionFlap(target, neighbor_ip, count=sev_count, gap_seconds=6.0)
     return {
         "type": "ldp_session_flap", "target": target, "severity": severity,
@@ -322,6 +363,148 @@ def scen_controller_drift(target, severity, duration):
     }
 
 
+# --- Core / catastrophic / correlated scenarios (POP-structured MPLS backbone) -
+# Link-sets are computed from topology-meta.json (no hardcoded interfaces). These
+# target the P core — the part of the network the predictive NOC most needs to see.
+def scen_p_node_failure(target, severity, duration):
+    """Catastrophic: down ALL core ifaces of one P router (full node loss). The
+    redundant POP mesh + PE dual-homing must reroute around it."""
+    links = [(target, i) for i in meta()["p_core_ifaces"][target]]
+    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    return {
+        "type": "p_node_failure", "device": target,
+        "target": {"device": target, "n_links": len(links), "links": links},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "signature": "full P-router loss; OSPF/LDP reconverge around it via POP mesh + dual-homing",
+    }
+
+
+def scen_pop_isolation(target, severity, duration):
+    """Catastrophic: down every inter-POP backbone link of one POP -> the region
+    is cut off (only intra-POP connectivity remains); its PEs go unreachable."""
+    links = [tuple(l) for l in meta()["pop_inter_links"][target]]
+    abr0 = meta()["pops"][target][0]
+    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    return {
+        "type": "pop_isolation", "device": abr0,
+        "target": {"pop": target, "n_links": len(links), "links": links},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "signature": f"{target} isolated: all inter-POP links down; in-POP PEs unreachable from other POPs",
+    }
+
+
+def scen_core_partition(target, severity, duration):
+    """Catastrophic: cut the full edge cut-set bisecting the backbone ring into
+    two halves (a multi-fibre core partition / area-0 discontiguity)."""
+    m = meta(); pc = m["pop_count"]
+    n = int(str(target).replace("pop", "")) if "pop" in str(target) else int(target)
+    half = {((n - 1 + k) % pc) + 1 for k in range(pc // 2)}
+    links = []
+    for rec in m["inter_pop_links"]:
+        if (rec["pop_a"] in half) != (rec["pop_b"] in half):   # crossing edge
+            links += [tuple(l) for l in rec["links"]]
+    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    return {
+        "type": "core_partition", "device": links[0][0] if links else "p1",
+        "target": {"seam": target, "half": sorted(half), "n_links": len(links),
+                   "links": links},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "signature": "backbone ring bisected; area-0 splits into two islands until restore",
+    }
+
+
+def scen_srlg_cut(target, severity, duration):
+    """Correlated fibre cut: down EVERY link in one SRLG conduit at once -- the
+    redundant parallel links share a duct, so 'redundancy' doesn't save you."""
+    links = [tuple(l) for l in meta()["srlgs"][target]]
+    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    return {
+        "type": "srlg_cut", "device": links[0][0],
+        "target": {"srlg": target, "n_links": len(links), "links": links},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "signature": "shared-risk conduit cut; all parallel inter-POP links drop together",
+    }
+
+
+def scen_core_congestion(target, severity, duration):
+    """Transit congestion buildup: netem delay+loss RAMP on a P-P backbone link;
+    every LSP transiting it degrades (not just one edge site)."""
+    s = SEVERITY[severity]
+    iface = _backbone_iface(target)
+    injector = inj.NetemImpair(target, iface,
+                               delay_ms=60 * s, jitter_ms=15 * s, loss_pct=4 * s)
+    return {
+        "type": "core_congestion", "device": target,
+        "target": {"device": target, "interface": iface},
+        "injector": injector, "ramp": True, "duration": duration,
+        "probe": None, "impact_delay_s": 4, "impact_method": "modelled",
+        "signature": "backbone-link congestion; latency/loss climb on all transiting LSPs",
+    }
+
+
+def scen_ospf_area_flap(target, severity, duration):
+    """Routing instability: flap an inter-POP (area-0) adjacency -> SPF churn +
+    inter-area reconvergence. Precursor = ospf_spf_* moving + ADJCHANGE in Loki."""
+    iface = _backbone_iface(target)
+    count = {"low": 1, "medium": 2, "high": 3}.get(str(severity), 2)
+    injector = inj.LinkFlap(target, iface, down_seconds=4.0, count=count)
+    return {
+        "type": "ospf_area_flap", "device": target,
+        "target": {"device": target, "interface": iface, "count": count},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "signature": "inter-POP adjacency flaps; SPF re-runs, inter-area routes churn",
+    }
+
+
+def scen_path_asymmetry(target, severity, duration):
+    """Raise OSPF cost on ONE direction of a backbone link so forward and return
+    paths diverge (path asymmetry -- a named precursor in the brief)."""
+    iface = _backbone_iface(target)
+    cost = int(500 + 1500 * SEVERITY[severity])
+    injector = inj.OspfCostShift(target, iface, cost=cost, orig_cost=100)
+    return {
+        "type": "path_asymmetry", "device": target,
+        "target": {"device": target, "interface": iface, "cost": cost},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 3, "impact_method": "modelled",
+        "signature": "one-way OSPF cost hike; forward/return paths diverge (asymmetric routing)",
+    }
+
+
+def scen_rr_failure(target, severity, duration):
+    """Catastrophic control-plane: kill bgpd on a Route Reflector -> VPNv4 route
+    propagation degrades cluster-wide until watchfrr respawns it."""
+    injector = inj.ProcessKill(target, proc="bgpd")
+    return {
+        "type": "rr_failure", "device": target,
+        "target": {"device": target, "process": "bgpd", "role": "route_reflector"},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 3, "impact_method": "modelled",
+        "signature": "RR bgpd gap; VPNv4 propagation stalls (bgp_peer_established drops) until restart",
+    }
+
+
+def scen_gray_failure(target, severity, duration):
+    """Gray failure: sub-BFD intermittent loss (0.5-2%) on a backbone link, NO
+    link-down. BFD won't trip; degradation is slow -> high predictive value."""
+    s = SEVERITY[severity]
+    iface = _backbone_iface(target)
+    loss = round(0.5 + 1.5 * s, 2)             # 0.5%..2%, below BFD trip
+    injector = inj.NetemImpair(target, iface, loss_pct=loss)
+    return {
+        "type": "gray_failure", "device": target,
+        "target": {"device": target, "interface": iface, "loss_pct": loss},
+        "injector": injector, "ramp": False, "duration": duration,
+        "probe": None, "impact_delay_s": 5, "impact_method": "modelled",
+        "signature": "low sub-BFD loss on a backbone link; no down event, slow transit degradation",
+    }
+
+
 SCENARIOS = {
     "congestion": scen_congestion,            # (a) mandated
     "bgp_flap": scen_bgp_flap,                # (b) mandated
@@ -335,6 +518,16 @@ SCENARIOS = {
     "hub_spoke_congest":     scen_hub_spoke_congest,
     "bgp_cascade":           scen_bgp_cascade,
     "controller_drift":      scen_controller_drift,
+    # --- core / catastrophic / correlated (POP backbone) ---
+    "p_node_failure":  scen_p_node_failure,
+    "pop_isolation":   scen_pop_isolation,
+    "core_partition":  scen_core_partition,
+    "srlg_cut":        scen_srlg_cut,
+    "core_congestion": scen_core_congestion,
+    "ospf_area_flap":  scen_ospf_area_flap,
+    "path_asymmetry":  scen_path_asymmetry,
+    "rr_failure":      scen_rr_failure,
+    "gray_failure":    scen_gray_failure,
 }
 
 
@@ -424,7 +617,7 @@ def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
         "baseline_value": baseline,
         "impact_value": observed,
         "signature": spec["signature"],
-        "device": target,
+        "device": spec.get("device", target),
     }
     write_label(row)
     print(json.dumps({"event": "label_written", "row": row}), flush=True)
@@ -460,8 +653,13 @@ _CE_BRANCHES = [f"ce_branch{i}" for i in range(1, 25)]   # 24 branches
 _CE_HUBS     = [f"ce_hub{i}"    for i in range(1, 7)]    # 6 hubs
 _CE_DCS      = [f"ce_dc{i}"     for i in range(1, 5)]    # 4 DCs
 _CE_ALL      = _CE_BRANCHES + _CE_HUBS + _CE_DCS          # 34 CEs
-_PE_ALL      = [f"pe{i}"        for i in range(1, 11)]   # 10 PEs
-_P_ALL       = [f"p{i}"         for i in range(1, 9)]    # 8 P routers
+_PE_ALL      = [f"pe{i}"        for i in range(1, 13)]   # 12 PEs
+_P_ALL       = [f"p{i}"         for i in range(1, 25)]   # 24 P routers
+# core-fault pools, derived from the topology-meta POP map (single source of truth)
+_ABRS  = meta()["abrs"]                                   # ABR (backbone) P routers
+_POPS  = list(meta()["pops"].keys())                     # pop1..pop6
+_SRLGS = list(meta()["srlgs"].keys())                    # inter-POP conduits
+_RR    = ["pe1", "pe2"]                                   # route reflectors
 
 # ponytail: scenario pools defined once here; avoids re-deriving them later.
 CAMPAIGN_POOLS = {
@@ -481,6 +679,18 @@ CAMPAIGN_POOLS = {
     "hub_spoke_congest":     _CE_HUBS,
     "bgp_cascade":           _CE_HUBS,
     "controller_drift":      _CE_HUBS,
+    # core / catastrophic / correlated faults — the chaos the campaign now mixes in.
+    # ponytail: pop_isolation + core_partition are EXCLUDED from the random campaign
+    #   (whole-region/backbone cuts overlap link-sets; run them explicitly as the
+    #   Phase-6 named scenarios). p_node_failure/srlg_cut/rr_failure stay in: each
+    #   touches a disjoint, recoverable link-set so the active-target guard suffices.
+    "p_node_failure":  _P_ALL,
+    "srlg_cut":        _SRLGS,
+    "core_congestion": _ABRS,
+    "ospf_area_flap":  _ABRS,
+    "path_asymmetry":  _ABRS,
+    "rr_failure":      _RR,
+    "gray_failure":    _ABRS,
 }
 
 # Fault duration bounds (seconds) per scenario, independent of --duration.
@@ -498,6 +708,15 @@ _DURATION_BOUNDS = {
     "hub_spoke_congest":     (30, 90),
     "bgp_cascade":           (20, 60),
     "controller_drift":      (60, 180),
+    "p_node_failure":        (15, 45),
+    "pop_isolation":         (20, 60),
+    "core_partition":        (20, 60),
+    "srlg_cut":              (20, 50),
+    "core_congestion":       (30, 90),
+    "ospf_area_flap":        (15, 45),
+    "path_asymmetry":        (30, 90),
+    "rr_failure":            (15, 40),
+    "gray_failure":          (60, 180),
 }
 
 

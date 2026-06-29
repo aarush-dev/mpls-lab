@@ -11,7 +11,7 @@
 ## 0. Prerequisites
 
 The lab requires:
-- Linux host: ~108 GB RAM, 19 cores (130 containers × ~1.2 GB each)
+- Linux host: ~108 GB RAM, 19 cores (148 lab containers (70 FRR + 78 hosts) + 9 telemetry/infra ≈ 157 total)
 - MPLS kernel modules: `mpls_router`, `mpls_gso`, `mpls_iptunnel`
 - Tools: `containerlab`, `docker`, `docker-compose`, `python3` with `pandas`, `fastapi`, `uvicorn`
 
@@ -33,14 +33,14 @@ cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
 cd /root/LAB/generator
 python3 generate.py
 # Output: /root/LAB/topology/clab.yml + per-node config dirs
-# Expected: "Wrote 90 nodes to clab.yml" + "WireGuard keys cached"
+# Expected: "Wrote 148 nodes to clab.yml" + "WireGuard keys cached"
 ```
 
-### Step 2: Deploy the 130-container network
+### Step 2: Deploy the 148-container network
 ```bash
 cd /root/LAB/topology
 sudo containerlab deploy --topo clab.yml --recycle
-# Expected: "deployed 90 nodes" (5–10 min on cold start; networking converges ~30s after)
+# Expected: "deployed 148 nodes" (5–10 min on cold start; networking converges ~30s after)
 ```
 
 ### Step 3: Start the telemetry stack (Grafana, VictoriaMetrics, Loki, Telegraf)
@@ -63,7 +63,7 @@ uvicorn app:app --host 127.0.0.1 --port 8000 &
 ```bash
 # Containers running
 docker ps | grep -E "tele-|clab-sdwan" | wc -l
-# Expected: 96 (90 network + 6 telemetry)
+# Expected: ~157 (148 network + 9 telemetry)
 
 # Telemetry stack responsive
 curl -s http://172.20.20.50:8428/api/v1/status/tsdb | jq '.status'
@@ -91,7 +91,7 @@ firefox http://172.20.20.51:3000 &
 # No password required (GF_AUTH_ANONYMOUS_ENABLED: true)
 ```
 
-**Panels in the NOC Dashboard:**
+**Panels in the NOC Dashboard (11 total):**
 
 | Panel | What It Shows | Best For |
 |-------|---------------|----------|
@@ -100,6 +100,10 @@ firefox http://172.20.20.51:3000 &
 | **BGP/OSPF Events Log** | Syslog ADJCHANGE, neighbor state churn (Loki source) | Verify routing protocol churn during BGP flap faults |
 | **Per-VRF Traffic** | ifHCInOctets grouped by vrf (CORP, VOICE, GUEST) | Isolate faults to a single VRF or verify cross-VRF isolation |
 | **Controller State** | Path changes, rekey events, policy drift signals | Confirm SD-WAN controller reaction to faults |
+| **OSPF Adjacency State** | ospf_neighbor_state{device,peer} 1=Full/0=not (P+PE) | Spot p_node_failure, srlg_cut, pop_isolation adjacency drops |
+| **OSPF SPF Duration** | ospf_spf_last_duration_ms + ospf_spf_last_executed_ms | Detect area_flap → SPF churn / inter-area reconvergence |
+| **MPLS LSP Count** | mpls_lsp_count{device} installed forwarding entries (P+PE) | Verify LSP table integrity after core faults |
+| **BGP Peers Established** | bgp_peer_established{device} iBGP/VPNv4 established count | See rr_failure collapse cluster-wide (pe1 RR=22 peers) |
 
 ### VictoriaMetrics (raw time-series DB)
 ```bash
@@ -143,14 +147,28 @@ In Grafana, click "Explore" → select "Loki" datasource.
 ```bash
 cd /root/LAB/faults
 python3 orchestrator.py --list
-# Output:
-# congestion           Link/interface congestion: netem delay+loss ramp
-# bgp_flap             BGP/OSPF adjacency flap; routing churn
-# tunnel_degrade       SD-WAN tunnel jitter/loss decay
-# policy_drift         CE VRF route-map: local-preference drift
-# node_failure         Kill bgpd; watchfrr restarts (recoverable)
-# asymmetric_loss      Egress-only packet loss
-# brownout             Hard rate cap; bandwidth starvation
+# Output (21 scenarios):
+# congestion              Link/interface congestion: netem delay+loss ramp
+# bgp_flap                BGP/OSPF adjacency flap; routing churn
+# tunnel_degrade          SD-WAN tunnel jitter/loss decay
+# policy_drift            CE VRF route-map: local-preference drift
+# node_failure            Kill bgpd; watchfrr restarts (recoverable)
+# asymmetric_loss         Egress-only packet loss
+# brownout                Hard rate cap; bandwidth starvation
+# mpls_underlay_failure   Drop all core ifaces on a P router
+# ldp_session_flap        Flap LDP session on a PE
+# hub_spoke_congest       Congestion on hub CE toward MPLS
+# bgp_cascade             Hub CE BGP kill → cascade to spokes
+# controller_drift        SD-WAN controller policy drift
+# p_node_failure          Down ALL core ifaces of one P (full node loss)
+# pop_isolation           Down all inter-POP links of one POP [named test only]
+# core_partition          Bisect backbone ring → two area-0 islands [named test only]
+# srlg_cut                Down one SRLG conduit (correlated multi-link fibre cut)
+# core_congestion         netem delay+loss ramp on a backbone P-P link
+# ospf_area_flap          Flap inter-POP (area-0) adjacency → SPF churn
+# path_asymmetry          Raise OSPF cost one direction → asymmetric paths
+# rr_failure              Kill bgpd on a Route Reflector → VPNv4 degraded cluster-wide
+# gray_failure            0.5–2% loss on backbone link, no link-down (hard to detect)
 ```
 
 ### Run a single fault scenario (synchronous)
@@ -232,6 +250,52 @@ PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario hub_spoke_congest
 PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario bgp_cascade --target ce_hub2 --severity high --duration 45
 PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario controller_drift --target ce_hub1 --duration 120
 ```
+
+### MPLS core fault scenarios (Phase 6 — 9 new)
+
+All commands run from `/root/LAB/faults` with `PYTHONPATH=/root/LAB`.
+
+**Target reference:** P faults → `p1..p24`; POP faults → `pop1..pop6`; SRLG conduits →
+`srlg_pop1_2`, `srlg_pop2_3`, `srlg_pop3_4`, `srlg_pop4_5`, `srlg_pop5_6`, `srlg_pop6_1`
+(ring) + `srlg_pop1_4`, `srlg_pop2_5`, `srlg_pop3_6` (chords);
+core_congestion / ospf_area_flap / path_asymmetry / gray_failure → an ABR P node
+(`p1,p2,p5,p6,p9,p10,p13,p14,p17,p18,p21,p22`); rr_failure → `pe1` or `pe2`.
+
+```bash
+cd /root/LAB/faults
+
+# P node failure — down ALL core interfaces of one P; all LSPs reroute
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario p_node_failure --target p9 --duration 30
+
+# POP isolation — cut all inter-POP links of one POP (region partition)
+# NOTE: named test only — excluded from random campaign; run explicitly
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario pop_isolation --target pop2 --duration 30
+
+# Core partition — bisect the backbone ring → two area-0 islands
+# NOTE: named test only — excluded from random campaign; run explicitly
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario core_partition --target pop1 --duration 30
+
+# SRLG cut — take down one SRLG conduit (both redundant inter-POP links together)
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario srlg_cut --target srlg_pop1_2
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario srlg_cut --target srlg_pop1_4  # chord
+
+# Core congestion — netem delay+loss ramp on a P-P backbone link
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario core_congestion --target p1 --severity high --duration 60
+
+# OSPF area flap — flap an inter-POP (area-0) adjacency → SPF churn
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario ospf_area_flap --target p2 --duration 30
+
+# Path asymmetry — raise OSPF cost one direction → forward/return paths diverge
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario path_asymmetry --target p5 --duration 60
+
+# Route reflector failure — kill bgpd on RR → VPNv4 propagation degrades cluster-wide
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario rr_failure --target pe1 --duration 30
+
+# Gray failure — 0.5–2% loss on a backbone link, no link-down event (slow, hard to detect)
+PYTHONPATH=/root/LAB python3 orchestrator.py --scenario gray_failure --target p10 --duration 120
+```
+
+**Campaign behaviour:** The Poisson campaign mixes edge + core + catastrophic + correlated faults ("chaos"). `pop_isolation` and `core_partition` are excluded from the random campaign pool (they are named Phase-6 tests). `--list` shows all 21 scenarios; `--campaign` picks from the 19-scenario pool.
 
 ### Revert a stuck fault manually (if needed)
 ```bash
@@ -324,10 +388,10 @@ curl 'http://127.0.0.1:8000/labels' | jq '.rows[] | select(.device == "ce_branch
 ```bash
 # Get the full topology as JSON
 curl 'http://127.0.0.1:8000/topology' | jq '.nodes | length'
-# Expected: 130 (52 routers + 78 hosts)
+# Expected: 148 (70 routers + 78 hosts)
 
 curl 'http://127.0.0.1:8000/topology' | jq '.nodes[] | select(.role == "PE") | .name'
-# pe1, pe2, pe3, pe4, pe5
+# pe1, pe2, pe3, pe4, pe5, pe6, pe7, pe8, pe9, pe10, pe11, pe12
 ```
 
 ### /datasets — ML-ready labeled Parquet (the main one)
@@ -508,15 +572,22 @@ print(f"Combined: {len(df_combined)} rows")
 
 All topology parameters are in one file: `/root/LAB/topology-spec.yaml`
 
-### Current scale (130 containers, stable)
+### Current scale (148 containers, stable)
 ```yaml
 knobs:
-  p_count:      8
-  pe_count:     10
-  branch_count: 24
-  hub_count:    6
-  dc_count:     4
-  # Total: 8 + 10 + (24+6+4) + 78 hosts = 130 containers
+  p_count:             24
+  pe_count:            12
+  pop_count:           6
+  p_per_pop:           4
+  multi_area:          true
+  igp_cost_intra:      10
+  igp_cost_inter:      100
+  inter_pop_redundancy: 2
+  inter_pop_chords:    [[1,4],[2,5],[3,6]]
+  branch_count:        24
+  hub_count:           6
+  dc_count:            4
+  # Total: 24 P + 12 PE + (24+6+4) CE + 78 hosts = 148 lab containers
 ```
 
 ### Scale down (20 containers, dev/testing)
@@ -544,9 +615,7 @@ sudo containerlab deploy --topo clab.yml --recycle
 ```bash
 # WARNING: requires > 150 GB RAM. Use only on high-end hardware.
 nano /root/LAB/topology-spec.yaml
-# Change:
-# p_count:  8
-# pe_count: 8
+# Increase CE counts (P/PE core is already at designed capacity):
 # branch_count: 32
 # hub_count: 8
 # dc_count: 8
@@ -560,7 +629,7 @@ cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --recycle
 | Scale | Containers | Deploy Time | Convergence | RAM Used |
 |-------|-----------|-------------|-------------|----------|
 | dev   | 20        | 2 min       | 30s         | 20 GB    |
-| prod  | 90        | 8 min       | 45s         | 108 GB   |
+| prod  | 148       | 8 min       | 45s         | 108 GB   |
 | max   | 150+      | 15 min      | 60s         | 200+ GB  |
 
 ---
@@ -669,7 +738,7 @@ docker exec clab-sdwan_mpls_noc-ce_branch1 vtysh -c "show version"
 ```bash
 # Query VictoriaMetrics for recent samples
 curl -s 'http://172.20.20.50:8428/api/v1/query?query=up' | jq '.data.result | length'
-# Expected: > 90 (at least one metric per router)
+# Expected: > 70 (at least one metric per FRR node; SNMP covers all 70)
 
 # Count time-series per metric
 curl -s 'http://172.20.20.50:8428/api/v1/label/__name__/values' | jq 'length'
@@ -759,7 +828,7 @@ curl -sg 'http://172.20.20.50:8428/api/v1/query?query=avg+by+(site_type)(sdwan_t
 docker exec clab-sdwan_mpls_noc-pe1 vtysh -c "show bfd peers brief"
 ```
 
-### Verify route-reflector clients (pe3–pe10 should peer only to pe1+pe2)
+### Verify route-reflector clients (pe3–pe12 should peer only to pe1+pe2)
 ```bash
 docker exec clab-sdwan_mpls_noc-pe3 vtysh -c "show bgp summary" | grep "10.255.2"  # should only show pe1+pe2
 ```
@@ -772,6 +841,33 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_ldp_session_state" | p
 ### BGP VRF prefix counts
 ```bash
 curl -s "http://172.20.20.50:8428/api/v1/query?query=bgp_vrf_prefix_count" | python3 -m json.tool | head -20
+```
+
+### MPLS core telemetry metrics (new in Phase 6)
+
+These metrics are emitted by the `noc-ldp-metrics` sidecar (container `172.20.20.58`) via
+vtysh JSON polling, pushed to VictoriaMetrics. SNMP now covers all 70 FRR nodes (70 agents).
+
+| Metric | Labels | Coverage | Notes |
+|--------|--------|----------|-------|
+| `ospf_neighbor_state` | `{device,peer}` | P+PE (~156 series) | 1=Full, 0=not; drops reveal node/link faults |
+| `ospf_spf_last_duration_ms` | `{device}` | P+PE | Last SPF compute time; jumps on area_flap |
+| `ospf_spf_last_executed_ms` | `{device}` | P+PE | Boot-relative timestamp of last SPF run |
+| `mpls_lsp_count` | `{device}` | P+PE | Installed MPLS forwarding entries (~107/node) |
+| `bgp_peer_established` | `{device}` | PE | Established iBGP/VPNv4 peers (RR=22, client=4) |
+
+```bash
+# OSPF neighbor state on P node (should be 1.0 for all peers when healthy)
+curl -s "http://172.20.20.50:8428/api/v1/query?query=ospf_neighbor_state%7Bdevice%3D%22p1%22%7D" | python3 -m json.tool
+
+# SPF churn — watch this spike during ospf_area_flap fault
+curl -s "http://172.20.20.50:8428/api/v1/query?query=ospf_spf_last_duration_ms" | python3 -m json.tool | head -20
+
+# BGP peers established (pe1 as RR should show 22 when healthy; drops during rr_failure fault)
+curl -s "http://172.20.20.50:8428/api/v1/query?query=bgp_peer_established%7Bdevice%3D%22pe1%22%7D" | python3 -m json.tool
+
+# MPLS forwarding table size on a core P node
+curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_lsp_count%7Bdevice%3D%22p1%22%7D" | python3 -m json.tool
 ```
 
 ---

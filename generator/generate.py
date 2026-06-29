@@ -118,6 +118,35 @@ def build(spec):
     p_count, pe_count = k["p_count"], k["pe_count"]
     branch, hub, dc = k["branch_count"], k["hub_count"], k["dc_count"]
 
+    # --- POP / multi-area core knobs ---
+    pop_count = k.get("pop_count", 1)
+    p_per_pop = k.get("p_per_pop", p_count)
+    multi_area = k.get("multi_area", False)
+    cost_intra = k.get("igp_cost_intra", 10)
+    cost_inter = k.get("igp_cost_inter", 100)
+    redundancy = k.get("inter_pop_redundancy", 2)
+    chords = [tuple(c) for c in k.get("inter_pop_chords", [])]
+    assert p_count == pop_count * p_per_pop, \
+        f"p_count {p_count} != pop_count {pop_count} * p_per_pop {p_per_pop}"
+    assert p_per_pop >= 3, "need >=3 P per POP (2 ABR + >=1 PE-facing)"
+
+    def pop_of(p):                       # 1-based POP id for P router index p
+        return (p - 1) // p_per_pop + 1
+
+    def pop_routers(pop):                # P indices in a POP
+        return list(range((pop - 1) * p_per_pop + 1, pop * p_per_pop + 1))
+
+    def borders(pop):                    # first 2 P of a POP = ABRs (area-0 facing)
+        return pop_routers(pop)[:2]
+
+    def internals(pop):                  # remaining P = PE-facing, pure area-K
+        return pop_routers(pop)[2:]
+
+    # area a P-loopback / link belongs to: its POP area (1..pop_count), or 0 if
+    # single-area mode. Backbone (inter-POP + ABR-ABR) links are forced to area 0.
+    def pop_area(pop):
+        return pop if multi_area else 0
+
     # node name + interface-index bookkeeping. eth index per node, eth0 reserved
     # by clab as mgmt; data links start at eth1.
     iface_ctr = {}
@@ -133,60 +162,115 @@ def build(spec):
     def reg_ip(ip, owner):
         all_ips.append((ip, owner))
 
-    # --- P routers ---
+    def pe_pop(i):                       # contiguous PE→POP assignment (2 per POP @ 12/6)
+        return (i - 1) * pop_count // pe_count + 1
+
+    # --- P routers (loopback lives in its POP area) ---
     for i in range(1, p_count + 1):
         lo = f"10.255.1.{i}"
-        nodes[f"p{i}"] = dict(role="P", loopback=lo, core_links=[], ce_links=[])
+        nodes[f"p{i}"] = dict(role="P", loopback=lo, core_links=[], ce_links=[],
+                              pop=pop_of(i), ospf_area=pop_area(pop_of(i)),
+                              is_abr=(i in borders(pop_of(i))))
         reg_ip(lo, f"p{i}.lo")
 
-    # --- PE routers ---
+    # --- PE routers (loopback lives in its POP area) ---
     for i in range(1, pe_count + 1):
         lo = f"10.255.2.{i}"
         nodes[f"pe{i}"] = dict(role="PE", loopback=lo, core_links=[], ce_links=[],
-                               vrfs=[])
+                               vrfs=[], pop=pe_pop(i), ospf_area=pop_area(pe_pop(i)))
         reg_ip(lo, f"pe{i}.lo")
 
-    # --- P-P core links (/31), all unordered pairs, sequential from 10.0.0.0 ---
-    pp_pairs = [(a, b) for a in range(1, p_count + 1) for b in range(a + 1, p_count + 1)]
-    for kk, (a, b) in enumerate(pp_pairs):
-        net = 2 * kk
-        lo_addr = f"10.0.0.{net}"      # lower-index router (.0 of /31)
-        hi_addr = f"10.0.0.{net + 1}"  # higher-index router
+    # ── Core link fabric (POP-structured, multi-area) ───────────────────────────
+    # P-P /31s sequential from 10.0.0.0; each link tagged with OSPF area, cost,
+    # and (inter-POP only) an SRLG conduit id. Intra-POP = cheap area-K mesh; the
+    # ABR-ABR pair + all inter-POP links = area 0 backbone (expensive transit).
+    pp_net = [0]              # mutable /31 counter for 10.0.0.x
+    srlgs = {}               # srlg_id -> [[device, iface], ...]
+    inter_pop_links = []     # adjacency records for topology-meta.json
+
+    def add_pp(a, b, area, cost, srlg=None):
+        net = 2 * pp_net[0]; pp_net[0] += 1
+        a_addr, b_addr = f"10.0.0.{net}", f"10.0.0.{net + 1}"
         ia, ib = next_iface(f"p{a}"), next_iface(f"p{b}")
-        nodes[f"p{a}"]["core_links"].append(dict(iface=ia, addr=lo_addr))
-        nodes[f"p{b}"]["core_links"].append(dict(iface=ib, addr=hi_addr))
+        nodes[f"p{a}"]["core_links"].append(
+            dict(iface=ia, addr=a_addr, area=area, ospf_cost=cost, srlg=srlg))
+        nodes[f"p{b}"]["core_links"].append(
+            dict(iface=ib, addr=b_addr, area=area, ospf_cost=cost, srlg=srlg))
         links.append(dict(a=f"p{a}:{ia}", b=f"p{b}:{ib}"))
-        reg_ip(lo_addr, f"p{a}:{ia}")
-        reg_ip(hi_addr, f"p{b}:{ib}")
+        reg_ip(a_addr, f"p{a}:{ia}"); reg_ip(b_addr, f"p{b}:{ib}")
+        if srlg:
+            srlgs.setdefault(srlg, []).extend([[f"p{a}", ia], [f"p{b}", ib]])
+        return (f"p{a}", ia), (f"p{b}", ib)
 
-    # --- P-PE links (/31), PE round-robin to a P, sequential from 10.0.1.0 ---
+    # 1) Intra-POP full mesh. ABR-ABR pair carries backbone → area 0; the rest
+    #    stay in the POP area. All intra links are cheap (cost_intra).
+    for pop in range(1, pop_count + 1):
+        rtr = pop_routers(pop)
+        bset = set(borders(pop))
+        for ii in range(len(rtr)):
+            for jj in range(ii + 1, len(rtr)):
+                a, b = rtr[ii], rtr[jj]
+                area = 0 if {a, b} == bset else pop_area(pop)
+                add_pp(a, b, area, cost_intra)
+
+    # 2) Inter-POP backbone: ring + chords, area 0, expensive. Each adjacency has
+    #    `redundancy` parallel links sharing ONE SRLG conduit (fibre cut = all down).
+    ring = [(p, p % pop_count + 1) for p in range(1, pop_count + 1)]
+    adjacencies = [(min(x, y), max(x, y), "ring") for (x, y) in ring]
+    adjacencies += [(min(x, y), max(x, y), "chord") for (x, y) in chords]
+    for (pa, pb, kind) in adjacencies:
+        srlg = f"srlg_pop{pa}_{pb}"
+        eps = []
+        for r in range(redundancy):
+            ea, eb = add_pp(borders(pa)[r % 2], borders(pb)[r % 2], 0,
+                            cost_inter, srlg=srlg)
+            eps.extend([ea, eb])
+        inter_pop_links.append(dict(pop_a=pa, pop_b=pb, kind=kind, srlg=srlg,
+                                    links=[[d, i] for (d, i) in eps]))
+
+    # 3) P-PE links (/31): each PE dual-homed to the 2 PE-facing P in its POP, in
+    #    the POP area. Sequential /31s from 10.0.1.0.
+    ppe_net = [0]
+
+    def add_ppe(pe_i, p_idx, area):
+        net = 2 * ppe_net[0]; ppe_net[0] += 1
+        pe_addr, p_addr = f"10.0.1.{net}", f"10.0.1.{net + 1}"
+        ipe, ip = next_iface(f"pe{pe_i}"), next_iface(f"p{p_idx}")
+        nodes[f"pe{pe_i}"]["core_links"].append(
+            dict(iface=ipe, addr=pe_addr, area=area, ospf_cost=cost_intra))
+        nodes[f"p{p_idx}"]["core_links"].append(
+            dict(iface=ip, addr=p_addr, area=area, ospf_cost=cost_intra))
+        links.append(dict(a=f"pe{pe_i}:{ipe}", b=f"p{p_idx}:{ip}"))
+        reg_ip(pe_addr, f"pe{pe_i}:{ipe}"); reg_ip(p_addr, f"p{p_idx}:{ip}")
+
     for i in range(1, pe_count + 1):
-        p_idx = (i - 1) % p_count + 1
-        net = 2 * (i - 1)
-        pe_addr = f"10.0.1.{net}"
-        p_addr = f"10.0.1.{net + 1}"
-        ipe, ip = next_iface(f"pe{i}"), next_iface(f"p{p_idx}")
-        nodes[f"pe{i}"]["core_links"].append(dict(iface=ipe, addr=pe_addr))
-        nodes[f"p{p_idx}"]["core_links"].append(dict(iface=ip, addr=p_addr))
-        links.append(dict(a=f"pe{i}:{ipe}", b=f"p{p_idx}:{ip}"))
-        reg_ip(pe_addr, f"pe{i}:{ipe}")
-        reg_ip(p_addr, f"p{p_idx}:{ip}")
+        pop = pe_pop(i)
+        area = pop_area(pop)
+        facing = internals(pop)            # PE-facing P in this POP
+        add_ppe(i, facing[(i - 1) % len(facing)], area)   # primary
+        if k.get("pe_dual_homing") and len(facing) > 1:
+            add_ppe(i, facing[i % len(facing)], area)      # secondary
 
-    # ponytail: dual-homing — each PE gets a second P uplink for MPLS underlay
-    # failure scenarios; secondary /31 nets start at index pe_count (no collision).
-    if k.get("pe_dual_homing"):
-        for i in range(1, pe_count + 1):
-            p_sec = i % p_count + 1
-            net_sec = 2 * (pe_count + i - 1)
-            pe_sec_addr = f"10.0.1.{net_sec}"
-            p_sec_addr  = f"10.0.1.{net_sec + 1}"
-            ipe_sec = next_iface(f"pe{i}")
-            ip_sec  = next_iface(f"p{p_sec}")
-            nodes[f"pe{i}"]["core_links"].append(dict(iface=ipe_sec, addr=pe_sec_addr))
-            nodes[f"p{p_sec}"]["core_links"].append(dict(iface=ip_sec,  addr=p_sec_addr))
-            links.append(dict(a=f"pe{i}:{ipe_sec}", b=f"p{p_sec}:{ip_sec}"))
-            reg_ip(pe_sec_addr, f"pe{i}:{ipe_sec}-sec")
-            reg_ip(p_sec_addr,  f"p{p_sec}:{ip_sec}-sec")
+    # --- topology metadata (consumed by faults/orchestrator.py + dataapi) ---
+    topo_meta = dict(
+        pop_count=pop_count, p_per_pop=p_per_pop, multi_area=multi_area,
+        pops={f"pop{pop}": [f"p{x}" for x in pop_routers(pop)]
+              for pop in range(1, pop_count + 1)},
+        abrs=[f"p{x}" for pop in range(1, pop_count + 1) for x in borders(pop)],
+        pe_pop={f"pe{i}": pe_pop(i) for i in range(1, pe_count + 1)},
+        # every core iface of each P (for p_node_failure = down all at once)
+        p_core_ifaces={f"p{i}": [l["iface"] for l in nodes[f"p{i}"]["core_links"]]
+                       for i in range(1, p_count + 1)},
+        srlgs=srlgs,
+        inter_pop_links=inter_pop_links,
+        # per-POP inter-POP link set (for pop_isolation fault)
+        pop_inter_links={
+            f"pop{pop}": [lk for rec in inter_pop_links
+                          if pop in (rec["pop_a"], rec["pop_b"])
+                          for lk in rec["links"]
+                          if lk[0] in {f"p{x}" for x in borders(pop)}]
+            for pop in range(1, pop_count + 1)},
+    )
 
     # --- iBGP: full-mesh or RR-aware ---
     rr_enabled = k.get("route_reflector", False)
@@ -487,6 +571,7 @@ def build(spec):
         spec=spec, nodes=nodes, links=links, host_nodes=host_nodes,
         ce_list=ce_list, wg=wg, node_exec=node_exec, all_ips=all_ips,
         provider_as=provider_as, pe_count=pe_count, mgmt_ip=mgmt_ip,
+        topo_meta=topo_meta,
     )
 
 
@@ -550,6 +635,7 @@ def render(model):
             lans=n.get("lans", []),
             bfd_core=k.get("bfd_core", False),
             is_rr=n.get("is_rr", False),
+            loopback_area=n.get("ospf_area", 0),
         )
         _w(os.path.join(ndir, "frr.conf"), frr_txt)
 
@@ -593,6 +679,10 @@ def render(model):
         host_image=k["host_image"], frr_nodes=frr_nodes,
         host_nodes=model["host_nodes"], links=model["links"])
     _w(os.path.join(OUT, "clab.yml"), clab_txt)
+
+    # topology metadata (POP/area/SRLG map) — consumed by faults + dataapi
+    _w(os.path.join(OUT, "topology-meta.json"),
+       json.dumps(model["topo_meta"], indent=2) + "\n")
 
     # emit telemetry node-mappings from the same model (anti-drift)
     emit_telemetry(model)

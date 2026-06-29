@@ -73,7 +73,7 @@ services:
     container_name: tele-nfacctd
     volumes:
       - ./nfacctd/nfacctd.conf:/etc/pmacct/nfacctd.conf:ro
-      - ./nfacctd/device_map.txt:/etc/pmacct/device_map.txt:ro
+      - ../topology/telemetry/device_map.txt:/etc/pmacct/device_map.txt:ro
     command: ["-f", "/etc/pmacct/nfacctd.conf"]
     ports:
       - "2055:2055/udp"

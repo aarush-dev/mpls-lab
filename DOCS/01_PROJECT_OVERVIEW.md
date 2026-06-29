@@ -40,15 +40,15 @@ Think of this as building a synthetic but realistic training environment, equiva
 
 Five major components were built:
 
-**A simulated network of 130 containers.** Fifty-two of these are FRR (FRRouting — an open-source network operating system) router containers running real routing protocols. Seventy-eight are host containers representing end-user machines at branch offices, regional hubs, and data centers. Together they form a realistic enterprise-grade network that generates genuine SNMP (Simple Network Management Protocol) counters, routing protocol events, and flow records — the same data a real NOC would see.
+**A simulated network of 148 lab containers** (~157 including telemetry and infrastructure services). Seventy of these are FRR (FRRouting — an open-source network operating system) router containers — 24 P-core, 12 PE, and 34 CE — running real routing protocols. Seventy-eight are host containers representing end-user machines at branch offices, regional hubs, and data centers. Together they form a realistic enterprise-grade network that generates genuine SNMP (Simple Network Management Protocol) counters, routing protocol events, and flow records — the same data a real NOC would see.
 
 **A full telemetry pipeline.** Every metric from every container is collected, normalized, and stored. Interface utilization (bytes in/out per second) goes through SNMP into Telegraf into VictoriaMetrics (a time-series database compatible with Prometheus). Routing events (BGP session changes, OSPF adjacency updates) go through syslog into Promtail into Loki (a log aggregation system). Flow records (which source IP talked to which destination, how many bytes) go through IPFIX (a standard network flow protocol) into nfacctd. All signals share a common `device` label as the join key.
 
-**A fault injection system with ground-truth labels.** Twelve named fault scenarios can be injected into any target device on demand or in a randomized campaign. Each injection writes a JSON label record containing the scenario type, target device, severity level, `t_start`, `t_impact`, and `lead_time_s`. These label files are the supervision signal for model training.
+**A fault injection system with ground-truth labels.** Twenty-one named fault scenarios can be injected into any target device on demand or in a randomized campaign. Each injection writes a JSON label record containing the scenario type, target device, severity level, `t_start`, `t_impact`, and `lead_time_s`. These label files are the supervision signal for model training.
 
 **A FastAPI data API.** A local HTTP server at port 8000 gives the ML team a clean, versioned interface to all of the above. They can query raw metrics, retrieve log events, download flow records, read fault labels, inspect the network topology as a graph, and — most importantly — download a pre-joined, labeled Parquet file that combines all four signal types into a single DataFrame ready for model training.
 
-**A synthetic dataset and air-gap packaging.** Because 130 containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures to 8.89 million rows while preserving realistic statistical properties. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
+**A synthetic dataset and air-gap packaging.** Because 148 lab containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures to 8.89 million rows while preserving realistic statistical properties. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
 
 ---
 
@@ -58,7 +58,7 @@ Five major components were built:
 
 Enterprise networks are typically organized into three layers, and this simulation faithfully reproduces all three.
 
-**Provider core (P and PE routers).** The backbone of the network consists of eight P routers (P stands for Provider — these are the core switches of the carrier network) and ten PE routers (PE stands for Provider Edge — these sit at the boundary between the carrier and the customer). The P routers form a mesh connected by point-to-point links. The PE routers connect to that mesh and also connect outward to customer sites. Each PE has two P uplinks for MPLS underlay failure coverage (dual-homing). BFD (Bidirectional Forwarding Detection) runs at 300ms detect intervals on all core OSPF links, with bfdd active on every P and PE node. MP-BGP uses a route-reflector design: pe1 and pe2 act as route reflectors; pe3–pe10 are clients. This reduces the BGP session count from a 45-session full mesh to 17 sessions.
+**Provider core (P and PE routers).** The backbone of the network consists of 24 P routers (Provider core switches) organized into 6 regional Points of Presence (POPs) of 4 routers each (p1–p24), and 12 PE routers (Provider Edge — the boundary between the carrier core and the customer). Within each POP the four P routers form a full mesh (C(4,2)=6 intra-POP links) in that POP's own OSPF area (areas 1 through 6), with an IGP link cost of 10. Across POPs, a ring (POP1-2-3-4-5-6-1) plus three chords ([1,4], [2,5], [3,6]) creates 9 inter-POP adjacencies, each realized by two redundant parallel links at OSPF cost 100 in OSPF area 0 (the backbone area). Every inter-POP parallel link pair shares a single SRLG conduit, so a conduit failure drops both links atomically — faithfully modelling a fibre-cut in production. The first two P routers in each POP (e.g., p1 and p2 in POP1) act as Area Border Routers (ABRs), participating in both area 0 and the POP's local area; the last two (e.g., p3, p4) are area-internal and serve as the PE attachment points. The 12 PE routers (pe1–pe12, two per POP) each dual-home to the two PE-facing P routers in their POP. BFD (Bidirectional Forwarding Detection) runs at 300ms detect intervals on all core links, with bfdd active on every P and PE node. MP-BGP uses a route-reflector design: pe1 and pe2 act as route reflectors; pe3–pe12 are RR clients. This avoids a C(12,2)=66-session full mesh, using 21 sessions instead.
 
 **Customer Edge routers (CE routers).** These sit at each customer location: 24 branch offices (small, single uplink), 6 regional hubs (larger, higher capacity), and 4 data center sites (server farms). Each CE connects to exactly one PE.
 
@@ -89,28 +89,32 @@ The three VRFs are:
 ### Topology Diagram
 
 ```
-                          ┌─────── MPLS PROVIDER CORE ───────┐
-                          │                                   │
-                   ┌──────┴──────┐                     ┌─────┴──────┐
-                   │    P1-P8    │◄────── OSPF+LDP ────│  P1-P8     │
-                   │  (8 P-core  │     full mesh       │  (same set)│
-                   │   routers)  │     BFD 300ms       └─────┬──────┘
-                   └──────┬──────┘                           │
-                          │                                   │
-             ┌────────────┼────────────┐                     │
-             │            │            │                      │
-          ┌──┴──┐      ┌──┴──┐      ┌──┴──┐   ← 10 PE routers (RR: pe1+pe2; clients: pe3-pe10)
-          │ PE1 │      │ PE2 │ ...  │PE10 │
-          └──┬──┘      └──┬──┘      └──┬──┘
-             │            │            │
-     ┌───────┼────┐  ┌────┼───┐  ┌────┼───┐
-     │       │    │  │    │   │  │    │   │
-  branch  branch hub  dc  hub  dc branch branch
-  CE1-16   ...  CE1-4 CE1-4 ...  ...   ...  ...
-     │            │
-     │  WireGuard │  (hub-spoke overlay, ~168 tunnels)
-     └────────────┘
-     
+           ┌────────────── MPLS PROVIDER CORE ─────────────────────┐
+           │  24 P-routers · 6 POPs × 4 · multi-area OSPF          │
+           │                                                         │
+           │  Ring: POP1─POP2─POP3─POP4─POP5─POP6─POP1 (area 0)  │
+           │  Chords: POP1─POP4, POP2─POP5, POP3─POP6 (area 0)    │
+           │  Each inter-POP adjacency: 2 parallel links, 1 SRLG   │
+           │                                                         │
+           │  Within each POP (example POP1):                       │
+           │    p1─p2 (ABRs, area 0+1)  p3─p4 (PE-facing, area 1) │
+           │    full mesh C(4,2)=6 links, OSPF cost 10              │
+           │    pe1, pe2 dual-homed to p3, p4                       │
+           │  BFD 300ms · LDP on all P-P and P-PE links             │
+           └────────────────────┬───────────────────────────────────┘
+                                │ dual-homed P→PE (2 uplinks per PE)
+           ┌────────────────────┴───────────────────────────────────┐
+           │  pe1 pe2 pe3 pe4 ... pe12  (MP-BGP VPNv4 RR mesh)    │
+           │  RR servers: pe1+pe2;  RR clients: pe3–pe12            │
+           └────────────────────┬───────────────────────────────────┘
+                                │  eBGP per VRF
+        ┌───────────────────────┴────────────────────────────────┐
+        │   24× ce_branch   6× ce_hub   4× ce_dc   (CE routers) │
+        │   + 78 host containers (one per site+VRF combination)  │
+        └────────────────────────────────────────────────────────┘
+                │  WireGuard SD-WAN overlay (~168 tunnels,
+                │  hub-spoke; adjacent hub-hub links)
+
   Each CE site:
   ┌─────────────────────────────────────────────────┐
   │  CE router (FRR)                                │
@@ -120,15 +124,30 @@ The three VRFs are:
   └─────────────────────────────────────────────────┘
   
   Telemetry flow:
-  FRR routers ──SNMP──► Telegraf ──► VictoriaMetrics (PromQL)
+  FRR routers ──SNMP──► Telegraf ──► VictoriaMetrics (PromQL) [70 SNMP agents]
   FRR syslogs ──────────────────► Loki (log queries)
   Flow records ──IPFIX──► nfacctd ──► SQLite / API
   Controller  ──────────────────► Prometheus metrics
+  OSPF/BGP/MPLS ─ ldp-metrics ──► VictoriaMetrics [ospf_neighbor_state,
+                                    ospf_spf_*, mpls_lsp_count,
+                                    bgp_peer_established; 11 Grafana panels]
                                         │
                                FastAPI Data API :8000
                                         │
                                ML team / model training
 ```
+
+### Realism Mechanisms
+
+The core redesign was specifically motivated by making the lab's failure behavior match real carrier-grade MPLS networks. Several mechanisms work together to achieve this:
+
+- **Multi-area OSPF fault isolation:** A fault in one POP's OSPF area triggers SPF recalculation only within that area; other POPs see only inter-area summary changes, exactly as in production.
+- **IGP-cost traffic engineering:** The 10/100 cost differential (intra/inter-POP) creates preferential intra-POP paths and deterministic ECMP load sharing across inter-POP chords — a real TE construct without RSVP-TE.
+- **Multi-hop cross-POP LSPs:** With 6 POPs arranged in a ring plus chords, a packet from POP1 to POP6 traverses multiple P hops, generating realistic transit telemetry — verified by a live pe1→pe11 path showing metric 140 (>100) and an MPLS label pushed in the forwarding table.
+- **SRLG-correlated fibre cuts:** Each inter-POP parallel link pair shares one SRLG conduit. A single `srlg_cut` scenario drops both links atomically, replicating a physical fibre cut.
+- **Sub-BFD gray failures:** The `gray_failure` scenario injects 0.5–2% loss on a backbone link without ever bringing the link down — the class of soft failures that threshold-based alerting misses entirely.
+- **PE dual-homing + BFD fast reconvergence:** Each PE has two P uplinks; BFD at 300ms ensures reroute happens in under a second when a P-facing link fails.
+- **Poisson chaos campaign:** The randomized fault campaign mixes edge faults, core faults (P node failures, SRLG cuts), catastrophic faults (POP isolation, core partition), and correlated faults — not just repeatable single-fault scripts.
 
 ---
 
@@ -136,15 +155,15 @@ The three VRFs are:
 
 ### FRRouting (FRR) as the Network OS
 
-The competition suggested EVE-NG or GNS3 (graphical network simulators), which would have required running full commercial router operating system images — large, licensed, and difficult to automate. FRR is the open-source routing suite that ships inside many commercial routers and runs natively in a Docker container. It implements real OSPF, BGP, LDP, and MPLS — not simplified simulations. Each FRR container uses about 50–150 MB of RAM, which is why 130 of them fit comfortably on a 108 GB machine. Because FRR supports AgentX (a protocol extension that lets FRR publish its routing tables over SNMP), the same SNMP polling that a real NOC uses against production routers works unchanged against these containers.
+The competition suggested EVE-NG or GNS3 (graphical network simulators), which would have required running full commercial router operating system images — large, licensed, and difficult to automate. FRR is the open-source routing suite that ships inside many commercial routers and runs natively in a Docker container. It implements real OSPF, BGP, LDP, and MPLS — not simplified simulations. Each FRR container uses about 50–150 MB of RAM, which is why all 148 lab containers fit comfortably on a 108 GB / 19-core machine. Because FRR supports AgentX (a protocol extension that lets FRR publish its routing tables over SNMP), the same SNMP polling that a real NOC uses against production routers works unchanged against these containers.
 
 ### Containerlab as the Orchestrator
 
-Containerlab is a tool that does for network containers what Docker Compose does for application containers: it reads a YAML file describing nodes and links, creates Docker containers, wires virtual Ethernet interfaces between them, and tears everything down cleanly. The entire 130-node topology is defined in a single generated `clab.yml` file. Containerlab also provides the `netem` subcommand used by the fault injectors to add delay, jitter, loss, and rate limiting to any link.
+Containerlab is a tool that does for network containers what Docker Compose does for application containers: it reads a YAML file describing nodes and links, creates Docker containers, wires virtual Ethernet interfaces between them, and tears everything down cleanly. The entire 148-node lab topology is defined in a single generated `clab.yml` file. Containerlab also provides the `netem` subcommand used by the fault injectors to add delay, jitter, loss, and rate limiting to any link.
 
 ### Code Generation from a Single Spec
 
-All 90 node configurations — FRR config files, SNMP configurations, WireGuard key pairs, QoS scripts — are generated by a Python + Jinja2 generator (`generator/generate.py`) from a single `topology-spec.yaml` file. The spec file contains only the knobs: router counts, BGP AS numbers, address block bases, VRF definitions. Every IP address, every BGP neighbor statement, every MPLS label range is derived algorithmically. This means scaling the lab (for example, doubling the number of branch sites) requires changing one number in one file. It also means the topology is fully reproducible — given the same spec, you always get the same network.
+All 148 node configurations — FRR config files, SNMP configurations, WireGuard key pairs, QoS scripts — are generated by a Python + Jinja2 generator (`generator/generate.py`) from a single `topology-spec.yaml` file. The spec file contains only the knobs: router counts, BGP AS numbers, address block bases, VRF definitions. Every IP address, every BGP neighbor statement, every MPLS label range is derived algorithmically. This means scaling the lab (for example, doubling the number of branch sites) requires changing one number in one file. It also means the topology is fully reproducible — given the same spec, you always get the same network.
 
 ### Per-VRF Host Separation
 
@@ -152,7 +171,7 @@ Each site has one host container per VRF rather than one shared host. This means
 
 ### VictoriaMetrics + Grafana + Loki
 
-This stack was chosen because it is the de facto standard for cloud-native telemetry and the entire stack runs offline. VictoriaMetrics is a drop-in replacement for Prometheus with better write throughput and smaller disk footprint — important when collecting 30-second interval metrics from 130 nodes. Loki stores logs as compressed, indexed streams without requiring a full-text search index per log line, keeping disk usage manageable. Grafana provides the NOC dashboard view. All three run as Docker containers defined in `telemetry/docker-compose.yml`.
+This stack was chosen because it is the de facto standard for cloud-native telemetry and the entire stack runs offline. VictoriaMetrics is a drop-in replacement for Prometheus with better write throughput and smaller disk footprint — important when collecting 30-second interval metrics from 70 FRR routers (SNMP covers all 70 nodes via 70 Telegraf agent entries). The Grafana NOC Overview dashboard ships 11 panels, covering interface SNMP counters, OSPF adjacency state, OSPF SPF duration, MPLS LSP count, and BGP peers established — each panel maps directly to one or more fault scenario classes. Loki stores logs as compressed, indexed streams without requiring a full-text search index per log line, keeping disk usage manageable. Grafana provides the NOC dashboard view. All three run as Docker containers defined in `telemetry/docker-compose.yml`.
 
 ### FastAPI as the ML Team Contract
 
@@ -196,12 +215,12 @@ The Parquet schema has 21 columns per row. Each row represents one 30-second tim
 | `flow_packets` | float | Total packets in IPFIX flow records |
 | `is_fault` | bool | True if a fault scenario was active at this timestamp |
 | `scenario_id` | string | Unique identifier for the fault run |
-| `fault_type` | string | One of the twelve scenario names |
+| `fault_type` | string | One of the twenty-one scenario names |
 | `severity` | string | `low`, `medium`, or `high` |
 | `lead_time_s` | float | Seconds from fault injection start to `t_impact` |
 | `time_to_impact_s` | float | Seconds remaining until impact at this timestamp |
 
-The `time_to_impact_s` column is the key ML target for a regression model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies which of the twelve fault types is active.
+The `time_to_impact_s` column is the key ML target for a regression model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies which of the twenty-one fault types is active.
 
 **Raw telemetry endpoints** give the team access to the underlying signals if they need to engineer custom features:
 
@@ -259,7 +278,7 @@ This document covers only Phases 1 and 2. The data API is the contract that allo
 Bring up the entire environment — network lab, telemetry stack, and data API — with these three commands:
 
 ```bash
-# 1. Deploy the full 130-container network topology
+# 1. Deploy the full 148-container lab topology
 cd /root/LAB/topology
 sudo containerlab deploy -t clab.yml
 
@@ -293,12 +312,12 @@ cd /root/LAB/topology && sudo containerlab destroy -t clab.yml
 | File | Purpose |
 |------|---------|
 | `/root/LAB/topology-spec.yaml` | Single declarative spec controlling the entire network scale |
-| `/root/LAB/generator/generate.py` | Jinja2 generator: spec → all 130 node configs |
+| `/root/LAB/generator/generate.py` | Jinja2 generator: spec → all 148 node configs; emits topology-meta.json |
 | `/root/LAB/topology/clab.yml` | Generated Containerlab topology file |
 | `/root/LAB/controller/controller.py` | SD-WAN path selection + Prometheus metrics |
 | `/root/LAB/trafficgen/trafficgen.py` | Diurnal traffic simulation |
 | `/root/LAB/faults/orchestrator.py` | Fault injection scheduler + ground-truth label writer |
-| `/root/LAB/faults/injectors.py` | Six fault primitives (netem, BGP flap, policy drift, etc.) |
+| `/root/LAB/faults/injectors.py` | Fault primitives: netem, BGP flap, policy drift, MultiLinkFault, OspfCostShift |
 | `/root/LAB/dataapi/app.py` | FastAPI endpoints — ML team's primary interface |
 | `/root/LAB/dataapi/export.py` | Joins all signals into labeled Parquet |
 | `/root/LAB/dataapi/schema/dataset.schema.json` | JSON Schema for the Parquet format |

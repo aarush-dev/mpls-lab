@@ -12,7 +12,7 @@
 Everything flows in one direction: physical network containers emit signals, a telemetry stack collects and stores them, a data API joins and labels them, and your ML model consumes the result.
 
 ```
-130 Docker containers (FRR routers + hosts)
+148 lab containers (70 FRR routers + 78 hosts)
         |
         | SNMP polls every 30s        → Telegraf → VictoriaMetrics (PromQL)
         | Syslog (BGP events)         → Promtail → Loki (LogQL)
@@ -37,7 +37,7 @@ The join key across every signal is the string `device` (for example `"ce_branch
 # 1. Start the telemetry collectors (VictoriaMetrics, Loki, Grafana, Telegraf, nfacctd)
 cd /root/LAB/telemetry && docker compose up -d
 
-# 2. Deploy the 130-container network lab
+# 2. Deploy the 148-container network lab
 cd /root/LAB && clab deploy -t topology/clab.yml
 
 # 3. Start the data API
@@ -308,7 +308,7 @@ COLUMNS = [
 |--------|------|-------------|
 | `is_fault` | bool | **The label.** True if this row falls inside a known fault window. |
 | `scenario_id` | str (nullable) | Unique ID for this fault instance. Use for GroupShuffleSplit. |
-| `fault_type` | str (nullable) | Which fault: `congestion`, `bgp_flap`, `tunnel_degrade`, `policy_drift`, `node_failure`, `asymmetric_loss`, `brownout` |
+| `fault_type` | str (nullable) | Which fault — 21 types total. Edge tier: `congestion`, `bgp_flap`, `tunnel_degrade`, `policy_drift`, `node_failure`, `asymmetric_loss`, `brownout`. Core tier (Phase 6): `p_node_failure`, `pop_isolation`, `core_partition`, `srlg_cut`, `core_congestion`, `ospf_area_flap`, `path_asymmetry`, `rr_failure`, `gray_failure`. |
 | `severity` | str (nullable) | `low`, `medium`, or `high` — maps to impairment magnitude |
 | `lead_time_s` | float64 | Seconds between fault start and user-visible impact. The **prediction horizon**. E.g. `52.0` means the model had 52 seconds of precursor signal before anyone felt anything. |
 | `time_to_impact_s` | float64 | Seconds from THIS ROW until impact. Positive = before impact (precursor). Zero = impact moment. Negative = post-impact. |
@@ -336,9 +336,11 @@ A model that predicts `is_fault=True` at `ts=10:00:00` (52 seconds early) scores
 
 ## 4. Fault Scenarios — The Training Signal
 
-Seven fault types are implemented: four mandated by the problem statement, three adversarial extras to harden the model.
+21 fault scenarios are implemented across two tiers: 12 edge/transient scenarios (seven original plus five adversarial core-adjacent ones) and 9 new MPLS-core/catastrophic/correlated scenarios added in Phase 6. The campaign Poisson scheduler mixes all tiers ("chaos") except `pop_isolation` and `core_partition`, which are run explicitly as named tests.
 
-### All 7 Fault Types
+**New injectors (Phase 6):** `MultiLinkFault` atomically downs a set of links (used by `pop_isolation`, `core_partition`, `srlg_cut`); `OspfCostShift` raises OSPF cost in one direction (used by `path_asymmetry`). Both live in `faults/injectors.py`.
+
+### Edge / Transient Fault Scenarios
 
 | Scenario | What it simulates in plain English | Primary metric signal |
 |----------|-------------------------------------|----------------------|
@@ -349,6 +351,37 @@ Seven fault types are implemented: four mandated by the problem statement, three
 | `node_failure` | The routing daemon (bgpd) is killed hard. Watchdog restarts it within seconds–minutes. | Interface down + BGP process gap in events |
 | `asymmetric_loss` | Loss only on the outbound direction. Latency stays normal. Hard to diagnose manually. | `tunnel_loss_pct` up, `tunnel_latency_ms` near-normal |
 | `brownout` | Hard rate cap on uplink bandwidth. Queue builds, latency rises, loss comes late. | `tunnel_latency_ms` climb under load |
+
+### MPLS-Core / Catastrophic / Correlated Fault Scenarios (Phase 6)
+
+Link-sets are computed at runtime from `topology/topology-meta.json` — no hardcoded interface names.
+
+| Scenario | What it simulates in plain English | Primary metric signal | Campaign |
+|----------|-------------------------------------|-----------------------|---------|
+| `p_node_failure` | Downs all core interfaces of one P router (full node loss). Traffic reroutes via intra-POP mesh + PE dual-homing. | `ospf_neighbor_state` collapse on that P; LSP reroute | Yes |
+| `pop_isolation` | Downs all inter-POP links of one POP → entire region cut off. Phase-6 named test. | `ospf_neighbor_state` drop for all P in POP; `bgp_vrf_prefix_count` falls | Explicit only |
+| `core_partition` | Cuts the edge cut-set bisecting the backbone ring → two area-0 islands. Named test. | Mass `ospf_neighbor_state` drops across the bisect | Explicit only |
+| `srlg_cut` | Downs one SRLG conduit (both parallel inter-POP links) → correlated multi-link fibre cut. | 4 simultaneous `ospf_neighbor_state` drops | Yes |
+| `core_congestion` | Applies netem delay + loss ramp on a P-P backbone link → all transiting LSPs degrade. | `tunnel_latency_ms` rise cross-POP; `ospf_spf_last_duration_ms` spike | Yes |
+| `ospf_area_flap` | Flaps an inter-POP (area-0) adjacency → SPF churn and inter-area reconvergence. | `ospf_spf_last_duration_ms`/`_executed_ms` jump; brief `ospf_neighbor_state` dip | Yes |
+| `path_asymmetry` | Raises OSPF cost in one direction → forward and return paths diverge. | Asymmetric `tunnel_latency_ms`; subtle, persistent | Yes |
+| `rr_failure` | Kills bgpd on a Route Reflector (pe1 or pe2) → VPNv4 propagation degrades cluster-wide. | `bgp_peer_established` collapse on that RR | Yes |
+| `gray_failure` | 0.5–2% loss on a backbone link, no link-down event → slow, hard-to-detect degradation below BFD threshold. | Gradual `tunnel_loss_pct` creep; no OSPF events | Yes |
+
+**Running a named core test:**
+
+```bash
+# SRLG cut on the POP1-POP2 conduit
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario srlg_cut --target srlg_pop1_2
+
+# Pop isolation — runs as an explicit named test, not in random campaign
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario pop_isolation --target pop3
+
+# Raise cost asymmetrically on ABR p1
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario path_asymmetry --target p1
+```
+
+Target naming: P-node faults → `p1`..`p24`; pop isolation → `pop1`..`pop6`; SRLG cuts → `srlg_pop1_2` etc.; cost/congestion/flap/gray faults → an ABR name (e.g. `p1`); RR failure → `pe1` or `pe2`.
 
 ### Triggering a Single Fault Programmatically
 
@@ -435,6 +468,13 @@ df[df["is_fault"]].groupby("fault_type")["lead_time_s"].agg(["mean", "min", "max
 # policy_drift      3.0   3.0    3.0   (nearly instant)
 # node_failure      1.0   1.0    1.0   (no precursor)
 # asymmetric_loss  30.0  20.0   45.0
+# --- core/catastrophic (Phase 6) ---
+# p_node_failure    5.0   3.0   10.0   (OSPF convergence is the precursor)
+# srlg_cut          2.0   2.0    2.0   (correlated; sudden)
+# core_congestion  45.0  30.0   60.0   (ramp on backbone link)
+# ospf_area_flap    4.0   2.0    8.0   (SPF churn window)
+# rr_failure        3.0   2.0    5.0   (BGP withdraw propagation)
+# gray_failure     90.0  60.0  120.0  (hardest to detect; longest precursor)
 ```
 
 ---
@@ -522,7 +562,7 @@ That is the entire extension. The label schema, the `/datasets` join, and the sy
 
 The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 21-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
 
-**What was built:** 8.89M rows covering 7 days of simulated telemetry across all 34 network devices, with fault episodes injected at calibrated rates. Fault signatures (how much latency rises, how long the precursor lasts) are derived from real lab captures via `calibrate.py`.
+**What was built:** 8.89M rows covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signatures (how much latency rises, how long the precursor lasts) are derived from real lab captures via `calibrate.py`.
 
 ### Generating More Data
 
@@ -667,22 +707,31 @@ pyg_graph.x = X
 
 ## 8. Scaling the Lab
 
-The entire 90-container lab is defined by a single YAML file: `/root/LAB/topology-spec.yaml`. Changing counts there and re-running the generator regenerates all 90 node configs.
+The entire 148-container lab is defined by a single YAML file: `/root/LAB/topology-spec.yaml`. Changing counts there and re-running the generator regenerates all node configs.
 
 ### The Scaling Knobs
 
 ```yaml
 # /root/LAB/topology-spec.yaml
 knobs:
-  p_count:  5          # P-routers (MPLS core, OSPF only)
-  pe_count: 5          # PE-routers (BGP, VPNv4, connects to CEs)
+  # --- MPLS core (redesigned in Phase 6) ---
+  p_count:  24         # P-routers total (6 POPs × 4 per POP)
+  pe_count: 12         # PE-routers total (2 per POP, dual-homed)
+  pop_count: 6         # Number of geographic POPs
+  p_per_pop: 4         # P routers per POP (intra-POP full mesh = C(4,2)=6 links)
+  multi_area: true     # Multi-area OSPF (each POP = area 1..6; inter-POP = area 0)
+  igp_cost_intra: 10   # OSPF cost for intra-POP P-P links
+  igp_cost_inter: 100  # OSPF cost for inter-POP (area-0) links
+  inter_pop_redundancy: 2   # Parallel links per inter-POP adjacency (SRLG-paired)
+  inter_pop_chords: [[1,4],[2,5],[3,6]]  # Extra backbone chords beyond the ring
 
+  # --- Edge (unchanged) ---
   branch_count: 16     # Branch sites (small, CORP+VOICE only)
   hub_count:    4      # Hub sites (CORP+VOICE+GUEST, WireGuard hubs)
   dc_count:     4      # DC sites (CORP+VOICE+GUEST, WireGuard spokes)
 ```
 
-Host count is derived automatically: `branch * 2 + (hub + dc) * 3 = 56`. Total containers = `p + pe + branch + hub + dc + hosts = 90`.
+Total lab containers: 70 FRR nodes (24 P + 12 PE + 34 CE) + 78 host containers = **148**. Plus 9 telemetry/infra containers (~157 total).
 
 **What the numbers mean for your ML dataset:**
 
@@ -690,7 +739,7 @@ Host count is derived automatically: `branch * 2 + (hub + dc) * 3 = 56`. Total c
 |--------|------------------|
 | `branch_count: 32` | 2x more branch CE devices, 2x more tunnel metrics, 2x more fault targets |
 | `hub_count: 8` | More hub concentrators = more WireGuard tunnels per spoke |
-| `pe_count: 10` | Larger MPLS core; PE-PE BGP sessions scale as C(n,2) |
+| `pe_count: 12` | 12 PE routers (2 per POP, dual-homed to the 2 PE-facing P in their POP). Route Reflectors pe1+pe2 serve pe3–pe12 as RR clients — 21 iBGP sessions instead of 66 in a full mesh (C(12,2)). |
 
 **After changing knobs**, regenerate configs and redeploy:
 
@@ -700,6 +749,10 @@ python3 generator/generate.py          # reads topology-spec.yaml, writes topolo
 clab destroy -t topology/clab.yml      # tear down old lab
 clab deploy -t topology/clab.yml       # bring up new lab
 ```
+
+The generator now emits two topology files: `topology/clab.yml` (Containerlab node definitions and link wiring) and `topology/topology-meta.json` (POP-structured metadata consumed by the fault orchestrator and the data API). `topology-meta.json` contains: `pop_count`, `p_per_pop`, `multi_area`, `pops` (P nodes per POP), `abrs` (the 12 ABR node names), `pe_pop` (PE-to-POP mapping), `p_core_ifaces` (per-P core interface list), `srlgs` (shared-risk link groups), `inter_pop_links`, and `pop_inter_links`. Fault scenarios like `srlg_cut` and `pop_isolation` read this file to resolve their link-sets at runtime — no hardcoded interface names.
+
+The `frr.conf.j2` template was extended to emit per-interface OSPF configuration: `ip ospf area {{link.area}}` and `ip ospf cost {{link.ospf_cost}}` are stamped on every core link according to whether it is intra-POP (area K, cost 10) or inter-POP (area 0, cost 100). Loopbacks get `ip ospf area {{loopback_area}}`. ABRs carry two area memberships (area 0 and their POP's area).
 
 ### Adding a New VRF
 
@@ -756,6 +809,23 @@ df_loss = vm_range('sdwan_tunnel_loss_pct')
 
 # 5. Cross-site traffic volume (aggregate)
 df_flows = vm_range('sum by (device) (rate(interface_ifHCInOctets[60s]))')
+
+# --- MPLS-core / OSPF telemetry (Phase 6 sidecar: noc-ldp-metrics) ---
+
+# 6. OSPF neighbor state — 1=Full, 0=not (P + PE, ~156 series)
+#    Drops signal p_node_failure, srlg_cut, pop_isolation events
+df_ospf = vm_range('ospf_neighbor_state')
+
+# 7. OSPF SPF computation duration — spikes during ospf_area_flap, core_congestion
+df_spf = vm_range('ospf_spf_last_duration_ms')
+
+# 8. MPLS LSP (label forwarding entry) count per P/PE node
+#    Drops when an LSP can't be established; ~107 entries per node normally
+df_lsp = vm_range('mpls_lsp_count')
+
+# 9. BGP peers in Established state per PE
+#    RR pe1/pe2 normally show ~22 peers; rr_failure drives this to 0
+df_bgp_peer = vm_range('bgp_peer_established')
 ```
 
 ### Querying Loki for BGP Events Around a Fault
@@ -1009,10 +1079,10 @@ Recommended action: [runbook resolution section]
 |--------|---------------|--------|
 | `is_fault` precision/recall | Standard sklearn metrics | >0.85 precision, >0.80 recall |
 | Mean lead time at prediction | `time_to_impact_s` at first True prediction per incident | >30s across all scenarios |
-| Per-scenario recall | Separate metrics per `fault_type` | All 7 types >0.70 |
+| Per-scenario recall | Separate metrics per `fault_type` | All 21 types >0.70 |
 | Copilot accuracy | Human evaluation of runbook grounding | Zero hallucinated device names |
 
-The hardest scenarios to predict early are `bgp_flap` (lead_time=2s) and `node_failure` (lead_time=1s). Acceptable to catch these post-impact. The highest-value early predictions are `brownout` (lead_time=55s) and `congestion` (lead_time=52s).
+The hardest scenarios to predict early are `bgp_flap` (lead_time=2s), `node_failure` (lead_time=1s), `srlg_cut` (lead_time=2s), and `rr_failure` (lead_time=3s). Acceptable to catch these post-impact. The highest-value early predictions are `brownout` (lead_time=55s), `congestion` (lead_time=52s), `core_congestion` (~45s), and `gray_failure` (up to 120s — long precursor but very weak signal).
 
 ---
 
@@ -1025,9 +1095,10 @@ The hardest scenarios to predict early are `bgp_flap` (lead_time=2s) and `node_f
 | `/root/LAB/dataapi/sources.py` | Data access: VM, Loki, flows, labels, topology |
 | `/root/LAB/dataapi/export.py` | Join logic: produces labeled Parquet |
 | `/root/LAB/faults/orchestrator.py` | Fault scheduler + label writer |
-| `/root/LAB/faults/injectors.py` | Fault primitives: NetemImpair, BgpFlap, PolicyDrift, etc. |
+| `/root/LAB/faults/injectors.py` | Fault primitives: NetemImpair, BgpFlap, PolicyDrift, MultiLinkFault, OspfCostShift, etc. |
 | `/root/LAB/faults/labels/labels.jsonl` | Ground truth written by each fault run |
 | `/root/LAB/synthetic/calibrate.py` | Derives profile.json from real Parquet |
+| `/root/LAB/topology/topology-meta.json` | POP metadata (ABRs, SRLGs, inter-POP links) emitted by generator; consumed by fault orchestrator and data API |
 | `/root/LAB/synthetic/generate.py` | Generates 8.89M-row synthetic dataset |
 | `/root/LAB/synthetic/profile.json` | Calibration parameters (written by calibrate.py) |
 | `/root/LAB/ragcorpus/` | Runbooks + topology map for LLM RAG retrieval |

@@ -39,8 +39,9 @@ python3 orchestrator.py --scenario congestion --target ce_branch1 --dry-run   # 
 > PYTHONPATH=/root/LAB python3 orchestrator.py --scenario mpls_underlay_failure --target p1
 > ```
 
-`--target` is a **device name** (node): `p1..p3`, `pe1..pe3`,
-`ce_branch1..4`, `ce_hub1..2`, `ce_dc1..2`. Severity ∈ `low|medium|high`
+`--target` is a **device name** (node): `p1..p24`, `pe1..pe12`,
+`ce_branch1..4`, `ce_hub1..2`, `ce_dc1..2`; for POP-scoped faults use
+`pop1..pop6`; for SRLG faults use e.g. `srlg_pop1_2`. Severity ∈ `low|medium|high`
 (scales impairment magnitude). `--duration` is total seconds.
 
 ---
@@ -97,7 +98,12 @@ must predict within.
 ## Scenarios
 
 The **4 mandated** scenarios cover the signals the PLAN names, plus **3
-adversarial extras** and **5 extended scenarios** — **12 total**.
+adversarial extras**, **5 extended scenarios**, and **9 new core/catastrophic/correlated
+scenarios** added in Phase 6 — **21 total**. The 9 new scenarios resolve all
+their link-sets and node identifiers from `topology/topology-meta.json` at runtime
+(no hardcoded interface names). The ground-truth label schema is **unchanged**;
+catastrophic core faults set `device` to a real epicenter node (e.g. the specific
+P router that failed or the POP ABR at the cut boundary).
 
 | scenario | mechanism (native tool) | target | `t_impact` | expected telemetry signature |
 |----------|------------------------|--------|-----------|------------------------------|
@@ -113,6 +119,15 @@ adversarial extras** and **5 extended scenarios** — **12 total**.
 | `hub_spoke_congest` | netem **delay+jitter+loss ramp** on hub CE uplink (eth1) | `ce_hub*` | vm_threshold (`sdwan_tunnel_latency_ms`) | hub uplink saturates; all spoke tunnels routed through this hub show rising latency |
 | `bgp_cascade` | `vtysh clear bgp *` repeated N times (severity scales count, 8 s gaps) | `ce_hub*`/`pe*` | vm_threshold (`sdwan_path_changes_total`) | repeated session clears; multiple path-switches; `sdwan_path_changes_total` increments |
 | `controller_drift` | HTTP POST to SD-WAN controller `/fault/drift` (raises latency threshold multiplier) | `ce_*` (site) | modelled | controller suppresses failover for the site; `sdwan_controller_drift_active` rises; clears via `/fault/drift/clear` |
+| `p_node_failure` | `MultiLinkFault` brings down **all** core interfaces of one P router atomically | `p1..p24` | modelled (+1 s) | `ospf_neighbor_state` drops to 0 for all peers of that node; traffic reroutes via mesh + PE dual-homing; `mpls_lsp_count` shifts on neighbours |
+| `pop_isolation` | `MultiLinkFault` cuts all inter-POP links of one POP → region isolated | `pop1..pop6` | modelled (+2 s) | all inter-area `ospf_neighbor_state` = 0 for the POP; PE routes to the isolated region withdraw; named Phase-6 test (excluded from Poisson campaign) |
+| `core_partition` | cuts the ring edge cut-set bisecting the backbone → two area-0 islands | `pop1` (canonical) | modelled (+2 s) | area-0 becomes split; inter-area IA routes on the cut side disappear; backbone reconverges around remaining chords; named test only |
+| `srlg_cut` | `MultiLinkFault` brings down both links in one SRLG conduit simultaneously | `srlg_pop1_2` etc. | modelled (+1 s) | correlated dual-link drop; OSPF floods two LSA removals at once; reroutes around the broken adjacency |
+| `core_congestion` | netem delay+loss **ramp** on a P-P backbone link (via `NetemImpair`) | ABR e.g. `p1` | vm_threshold (`ospf_neighbor_state`) | all LSPs transiting that link degrade; latency climbs on cross-POP flows; no link-down event |
+| `ospf_area_flap` | flap an inter-POP area-0 adjacency (`LinkFlap`) repeatedly | ABR e.g. `p1` | vm_threshold (`ospf_spf_last_duration_ms`) | repeated SPF runs (`ospf_spf_last_executed_ms` jumps); inter-area reconvergence churn; ECMP path oscillation |
+| `path_asymmetry` | `OspfCostShift` raises OSPF cost in one direction only | ABR e.g. `p2` | modelled (+1 s) | forward/return paths diverge; asymmetric latency visible in tunnel metrics; traceroute-level asymmetry |
+| `rr_failure` | `kill -9 bgpd` on a route reflector (pe1 or pe2); watchfrr respawns | `pe1` / `pe2` | modelled (+1 s) | `bgp_peer_established` collapses cluster-wide; VPNv4 prefix propagation degrades until RR restarts; covers all 22 RR clients |
+| `gray_failure` | netem 0.5–2% loss on a backbone P-P link, NO `link-down` event | ABR e.g. `p5` | vm_threshold (`ospf_neighbor_state` or tunnel loss) | sub-BFD loss; BFD stays up; packets drop silently; hard-to-detect; `gray_failure` label distinguishes it from hard failures |
 
 ### Injectors (`injectors.py`)
 
@@ -130,6 +145,8 @@ tools only:
 - `PolicyDrift` — inject/remove a CE VRF route-map altering local-preference.
 - `MplsUnderlayFailure` — `ip link set <iface> down/up` on a P-router core interface.
 - `LdpSessionFlap` — `vtysh clear mpls ldp neighbor <ip>` N times with a configurable gap.
+- `MultiLinkFault` — brings down (or restores) a **set** of interfaces atomically by calling `LinkFlap` on each in sequence with negligible delay. Used by `p_node_failure` (all ifaces of a P router), `pop_isolation` (all inter-POP links of a POP), `core_partition`, and `srlg_cut` (both SRLG-shared links). The interface list is resolved from `topology-meta.json` at scenario start.
+- `OspfCostShift` — issues `vtysh -c "interface <iface>" -c "ip ospf cost <N>"` to raise the OSPF cost on one direction of a P-P link. Revert restores the original cost. Used by `path_asymmetry` to split forward/return paths without triggering a link-down.
 - `_DriftInjector` — inline injector (no extra class file); calls the controller HTTP API:
   - **apply**: `POST http://172.20.20.56/fault/drift` `{"site": ..., "latency_threshold_mult": N, "ttl_s": T}`
   - **revert**: `POST http://172.20.20.56/fault/drift/clear` `{"site": ...}`

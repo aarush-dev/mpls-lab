@@ -1,137 +1,350 @@
 {
-  "uid": "noc-overview",
-  "title": "NOC Overview",
-  "tags": ["noc", "sdwan", "phase2"],
-  "timezone": "utc",
-  "schemaVersion": 39,
-  "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" },
-  "templating": {
-    "list": [
-      {
-        "name": "device",
-        "type": "query",
-        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-        "query": "label_values(interface_ifHCInOctets, device)",
-        "includeAll": true,
-        "multi": true,
-        "current": { "text": "All", "value": "$__all" }
-      }
-    ]
-  },
-  "panels": [
-    {
-      "id": 1,
-      "title": "Interface RX throughput (bps)",
-      "type": "timeseries",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": { "defaults": { "unit": "bps" } },
-      "targets": [
-        {
-          "expr": "rate(interface_ifHCInOctets{device=~\"$device\"}[5m]) * 8",
-          "legendFormat": "{{device}} {{interface}}"
-        }
-      ]
+ "uid": "noc-overview",
+ "title": "NOC Overview",
+ "tags": [
+  "noc",
+  "sdwan",
+  "phase2"
+ ],
+ "timezone": "utc",
+ "schemaVersion": 39,
+ "refresh": "30s",
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "device",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "victoriametrics"
     },
-    {
-      "id": 2,
-      "title": "Interface TX throughput (bps)",
-      "type": "timeseries",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": { "defaults": { "unit": "bps" } },
-      "targets": [
-        {
-          "expr": "rate(interface_ifHCOutOctets{device=~\"$device\"}[5m]) * 8",
-          "legendFormat": "{{device}} {{interface}}"
-        }
-      ]
-    },
-    {
-      "id": 3,
-      "title": "SD-WAN tunnel latency (ms)",
-      "type": "timeseries",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": { "defaults": { "unit": "ms" } },
-      "targets": [
-        {
-          "expr": "sdwan_tunnel_latency_ms",
-          "legendFormat": "{{tunnel}} -> {{hub}}"
-        }
-      ]
-    },
-    {
-      "id": 4,
-      "title": "SD-WAN tunnel loss (%)",
-      "type": "timeseries",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": { "defaults": { "unit": "percent" } },
-      "targets": [
-        {
-          "expr": "sdwan_tunnel_loss_pct",
-          "legendFormat": "{{tunnel}} -> {{hub}}"
-        }
-      ]
-    },
-    {
-      "id": 5,
-      "title": "MPLS LDP session state",
-      "type": "timeseries",
-      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": { "defaults": { "min": 0, "max": 5 } },
-      "options": {},
-      "targets": [
-        {
-          "expr": "mpls_ldp_session_state",
-          "legendFormat": "{{device}} → {{peer}}"
-        }
-      ]
-    },
-    {
-      "id": 6,
-      "title": "BGP VRF prefix count per PE",
-      "type": "timeseries",
-      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": { "defaults": {} },
-      "options": {},
-      "targets": [
-        {
-          "expr": "bgp_vrf_prefix_count",
-          "legendFormat": "{{device}} {{vrf}}"
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "title": "Controller drift active",
-      "type": "stat",
-      "gridPos": { "x": 0, "y": 26, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "thresholds": {
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] }
-      },
-      "targets": [
-        {
-          "expr": "sum(sdwan_controller_drift_active)",
-          "legendFormat": "drifting sites"
-        }
-      ]
+    "query": "label_values(interface_ifHCInOctets, device)",
+    "includeAll": true,
+    "multi": true,
+    "current": {
+     "text": "All",
+     "value": "$__all"
     }
+   }
   ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "title": "Interface RX throughput (bps)",
+   "type": "timeseries",
+   "gridPos": {
+    "h": 9,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bps"
+    }
+   },
+   "targets": [
+    {
+     "expr": "rate(interface_ifHCInOctets{device=~\"$device\"}[5m]) * 8",
+     "legendFormat": "{{device}} {{interface}}"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "title": "Interface TX throughput (bps)",
+   "type": "timeseries",
+   "gridPos": {
+    "h": 9,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bps"
+    }
+   },
+   "targets": [
+    {
+     "expr": "rate(interface_ifHCOutOctets{device=~\"$device\"}[5m]) * 8",
+     "legendFormat": "{{device}} {{interface}}"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "title": "SD-WAN tunnel latency (ms)",
+   "type": "timeseries",
+   "gridPos": {
+    "h": 9,
+    "w": 12,
+    "x": 0,
+    "y": 9
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ms"
+    }
+   },
+   "targets": [
+    {
+     "expr": "sdwan_tunnel_latency_ms",
+     "legendFormat": "{{tunnel}} -> {{hub}}"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "title": "SD-WAN tunnel loss (%)",
+   "type": "timeseries",
+   "gridPos": {
+    "h": 9,
+    "w": 12,
+    "x": 12,
+    "y": 9
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent"
+    }
+   },
+   "targets": [
+    {
+     "expr": "sdwan_tunnel_loss_pct",
+     "legendFormat": "{{tunnel}} -> {{hub}}"
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "title": "MPLS LDP session state",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 18,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "max": 5
+    }
+   },
+   "options": {},
+   "targets": [
+    {
+     "expr": "mpls_ldp_session_state",
+     "legendFormat": "{{device}} \u2192 {{peer}}"
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "title": "BGP VRF prefix count per PE",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 12,
+    "y": 18,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {}
+   },
+   "options": {},
+   "targets": [
+    {
+     "expr": "bgp_vrf_prefix_count",
+     "legendFormat": "{{device}} {{vrf}}"
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "title": "Controller drift active",
+   "type": "stat",
+   "gridPos": {
+    "x": 0,
+    "y": 26,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "expr": "sum(sdwan_controller_drift_active)",
+     "legendFormat": "drifting sites"
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "title": "OSPF adjacency state (Full=1)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "max": 1
+    }
+   },
+   "options": {},
+   "targets": [
+    {
+     "expr": "ospf_neighbor_state",
+     "legendFormat": "{{device}} \u2192 {{peer}}"
+    }
+   ]
+  },
+  {
+   "id": 9,
+   "title": "OSPF SPF last duration (ms)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 12,
+    "y": 30,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    }
+   },
+   "options": {},
+   "targets": [
+    {
+     "expr": "ospf_spf_last_duration_ms",
+     "legendFormat": "{{device}}"
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "title": "MPLS LSP count (forwarding entries)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 38,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    }
+   },
+   "options": {},
+   "targets": [
+    {
+     "expr": "mpls_lsp_count",
+     "legendFormat": "{{device}}"
+    }
+   ]
+  },
+  {
+   "id": 11,
+   "title": "BGP peers Established (iBGP/VPNv4)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 12,
+    "y": 38,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "min": 0
+    }
+   },
+   "options": {},
+   "targets": [
+    {
+     "expr": "bgp_peer_established",
+     "legendFormat": "{{device}}"
+    }
+   ]
+  }
+ ]
 }

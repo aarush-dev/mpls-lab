@@ -44,7 +44,25 @@ A router at the edge of the provider network that both understands MPLS labels A
 The protocol routers use to agree on which labels mean what paths. Imagine two routers need to route traffic via a pre-computed path: they must agree that "label 100 = path via node X." LDP runs between adjacent routers and builds the label mappings so that when a packet tagged with label 100 arrives, everyone knows what to do with it. In this lab, LDP runs on all core P-P and P-PE links.
 
 **LSP (Label Switched Path)**  
-The pre-computed path through the MPLS core that a packet will traverse. An LSP is built using the network topology (discovered by OSPF) and is then labeled (via LDP). Every packet that enters an LSP gets the same treatment — it takes the same route through the core. Multiple LSPs can exist in parallel (e.g., one LSP per customer VRF), each with its own label and its own path. The telemetry tracks tunnel metrics (latency, jitter, loss) per LSP.
+The pre-computed path through the MPLS core that a packet will traverse. An LSP is built using the network topology (discovered by OSPF) and is then labeled (via LDP). Every packet that enters an LSP gets the same treatment — it takes the same route through the core. Multiple LSPs can exist in parallel (e.g., one LSP per customer VRF), each with its own label and its own path. The telemetry tracks tunnel metrics (latency, jitter, loss) per LSP. In this lab each P node carries approximately 107 MPLS forwarding entries, monitored via `mpls_lsp_count`.
+
+**POP (Point of Presence)**  
+A geographic concentration of provider core routers that represents a single network region. This lab has 6 POPs; each POP contains 4 P routers (intra-POP full mesh, OSPF area K, cost 10) and 2 PE routers (dual-homed to the 2 PE-facing P routers in that POP). POPs are interconnected by an inter-POP backbone ring plus 3 chords, all in OSPF area 0 with cost 100. POP boundaries are the key fault-isolation domain: a `pop_isolation` fault cuts an entire region, while intra-POP faults stay local.
+
+**OSPF area**  
+A subdivision of the OSPF network within which all routers share identical topology knowledge (an LSDB). Routers in different areas only see summary routes exchanged via ABRs. Area 0 (the backbone area) connects all other areas; non-backbone areas must touch area 0 through an ABR. In this lab each POP is one OSPF area (1–6) and the inter-POP backbone is area 0. Per-area OSPF isolates SPF computation: a failure inside one POP's area does not trigger full SPF recalculation in all other areas.
+
+**ABR (Area Border Router)**  
+A router that is a member of two or more OSPF areas simultaneously — it maintains an LSDB for each area and advertises summary routes between them. In this lab, the first 2 P routers per POP are ABRs: p1+p2 (POP1), p5+p6 (POP2), p9+p10 (POP3), p13+p14 (POP4), p17+p18 (POP5), p21+p22 (POP6). Each ABR runs in both area 0 (inter-POP) and its POP's area K. The remaining 2 P routers per POP (e.g. p3+p4 in POP1) are pure intra-area (PE-facing) internal routers. ABRs are the primary targets for `ospf_area_flap` and `path_asymmetry` fault scenarios.
+
+**IGP cost / IGP metric**  
+An administrative weight assigned to each link that OSPF uses when computing shortest paths (via Dijkstra's algorithm). A lower cost means a more preferred path. In this lab, intra-POP P-P links carry cost 10 and inter-POP (area-0) links carry cost 100. This ten-to-one ratio ensures traffic prefers staying within a POP if possible, and that cross-POP paths incur a measurable, engineered cost difference — making it possible to steer traffic by raising or lowering costs (`path_asymmetry` fault) and to detect routing changes via `ospf_spf_last_duration_ms`.
+
+**SRLG (Shared Risk Link Group)**  
+A set of links that share a common physical resource (e.g., the same fibre conduit), meaning a single physical failure can take down all links in the group simultaneously. In this lab, each inter-POP adjacency uses 2 parallel links sharing one SRLG conduit; the `srlg_cut` fault scenario downs both links atomically to simulate a fibre cut. SRLGs are catalogued in `topology/topology-meta.json`. Understanding SRLGs is essential for ML models: an SRLG-cut looks like correlated but simultaneous failures on otherwise-unrelated logical links, which is a very different signature from an independent two-link failure.
+
+**ECMP (Equal-Cost Multi-Path)**  
+Forwarding traffic across two or more paths that have the same OSPF total cost. When OSPF computes equal-cost paths, the router distributes load across all of them (typically per-flow hashing). In this lab, PE routers are dual-homed to two PE-facing P routers within their POP; both uplinks have the same IGP cost, so traffic from the PE naturally load-balances across both — verified by the live lab (pe1→pe11 route shows ECMP over both dual-homed uplinks). ECMP improves resilience: if one P router fails, the other still carries traffic without reconvergence.
 
 ---
 
@@ -54,7 +72,7 @@ The pre-computed path through the MPLS core that a packet will traverse. An LSP 
 A logical router inside a single physical router. It's a separate routing table, isolated from other VRFs, so customers don't see each other's routes. In this lab, there are 3 VRFs: **CORP** (business), **VOICE** (real-time), and **GUEST** (untrusted) — each site may have 1–3 VRFs depending on service type (branches have only CORP + VOICE; hubs and datacenters have all 3). Routes in one VRF never leak into another unless explicitly imported. Think of VRFs as separate apartment buildings on the same street — mail (routes) stays within the building.
 
 **MP-BGP (Multi-Protocol BGP)**  
-An extension to BGP that carries not just IPv4 routes but also VPN routes, MPLS labels, and other address families. In this lab, MP-BGP runs between all PE routers in a full mesh (iBGP, internal BGP — all PEs are in AS 65000, with Route Reflectors (pe1+pe2) reducing 45-session full mesh to 17 sessions) and exchanges **VPNv4** routes, the address family that carries customer routes with VPN identifiers so they can be demultiplexed into the right VRF at the destination.
+An extension to BGP that carries not just IPv4 routes but also VPN routes, MPLS labels, and other address families. In this lab, MP-BGP runs between all 12 PE routers (iBGP, internal BGP — all PEs are in AS 65000, with Route Reflectors pe1+pe2 reducing the 66-session full mesh to 21 sessions) and exchanges **VPNv4** routes, the address family that carries customer routes with VPN identifiers so they can be demultiplexed into the right VRF at the destination.
 
 **VPNv4**  
 An address family (a type of route) that carries IPv4 routes WITH a VPN identifier attached. When a customer advertises a route `192.168.1.0/24` in the CORP VRF, the PE sends it as a VPNv4 route (e.g., `192.168.1.0/24 RD 65000:10`) across MP-BGP to other PEs. Other PEs import this route into their CORP VRFs and make it available to their own customers. The RD and RT ensure routes don't collide and get imported into the right place.
@@ -72,13 +90,13 @@ A VPN service that isolates customers at the IP routing layer using VRFs, MPLS l
 The internet's routing protocol. BGP is used in three ways here: (1) **iBGP** between PEs (MP-BGP, for VPN routes), (2) **eBGP** between a CE and its PE (for customer routes), and (3) **iBGP** between branch CEs and the regional hub (over the SD-WAN overlay). BGP is slow to converge but can handle complex policies. The classic BGP failure mode is a "flap" — a route appears, disappears, reappears, making the network unstable.
 
 **iBGP (internal BGP)**  
-BGP peering between routers in the same Autonomous System (AS). In this lab, all PEs are in AS 65000 and peer with each other via iBGP for MP-BGP VPNv4 routes. iBGP requires either a full mesh (every router peers with every other) or a route reflector (a central hub that all others peer to). This lab uses Route Reflectors: pe1+pe2 act as RR servers (cluster-id = their loopback); pe3–pe10 are RR clients that peer only with pe1+pe2 — 17 sessions instead of 45 in a full mesh.
+BGP peering between routers in the same Autonomous System (AS). In this lab, all 12 PEs are in AS 65000 and peer with each other via iBGP for MP-BGP VPNv4 routes. iBGP requires either a full mesh (every router peers with every other) or a route reflector (a central hub that all others peer to). This lab uses Route Reflectors: pe1+pe2 act as RR servers (cluster-id = their loopback); pe3–pe12 are RR clients that peer only with pe1+pe2 — 21 sessions instead of 66 (C(12,2)) in a full mesh.
 
 **eBGP (external BGP)**  
 BGP peering between routers in different ASes. In this lab, each CE is in its own private AS (branch CEs in 65101–65116, hubs in 65201–65204, DCs in 65301–65304) and peers via eBGP with its PE (which is in AS 65000). eBGP allows the customer to advertise routes to the provider and receive routes from the provider, but with natural firewalling — the AS boundary prevents accidental or malicious route injection.
 
 **OSPF (Open Shortest Path First)**  
-A fast link-state routing protocol used inside the provider core to discover the network topology and compute the shortest path between any two routers. All P and PE routers run OSPF in area 0 on their core-facing interfaces and loopbacks. OSPF builds a complete map of the core network and tells LDP how to build LSPs. Unlike BGP, OSPF converges in seconds and is much simpler to operate.
+A fast link-state routing protocol used inside the provider core to discover the network topology and compute the shortest path between any two routers. All P and PE routers run OSPF; the lab uses **multi-area OSPF** — each POP is an independent OSPF area (areas 1–6), and the inter-POP backbone is area 0. Area Border Routers (ABRs) sit at the edge of each POP and advertise inter-area reachability summaries into area 0. Per-link IGP costs differentiate intra-POP links (cost 10) from inter-POP links (cost 100), giving the network an engineered traffic matrix. OSPF builds a complete map of the core and tells LDP how to build LSPs. Unlike BGP, OSPF converges in seconds. See also: **ABR**, **OSPF area**, **IGP cost**.
 
 **CE Router (Customer Edge)**  
 The customer's router that connects to the provider network. It's the first router inside the customer's network. In this lab, every site (branch, hub, DC) has one or more CE routers (actually, logical CE functions inside FRRouting containers). Each CE runs eBGP with its PE, advertising the customer LAN prefixes and receiving the provider's VPN routes. A CE is where QoS (DSCP marking, traffic shaping) is typically applied.
@@ -193,10 +211,10 @@ The common identifier used to link data from different sources. In this lab, the
 ## Group 7: Containerlab & Lab Infrastructure
 
 **Containerlab**  
-A tool that orchestrates Docker containers as network nodes and wires them together with virtual Ethernet cables (veths). Rather than running routers on physical hardware, Containerlab runs them as lightweight containers, making it easy to create large topologies on a single machine. Containerlab reads a YAML file (`clab.yml`) that describes the nodes, links, and images, then uses Docker to spin them up and `ip link` to connect them. In this lab, all 130 nodes (8P + 10PE + 34 CEs + 78 hosts) are Containerlab containers.
+A tool that orchestrates Docker containers as network nodes and wires them together with virtual Ethernet cables (veths). Rather than running routers on physical hardware, Containerlab runs them as lightweight containers, making it easy to create large topologies on a single machine. Containerlab reads a YAML file (`clab.yml`) that describes the nodes, links, and images, then uses Docker to spin them up and `ip link` to connect them. In this lab, all 148 lab containers (24 P + 12 PE + 34 CE + 78 hosts) are Containerlab containers; a further ~9 telemetry/infra containers bring the total to ~157.
 
 **Docker**  
-A container runtime — a lightweight virtualization technology. Each container is an isolated Linux user space with its own filesystem, processes, and network namespace. A Docker image is a template (like a frozen VM disk image) that can be instantiated into many containers. In this lab, the FRR image (`quay.io/frrouting/frr:10.5.1`) is used for 52 router containers; the multitool image is used for 78 host containers. Containers are much lighter than VMs (seconds to boot, MB of RAM per container).
+A container runtime — a lightweight virtualization technology. Each container is an isolated Linux user space with its own filesystem, processes, and network namespace. A Docker image is a template (like a frozen VM disk image) that can be instantiated into many containers. In this lab, the FRR image (`frr-node:0.1`, based on FRR 10.x) is used for 70 router containers (24 P + 12 PE + 34 CE); the multitool image is used for 78 host containers. Containers are much lighter than VMs (seconds to boot, MB of RAM per container).
 
 **FRRouting (FRR)**  
 An open-source routing suite implementing OSPF, BGP, LDP, MPLS, VRF, and a dozen other protocols. FRR runs in user space (not kernel space like traditional routers) and manages the kernel's routing table via netlink. In this lab, FRR is the NOS (network operating system) for all P, PE, and CE routers. Configuration is via files (`frr.conf`, `daemons`) or the `vtysh` CLI.
@@ -245,7 +263,7 @@ The time delta `t_impact - t_start`, in seconds. This is the "warning window" fo
 A signal that appears BEFORE the fault becomes user-visible. For congestion, the precursor is latency and jitter gradually climbing (before the threshold is crossed). For BGP flaps, the precursor might be the control-plane CPU spike (before the adjacency flaps). The ML model's job is to detect precursors and predict impact before `t_impact`. The lead time is the width of the precursor window.
 
 **Scenario**  
-A complete fault episode: inject → wait/perturb → observe → revert. The orchestrator runs scenarios on demand (CLI: `python3 orchestrator.py --scenario congestion --target ce_branch1`). Each scenario is a named fault type (one of 7: congestion, bgp_flap, tunnel_degrade, policy_drift, node_failure, asymmetric_loss, brownout) applied to a specific target (device) with a severity (low/medium/high) and a duration. The scenario is idempotent; running it twice in a row should be safe (injectors have clean `revert()` methods).
+A complete fault episode: inject → wait/perturb → observe → revert. The orchestrator runs scenarios on demand (CLI: `python3 orchestrator.py --scenario congestion --target ce_branch1`). There are 21 named scenarios in two tiers: 12 edge/transient faults (congestion, bgp_flap, tunnel_degrade, policy_drift, node_failure, asymmetric_loss, brownout, plus adversarial extras) and 9 MPLS-core/catastrophic/correlated faults (p_node_failure, pop_isolation, core_partition, srlg_cut, core_congestion, ospf_area_flap, path_asymmetry, rr_failure, gray_failure). Core link-sets are resolved at runtime from `topology-meta.json`. The scenario is idempotent; running it twice in a row should be safe (injectors have clean `revert()` methods).
 
 **is_fault**  
 A boolean label column in the dataset. For each time bucket (e.g., 30-second windows), `is_fault = True` if any scenario was active during that window, `False` otherwise. The ML team uses this column as the target variable: "given the telemetry metrics for time bucket T, predict is_fault[T]." The bucket must overlap the `[t_start, t_end]` window of at least one scenario to be labeled `True`. This is a straightforward binary classification problem.
@@ -278,14 +296,15 @@ An efficient, columnar file format for storing tabular data. Unlike CSV (row-ori
 
 The entire system forms a data pipeline: **network simulation → fault injection → telemetry collection → data export → ML training**. Here's the flow:
 
-**Network simulation** begins with a single YAML file (`topology-spec.yaml`) specifying node counts and site types. A generator (Jinja2 + Python) emits 130 Containerlab node definitions, 52 FRR configs (OSPF/LDP/MP-BGP/VRFs), 78 host configs, ~168 SD-WAN tunnel configs, and QoS rules. Containerlab deploys all 130 containers on a single Linux machine, wiring them with virtual Ethernet veths. The MPLS core (P and PE routers running FRR) comes up with LDP, discovering LSPs. Each site gets isolated VRFs (CORP/VOICE/GUEST), connected via CE routers. The SD-WAN controller (Python service) comes online and monitors tunnel latency/jitter/loss from all CE nodes, publishing decisions to a Prometheus endpoint.
+**Network simulation** begins with a single YAML file (`topology-spec.yaml`) specifying node counts and site types. A generator (Jinja2 + Python) emits 148 Containerlab node definitions, 70 FRR configs (multi-area OSPF/LDP/MP-BGP/VRFs), 78 host configs, ~168 SD-WAN tunnel configs, QoS rules, and `topology/topology-meta.json` (POP/ABR/SRLG metadata for the fault orchestrator). Containerlab deploys all 148 lab containers on a single Linux machine, wiring them with virtual Ethernet veths. The MPLS core (24 P + 12 PE routers running FRR) comes up with multi-area OSPF and LDP, building LSPs across the POP-structured backbone. Each site gets isolated VRFs (CORP/VOICE/GUEST), connected via CE routers. The SD-WAN controller (Python service) comes online and monitors tunnel latency/jitter/loss from all CE nodes, publishing decisions to a Prometheus endpoint.
 
 **Traffic simulation** starts: the trafficgen service (Python + Docker) drives realistic, diurnal flows across the network using `nc` or iperf3, causing interface counters to climb and nfacctd to see flows. Latency and jitter naturally increase as load increases, simulating realistic congestion curves.
 
-**Fault injection** adds the ground truth: the orchestrator (Python, in `faults/`) applies one of 7 fault scenarios (congestion, BGP flap, tunnel degrade, policy drift, node failure, asymmetric loss, brownout) to a chosen device. Injectors use native tools (`tc`/`netem` for delay/loss, `vtysh clear bgp` for flaps, `kill -9` for process crashes, iptables for policy changes). The orchestrator polls VictoriaMetrics to detect when the fault became observable in telemetry, records `t_start`, `t_impact`, `t_end`, and `lead_time`, and writes a label row to `labels.jsonl`.
+**Fault injection** adds the ground truth: the orchestrator (Python, in `faults/`) applies one of 21 fault scenarios — 12 edge/transient faults (congestion, BGP flap, tunnel degrade, policy drift, node failure, asymmetric loss, brownout, and others) plus 9 MPLS-core/catastrophic/correlated faults (p_node_failure, srlg_cut, core_congestion, ospf_area_flap, path_asymmetry, rr_failure, gray_failure, pop_isolation, core_partition). Injectors use native tools (`tc`/`netem` for delay/loss, `vtysh` for OSPF cost changes, `vtysh clear bgp` for flaps, `kill -9` for process crashes, `MultiLinkFault` for atomic multi-link teardown). Core link-sets are resolved from `topology-meta.json` at runtime. The orchestrator polls VictoriaMetrics to detect when the fault became observable in telemetry, records `t_start`, `t_impact`, `t_end`, and `lead_time`, and writes a label row to `labels.jsonl`.
 
 **Telemetry collection** runs continuously:
-- **Telegraf** polls SNMP on all nodes every 30 seconds (interface counters, ARP table, BGP neighbor count) → VictoriaMetrics.
+- **Telegraf** polls SNMP on all 70 nodes every 30 seconds (interface counters, ARP table, BGP neighbor count) → VictoriaMetrics.
+- **noc-ldp-metrics sidecar** (`ldp-metrics.sh`) queries `vtysh` JSON on each P+PE node and exports OSPF and MPLS metrics to VictoriaMetrics: `ospf_neighbor_state` (1=Full, 0=not; ~156 series), `ospf_spf_last_duration_ms`, `ospf_spf_last_executed_ms`, `mpls_lsp_count`, and `bgp_peer_established`.
 - **nfacctd** receives IPFIX records from all CE/PE nodes → aggregates and exports flow summaries → VictoriaMetrics.
 - **Promtail** listens on syslog port 1514, receives BGP/OSPF adjacency events from FRR → Loki.
 - **Controller** publishes Prometheus metrics (tunnel latency/loss/jitter, path decisions) → VictoriaMetrics.
@@ -319,9 +338,9 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ NETWORK SIMULATION (Containerlab + FRR)                                 │
-│  - 8 P routers (OSPF/LDP/BFD, MPLS core, dual-homed PEs)               │
-│  - 10 PE routers (MP-BGP VPNv4, L3VPN, RR: pe1+pe2)                   │
-│  - 80 CE + host containers (3 VRFs: CORP/VOICE/GUEST, SD-WAN overlay)  │
+│  - 24 P routers (multi-area OSPF/LDP, 6 POPs × 4, area-0 backbone)     │
+│  - 12 PE routers (MP-BGP VPNv4, L3VPN, dual-homed; RR: pe1+pe2)        │
+│  - 112 CE + host containers (34 CE, 78 hosts; 3 VRFs: CORP/VOICE/GUEST) │
 └────────────────────┬────────────────────────────────────────────────────┘
                      │
           ┌──────────▼──────────┐
@@ -387,7 +406,7 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 - **faults/README.md** — Fault scenarios, label schema, injector details.
 - **dataapi/schema/** — Parquet schema definitions (columns, types, units).
 - **telemetry/docker-compose.yml** — Telemetry stack (VictoriaMetrics, Grafana, Loki, Telegraf, nfacctd).
-- **DOCS/01_TOPOLOGY_OVERVIEW.md** — Physical/logical topology of the 130-container lab.
+- **DOCS/01_TOPOLOGY_OVERVIEW.md** — Physical/logical topology of the 148-container lab.
 - **DOCS/02_ROUTING_AND_VPNS.md** — MPLS/L3VPN/BGP deep dive.
 - **DOCS/03_TELEMETRY_PIPELINE.md** — Signal flow, schema, query examples.
 - **DOCS/04_FAULT_SCENARIOS.md** — Fault mechanics, precursor signals, expected telemetry.
@@ -398,4 +417,4 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 
 ---
 
-*Generated for the ISRO BAH 2026 air-gapped predictive NOC copilot project. Minimum word count: 1500 words. Updated June 21, 2026.*
+*Generated for the ISRO BAH 2026 air-gapped predictive NOC copilot project. Minimum word count: 1500 words. Updated June 29, 2026 — reflects Phase 6 MPLS-core redesign (24 P / 12 PE / 148 lab containers / 21 fault scenarios).*

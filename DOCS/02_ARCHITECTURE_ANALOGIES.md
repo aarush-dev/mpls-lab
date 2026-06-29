@@ -4,7 +4,7 @@
 
 **See also:** [01 Project Overview](01_PROJECT_OVERVIEW.md) — context and motivation | [05 Technical Glossary](05_TECHNICAL_GLOSSARY.md) — term definitions
 
-If you have ever wondered what the heck "MPLS" or "BGP VPNv4" means and why anyone would run 130 containers to simulate it — this document is for you. Every concept is introduced as something familiar first. The networking jargon comes second, as a label you can attach to the mental model you already built.
+If you have ever wondered what the heck "MPLS" or "BGP VPNv4" means and why anyone would run 148 containers to simulate it — this document is for you. Every concept is introduced as something familiar first. The networking jargon comes second, as a label you can attach to the mental model you already built.
 
 ---
 
@@ -14,16 +14,17 @@ Before diving into individual pieces, here is the whole system in one diagram. R
 
 ```
   ┌──────────────────────────────────────────────────────────────────────┐
-  │                    THE 130-CONTAINER LAB (single Linux host)         │
+  │                    THE 148-CONTAINER LAB (single Linux host)         │
   │                                                                      │
-  │   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐   │
-  │   │  p1    │───│  p2    │───│  p3    │───│  p4    │───│p5..p8  │   │
-  │   │ (MPLS  │   │ core   │   │ core   │   │ core   │   │ core)  │   │
-  │   └───┬────┘   └───┬────┘   └───┬────┘   └───┬────┘   └───┬────┘   │
-  │       │            │            │            │            │          │
-  │   ┌───┴────────────┴────────────┴────────────┴────────────┴────┐    │
-  │   │          pe1  pe2  pe3  ...  pe10  (MP-BGP VPNv4 RR mesh)  │    │
-  │   └───┬──────────────────────────────────────────────────────┬─┘    │
+  │   24 P-routers · 6 POPs × 4 · multi-area OSPF                      │
+  │   Ring: POP1─POP2─POP3─POP4─POP5─POP6─POP1 (area 0, cost 100)    │
+  │   Chords: POP1─POP4, POP2─POP5, POP3─POP6 (area 0)               │
+  │   Intra-POP: full mesh C(4,2)=6, area K, cost 10; ABRs on border   │
+  │   Each inter-POP adjacency: 2 parallel links sharing 1 SRLG conduit│
+  │                                                                      │
+  │   ┌─────────────────────────────────────────────────────────────┐   │
+  │   │    pe1  pe2  pe3  pe4 ... pe12   (MP-BGP VPNv4 RR mesh)    │   │
+  │   └───┬──────────────────────────────────────────────────────┬──┘   │
   │       │  eBGP per VRF                                        │      │
   │  ┌────┴─────────────────────────────────────────────────┐    │      │
   │  │  24x ce_branch  6x ce_hub  4x ce_dc   (CE routers)  │    │      │
@@ -75,9 +76,9 @@ Imagine a metropolitan area: a downtown core, regional hubs, suburban branch off
 
 In our lab:
 
-- **The highway system (P routers — p1 through p8):** Eight routers that form the high-speed core. They only care about moving traffic as fast as possible. They do not know anything about which company the traffic belongs to or where it is ultimately going. They just pass packets forward.
+- **The highway system (P routers — p1 through p24):** Twenty-four routers organized into six regional Points of Presence (POPs), four routers per POP. Within each POP the four P routers form a local mesh (the city's downtown grid), all in that POP's own OSPF area. The six POPs interconnect via a ring plus three diagonal chords (the inter-city motorways), all running in OSPF area 0. P routers know nothing about which company the traffic belongs to; they only look at the MPLS label and forward the packet. Because traffic between distant POPs must traverse multiple P hops through the backbone, the core generates realistic multi-hop transit telemetry — including cross-POP LSPs with real intermediate label swaps.
 
-- **The highway on-ramps (PE routers — pe1 through pe10):** Ten routers that sit at the boundary between the highway system and the customer's private road network. When your company's traffic enters here, the on-ramp stamps it with a label ("this belongs to Company A, destination downtown") and hands it to the highway.
+- **The highway on-ramps (PE routers — pe1 through pe12):** Twelve routers (two per POP) that sit at the boundary between the highway system and the customer's private road network. When your company's traffic enters here, the on-ramp stamps it with a label ("this belongs to Company A, destination downtown") and hands it to the highway. Each PE dual-homes to the two PE-facing P routers in its POP for resilience.
 
 - **The office buildings (CE routers — 24 of them):** Customer Edge routers, one per site. These are the company's own equipment — the building's front door. 16 branch offices, 4 regional hubs, 4 datacenters. Each CE connects to one PE via a private link.
 
@@ -99,15 +100,17 @@ The topology is declared in a single file (`topology-spec.yaml`) with plain nume
 
 ```yaml
 knobs:
-  p_count:      8    # highway core routers
-  pe_count:     10   # on-ramp routers (pe1+pe2 = Route Reflectors)
+  p_count:      24   # highway core routers (6 POPs × 4)
+  pe_count:     12   # on-ramp routers (pe1+pe2 = Route Reflectors)
+  pop_count:    6    # regional Points of Presence
+  p_per_pop:    4    # P routers per POP
   branch_count: 24   # small branch offices
   hub_count:    6    # regional hubs
   dc_count:     4    # datacenters
-# Total containers: 8 + 10 + 34 + 78 = 130
+# Total lab containers: 24 + 12 + 34 + 78 = 148  (~157 with telemetry/infra)
 ```
 
-A Jinja2 generator reads those numbers and automatically derives every IP address, BGP AS number, and config file for all 130 nodes. Change one number, regenerate, redeploy — the whole city resizes.
+A Jinja2 generator reads those numbers and automatically derives every IP address, BGP AS number, and config file for all 148 nodes. Change one number, regenerate, redeploy — the whole city resizes.
 
 ---
 
@@ -161,7 +164,7 @@ In networking terms, this is **MPLS L3VPN** with **MP-BGP VPNv4**:
 - The VRF is like a separate routing table — a completely isolated IP address space. The same IP address can appear in CORP and VOICE without conflict, because they live in different VRFs.
 - **Route Distinguisher (RD):** Every VPN route gets an extra tag prepended to make it globally unique, even if two customers use the same IP range. `65000:10` for CORP, `65000:20` for VOICE, `65000:30` for GUEST.
 - **Route Target (RT):** Controls which VRFs "import" which routes — which trucks are allowed to follow which exit signs. A CORP route is only imported by CORP VRFs at other PE routers.
-- **MP-BGP VPNv4:** The protocol that carries VPN routes between PE routers across the MPLS core. All 10 PE routers exchange VPNv4 prefixes via Route Reflectors: pe1+pe2 act as RR servers; pe3–pe10 are RR clients that peer only with pe1+pe2 — 17 sessions instead of 45 in a full mesh.
+- **MP-BGP VPNv4:** The protocol that carries VPN routes between PE routers across the MPLS core. All 12 PE routers exchange VPNv4 prefixes via Route Reflectors: pe1+pe2 act as RR servers; pe3–pe12 are RR clients that peer only with pe1+pe2 — 21 sessions instead of a C(12,2)=66-session full mesh.
 
 ```
 PE1 VRF CORP: knows 192.168.0.0/24 (branch1) and 192.168.4.0/24 (branch2)...
@@ -197,7 +200,7 @@ That negotiation — "I can reach X, go through me" — plus the policies about 
 
 BGP has two flavors in our lab:
 
-**iBGP (internal BGP):** Sessions between routers within the provider's own network (all in AS 65000). PE routers share VPNv4 routes via Route Reflectors (pe1+pe2 as RR servers, pe3–pe10 as clients) — PE1 tells PE3: "I know how to reach the CORP subnet at branch1."
+**iBGP (internal BGP):** Sessions between routers within the provider's own network (all in AS 65000). PE routers share VPNv4 routes via Route Reflectors (pe1+pe2 as RR servers, pe3–pe12 as clients) — PE1 tells PE3: "I know how to reach the CORP subnet at branch1."
 
 **eBGP (external BGP):** Sessions between different autonomous systems. Each CE router has its own BGP AS number (branch sites: AS 65101–65116, hubs: AS 65201–65204, datacenters: AS 65301–65304). When ce_branch1 (AS 65101) wants to tell the provider's pe1 (AS 65000) about its local subnet, it sends an eBGP advertisement: "I can reach 192.168.0.0/24, come through me."
 
@@ -239,21 +242,21 @@ Think of OSPF as the city's internal street directory — the kind that every ci
 3. Builds a complete map of the entire network.
 4. Independently runs Dijkstra's shortest-path algorithm to find the best path to every destination.
 
-In our lab, OSPF runs in **area 0** (the backbone area) across all P-P and P-PE links. The loopback interfaces (`10.255.x.x/32`) are advertised into OSPF — this matters because BGP sessions between PEs use these loopback addresses as stable identifiers, and OSPF is what makes those loopbacks reachable.
+In our lab, OSPF uses a **multi-area design**. Each POP has its own OSPF area (areas 1 through 6): all intra-POP P-P links and the P-PE links within that POP sit in the POP's local area, with link cost 10. The inter-POP ring and chord links form **OSPF area 0** (the backbone area), each with cost 100. The first two P routers per POP are Area Border Routers (ABRs) — they participate in both area 0 and the POP's local area, summarizing routes across the boundary. This means a fault confined to one POP causes SPF recalculation only within that area; other POPs see only inter-area summary changes, bounding reconvergence blast radius. Loopback interfaces (`10.255.x.x/32`) are advertised into OSPF, making PE-to-PE BGP sessions reachable across areas.
 
 ```
-OSPF Area 0 participants:
-  p1  (10.255.1.1/32)
-  p2  (10.255.1.2/32)
-  p3  (10.255.1.3/32)
-  p4  (10.255.1.4/32)
-  p5  (10.255.1.5/32)
-  p6  (10.255.1.6/32)
-  p7  (10.255.1.7/32)
-  p8  (10.255.1.8/32)
-  pe1 (10.255.2.1/32) ─── RR server; pe3–pe10 peer here (17 iBGP sessions total)
-  pe2 (10.255.2.2/32) ─── RR server
-  ...
+OSPF multi-area assignment:
+  area 0  (backbone):  ABRs p1-p2, p5-p6, p9-p10, p13-p14, p17-p18, p21-p22
+                       inter-POP ring + chord links, cost 100
+  area 1  (POP1):      p1,p2 (ABRs), p3,p4 (PE-facing); pe1,pe2  ← intra cost 10
+  area 2  (POP2):      p5,p6 (ABRs), p7,p8; pe3,pe4
+  area 3  (POP3):      p9,p10 (ABRs), p11,p12; pe5,pe6
+  area 4  (POP4):      p13,p14 (ABRs), p15,p16; pe7,pe8
+  area 5  (POP5):      p17,p18 (ABRs), p19,p20; pe9,pe10
+  area 6  (POP6):      p21,p22 (ABRs), p23,p24; pe11,pe12
+
+  pe1 (10.255.2.1/32) ─── RR server; pe3–pe12 are RR clients
+  pe2 (10.255.2.2/32) ─── RR server  (C(12,2)=66 full mesh avoided; 21 sessions)
 ```
 
 OSPF convergence (time to re-route around a failed link) is typically under 10 seconds for small topologies like ours. It is the foundation that everything else sits on: no OSPF → no LDP reachability → no MPLS paths → no VPNv4 → nothing works.
@@ -356,6 +359,9 @@ Our network lab has exactly the same structure. Four separate sensor systems fee
 │  → pushes to VictoriaMetrics (172.20.20.50:8428)                   │
 │  Metric names: interface_ifHCInOctets, interface_ifHCOutOctets,    │
 │                interface_ifOperStatus                               │
+│  + ldp-metrics sidecar (vtysh JSON → VictoriaMetrics, 70 nodes):  │
+│    ospf_neighbor_state, ospf_spf_last_duration_ms,                 │
+│    mpls_lsp_count, bgp_peer_established  [11 Grafana panels total] │
 │                                                                     │
 │  STREAM 2: Syslog (router log messages)                             │
 │  Routers emit log lines: "BGP: %ADJCHANGE: neighbor X Down"        │
@@ -424,7 +430,7 @@ tc qdisc add dev eth1 root netem delay 56ms 14ms loss 4.2%
 # This makes the router's uplink behave as if it is suffering from congestion
 ```
 
-Seven fault scenarios are implemented:
+Twenty-one fault scenarios are implemented — the original seven edge-layer scenarios plus nine new core and catastrophic scenarios added in the MPLS core redesign:
 
 | Fault Type | What it simulates | Signature in telemetry |
 |---|---|---|
@@ -435,6 +441,15 @@ Seven fault scenarios are implemented:
 | `node_failure` | BGP daemon killed (watchfrr auto-restarts it) | Brief prefix withdrawal then recovery |
 | `asymmetric_loss` | Loss only on egress direction, not ingress | Loss high, latency near-normal — hard to diagnose |
 | `brownout` | Hard bandwidth cap (queue builds but no netem delay) | Queueing latency climbs, loss appears late |
+| `p_node_failure` | All interfaces of one P router go down | ospf_neighbor_state drops for all 6 POP peers; MPLS LSP reroutes via dual-homing |
+| `pop_isolation` | All inter-POP links of one POP cut | POP becomes unreachable; inter-area OSPF summaries withdrawn |
+| `core_partition` | Edge cut-set bisects the area-0 backbone ring | Two area-0 islands; cross-partition VPNv4 routes lost |
+| `srlg_cut` | One SRLG conduit fails → both parallel links drop atomically | ospf_neighbor_state drops on both links simultaneously (correlated) |
+| `core_congestion` | Delay + loss ramp on a P-P backbone link | All transiting LSPs degrade; mpls_lsp_count stable but throughput drops |
+| `ospf_area_flap` | Inter-POP area-0 adjacency flap | ospf_spf_last_duration_ms spikes; inter-area reconvergence visible |
+| `path_asymmetry` | OSPF cost raised in one direction only | Forward and return LSP paths diverge; asymmetric loss/latency |
+| `rr_failure` | BGP daemon killed on a Route Reflector (pe1 or pe2) | bgp_peer_established collapses cluster-wide; VPNv4 propagation stalls |
+| `gray_failure` | 0.5–2% loss on a backbone link, no link-down event | Slow throughput degradation; BFD stays up; only telemetry rates reveal it |
 
 **The ground-truth label schema** — what the ML team trains on:
 
@@ -455,7 +470,7 @@ Seven fault scenarios are implemented:
 
 The `lead_time` field is the prize: it tells the ML model how many seconds in advance the early warning signals appeared before the fault became user-visible. The goal is to detect faults *before* `t_impact` — during the `lead_time` window — which is why columns like `lead_time_s` and `time_to_impact_s` appear in the final dataset.
 
-The orchestrator also supports a **campaign mode** — a Poisson-arrival process that fires faults randomly across all 24 CE nodes with realistic inter-arrival gaps, creating a realistic mix of concurrent and sequential incidents for training:
+The orchestrator also supports a **campaign mode** — a Poisson-arrival process that mixes edge faults (CE nodes), core faults (P node failures, SRLG cuts), and catastrophic faults (RR failure, POP isolation) with realistic inter-arrival gaps, creating a "chaos" mix of concurrent and sequential incidents for training:
 
 ```python
 # from faults/orchestrator.py

@@ -138,6 +138,34 @@ Start Docker; install `iproute2` + **Containerlab**; probe kernel MPLS support �
 
 ---
 
+## Phase 1 / 2 / 6 extensions (post-initial-build)
+
+The following extensions were applied after the initial Phases 1–2 build and are now
+integrated into the canonical lab:
+
+- **24-P POP multi-area core (Phase 1 extension):** the original 8-P full-mesh core
+  was replaced with a POP-structured multi-area OSPF backbone: 24 P routers in
+  6 POPs × 4, with a ring+chord inter-POP backbone (area 0, cost 100) and intra-POP
+  meshes (area 1..6, cost 10). PE count grew from 10 to 12 (2 per POP, dual-homed).
+  New generator knobs: `pop_count: 6`, `p_per_pop: 4`, `multi_area: true`,
+  `igp_cost_intra: 10`, `igp_cost_inter: 100`, `inter_pop_redundancy: 2`,
+  `inter_pop_chords: [[1,4],[2,5],[3,6]]`. Total lab containers: **148** (70 FRR +
+  78 hosts) + 9 telemetry/infra = ~157. The generator now also emits
+  `topology/topology-meta.json` consumed by faults and dataapi.
+
+- **9 new core/catastrophic/correlated fault scenarios (Phase 6 extension):** added
+  `p_node_failure`, `pop_isolation`, `core_partition`, `srlg_cut`, `core_congestion`,
+  `ospf_area_flap`, `path_asymmetry`, `rr_failure`, and `gray_failure`, bringing the
+  scenario total from 12 to **21**. Two new injectors: `MultiLinkFault` (atomic
+  multi-link down) and `OspfCostShift` (one-directional cost raise). Scenarios resolve
+  targets from `topology-meta.json`.
+
+- **MPLS-core observability (Phase 2 extension):** the telemetry sidecar now collects
+  five additional metric families: `ospf_neighbor_state`, `ospf_spf_last_duration_ms`,
+  `ospf_spf_last_executed_ms`, `mpls_lsp_count`, and `bgp_peer_established`. SNMP
+  coverage grew from 52 to **70 agents** (all FRR nodes). Grafana NOC Overview grew
+  from 7 to **11 panels**.
+
 ## Reuse-before-build (don't reinvent)
 Adapt: `martimy/clab_mpls_frr`, `frr01`, `upa/nante-wan`, `ntaka329` pmacct lab, `sflow/frr`;
 native `containerlab tools netem`; Telegraf SNMP plugin; VictoriaMetrics+Grafana; pmacct pipeline.
