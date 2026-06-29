@@ -14,7 +14,6 @@ Deps: jinja2, PyYAML (stdlib otherwise).
 import os
 import sys
 import json
-import shutil
 import subprocess
 
 import yaml
@@ -173,10 +172,41 @@ def build(spec):
         reg_ip(pe_addr, f"pe{i}:{ipe}")
         reg_ip(p_addr, f"p{p_idx}:{ip}")
 
-    # --- iBGP full mesh among PEs ---
+    # ponytail: dual-homing — each PE gets a second P uplink for MPLS underlay
+    # failure scenarios; secondary /31 nets start at index pe_count (no collision).
+    if k.get("pe_dual_homing"):
+        for i in range(1, pe_count + 1):
+            p_sec = i % p_count + 1
+            net_sec = 2 * (pe_count + i - 1)
+            pe_sec_addr = f"10.0.1.{net_sec}"
+            p_sec_addr  = f"10.0.1.{net_sec + 1}"
+            ipe_sec = next_iface(f"pe{i}")
+            ip_sec  = next_iface(f"p{p_sec}")
+            nodes[f"pe{i}"]["core_links"].append(dict(iface=ipe_sec, addr=pe_sec_addr))
+            nodes[f"p{p_sec}"]["core_links"].append(dict(iface=ip_sec,  addr=p_sec_addr))
+            links.append(dict(a=f"pe{i}:{ipe_sec}", b=f"p{p_sec}:{ip_sec}"))
+            reg_ip(pe_sec_addr, f"pe{i}:{ipe_sec}-sec")
+            reg_ip(p_sec_addr,  f"p{p_sec}:{ip_sec}-sec")
+
+    # --- iBGP: full-mesh or RR-aware ---
+    rr_enabled = k.get("route_reflector", False)
+    rr_node_names = set(k.get("rr_nodes", []))
     for i in range(1, pe_count + 1):
-        peers = [f"10.255.2.{j}" for j in range(1, pe_count + 1) if j != i]
-        nodes[f"pe{i}"]["ibgp_peers"] = peers
+        pe_name = f"pe{i}"
+        is_rr = rr_enabled and pe_name in rr_node_names
+        if rr_enabled and not is_rr:
+            peer_list = [
+                {"ip": f"10.255.2.{j}", "rr_client": False}
+                for j in range(1, pe_count + 1) if f"pe{j}" in rr_node_names
+            ]
+        else:
+            peer_list = [
+                {"ip": f"10.255.2.{j}",
+                 "rr_client": rr_enabled and f"pe{j}" not in rr_node_names}
+                for j in range(1, pe_count + 1) if j != i
+            ]
+        nodes[pe_name]["ibgp_peers"] = peer_list
+        nodes[pe_name]["is_rr"] = is_rr
 
     # --- CE nodes: build linear list (branch, hub, dc) ---
     ce_list = []  # dict(name, site_type, type_idx, lo, asn, vrfs[], wg)
@@ -365,6 +395,18 @@ def build(spec):
                                   endpoint=si["endpoint"]))
         info["peers"] = peers
 
+    # --- hub-hub WG pairs (adjacent hubs: 0+1, 2+3, ...) ---
+    if k.get("hub_hub_wg") and len(hubs) >= 2:
+        for hi_idx in range(0, len(hubs) - 1, 2):
+            ha, hb = hubs[hi_idx], hubs[hi_idx + 1]
+            ia, ib = wg[ha], wg[hb]
+            wg[ha]["peers"].append(dict(name=hb, role="hub", pub_key=ib["pub"],
+                                        allowed_ips=f"{ib['addr']}/32",
+                                        endpoint=ib["endpoint"]))
+            wg[hb]["peers"].append(dict(name=ha, role="hub", pub_key=ia["pub"],
+                                        allowed_ips=f"{ia['addr']}/32",
+                                        endpoint=ia["endpoint"]))
+
     # assign mgmt IPs to host nodes (built during CE-PE links loop)
     for h in host_nodes:
         assign_mgmt(h["name"])
@@ -487,15 +529,15 @@ def render(model):
     # default class = best-effort (GUEST) if present else CORP
     default_classid = classid_for.get("GUEST", classid_for["CORP"])
 
-    if os.path.isdir(OUT):
-        shutil.rmtree(OUT)
-    os.makedirs(os.path.join(OUT, "configs"))
+    # ponytail: exist_ok preserves inodes so Docker bind mounts inside running
+    # containers see regenerated content without a container restart.
+    os.makedirs(os.path.join(OUT, "configs"), exist_ok=True)
 
     frr_nodes = []
     for name, n in model["nodes"].items():
         role = n["role"]
         ndir = os.path.join(OUT, "configs", name)
-        os.makedirs(ndir)
+        os.makedirs(ndir, exist_ok=True)
         core_ifaces = [l["iface"] for l in n["core_links"]]
 
         frr_txt = t_frr.render(
@@ -506,12 +548,15 @@ def render(model):
             vrf_ifaces=n.get("vrf_ifaces", []),
             provider_as=provider_as, ce_as=n.get("asn"),
             lans=n.get("lans", []),
+            bfd_core=k.get("bfd_core", False),
+            is_rr=n.get("is_rr", False),
         )
         _w(os.path.join(ndir, "frr.conf"), frr_txt)
 
         _w(os.path.join(ndir, "daemons"), t_daemons.render(
             ospfd=(role in ("P", "PE")), ldpd=(role in ("P", "PE")),
-            bgpd=(role in ("PE", "CE")), staticd=False))
+            bgpd=(role in ("PE", "CE")), staticd=False,
+            bfdd=(role in ("P", "PE") and k.get("bfd_core", False))))
 
         _w(os.path.join(ndir, "snmpd.conf"), t_snmp.render(
             hostname=name, snmp_community=snmp_community))
@@ -644,22 +689,37 @@ def check(model, post_render=False):
 
     # 2. every PE has pe_count-1 iBGP peers
     pe_count = model["pe_count"]
+    k_check = model["spec"]["knobs"]
+    rr_enabled_c = k_check.get("route_reflector", False)
+    rr_nodes_c = set(k_check.get("rr_nodes", []))
     for name, n in model["nodes"].items():
         if n["role"] == "PE":
-            assert len(n["ibgp_peers"]) == pe_count - 1, \
-                f"{name} iBGP peers {len(n['ibgp_peers'])} != {pe_count-1}"
+            if rr_enabled_c and name not in rr_nodes_c:
+                expected_peers = len(rr_nodes_c)
+            else:
+                expected_peers = pe_count - 1
+            assert len(n["ibgp_peers"]) == expected_peers, (
+                f"{name} iBGP peers {len(n['ibgp_peers'])} != {expected_peers}"
+            )
 
     # 3. each spoke has exactly len(hubs) wg peers; hub has branch_count+dc_count peers
     k = model["spec"]["knobs"]
     n_hubs = k["hub_count"]
     n_spokes_expected = k["branch_count"] + k["dc_count"]
+    hubs = [nm for nm, w in model["wg"].items() if w["role"] == "hub"]
     for cename, w in model["wg"].items():
         if w["role"] == "spoke":
             assert len(w["peers"]) == n_hubs, \
                 f"{cename} wg peers {len(w['peers'])} != {n_hubs} (hub count)"
         else:
-            assert len(w["peers"]) == n_spokes_expected, \
-                f"{cename} hub wg peers {len(w['peers'])} != {n_spokes_expected}"
+            hi_idx = hubs.index(cename) if cename in hubs else -1
+            in_pair = k.get("hub_hub_wg") and hi_idx >= 0 and (
+                (hi_idx % 2 == 0 and hi_idx + 1 < len(hubs)) or hi_idx % 2 == 1
+            )
+            expected_hub_peers = n_spokes_expected + (1 if in_pair else 0)
+            assert len(w["peers"]) == expected_hub_peers, (
+                f"{cename} hub wg peers {len(w['peers'])} != {expected_hub_peers}"
+            )
 
     # 4. required per-node files exist on disk (post-render only)
     if post_render and os.path.isdir(OUT):

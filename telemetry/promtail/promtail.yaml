@@ -26,6 +26,25 @@ scrape_configs:
         target_label: severity
       - source_labels: ['__syslog_message_app_name']
         target_label: app
+    pipeline_stages:
+      - match:
+          selector: '{job="syslog"}'
+          stages:
+            - regex:
+                expression: 'BGP.*ADJCHANGE.*neighbor (?P<bgp_peer>[0-9.]+) (?P<bgp_state>Up|Down)'
+            - labels:
+                bgp_peer:
+                bgp_state:
+            - regex:
+                expression: 'LDP.*(peer|neighbor) (?P<ldp_peer>[0-9.]+).*(?P<ldp_event>Down|Up|operational)'
+            - labels:
+                ldp_peer:
+                ldp_event:
+            - regex:
+                expression: 'OSPF.*interface (?P<ospf_iface>[a-z0-9]+) neighbor (?P<ospf_peer>[0-9.]+) changed from (?P<ospf_from>[A-Za-z]+) to (?P<ospf_to>[A-Za-z]+)'
+            - labels:
+                ospf_peer:
+                ospf_to:
 
   # UDP listener (promtail needs a separate scrape block per protocol).
   - job_name: syslog_udp
@@ -46,3 +65,22 @@ scrape_configs:
         target_label: severity
       - source_labels: ['__syslog_message_app_name']
         target_label: app
+    pipeline_stages:
+      - match:
+          selector: '{job="syslog"}'
+          stages:
+            - regex:
+                expression: 'BGP.*ADJCHANGE.*neighbor (?P<bgp_peer>[0-9.]+) (?P<bgp_state>Up|Down)'
+            - labels:
+                bgp_peer:
+                bgp_state:
+            - regex:
+                expression: 'LDP.*(peer|neighbor) (?P<ldp_peer>[0-9.]+).*(?P<ldp_event>Down|Up|operational)'
+            - labels:
+                ldp_peer:
+                ldp_event:
+            - regex:
+                expression: 'OSPF.*interface (?P<ospf_iface>[a-z0-9]+) neighbor (?P<ospf_peer>[0-9.]+) changed from (?P<ospf_from>[A-Za-z]+) to (?P<ospf_to>[A-Za-z]+)'
+            - labels:
+                ospf_peer:
+                ospf_to:

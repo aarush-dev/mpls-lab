@@ -60,6 +60,7 @@ services:
     container_name: tele-telegraf
     volumes:
       - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       clab:
         ipv4_address: 172.20.20.52
@@ -132,6 +133,25 @@ services:
     networks:
       clab:
         ipv4_address: 172.20.20.56
+    restart: unless-stopped
+
+  # --- LDP/BGP metrics pusher ------------------------------------------------
+  # frr-snmp AgentX ABI mismatch → exec+vtysh path for MPLS MIBs.
+  # Uses noc-controller image (has docker CLI + python). Loops every 30s,
+  # runs ldp-metrics.sh, pushes Prometheus text to VM import API.
+  # ponytail: reuses controller image; no new image build or air-gap update.
+  ldp-metrics:
+    image: noc-controller:0.1
+    container_name: noc-ldp-metrics
+    entrypoint: ["/bin/bash", "-c", "while true; do /app/ldp-metrics.sh 2>/dev/null | python3 -c \"import sys,urllib.request; urllib.request.urlopen('http://172.20.20.50:8428/api/v1/import/prometheus', data=sys.stdin.buffer.read())\" 2>/dev/null; sleep 30; done"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./telegraf/ldp-metrics.sh:/app/ldp-metrics.sh:ro
+    networks:
+      clab:
+        ipv4_address: 172.20.20.58
+    depends_on:
+      - victoriametrics
     restart: unless-stopped
 
   # --- Traffic generator (Phase 2.2) -----------------------------------------

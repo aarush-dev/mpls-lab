@@ -18,13 +18,26 @@ interface lo
 {% endif -%}
 exit
 !
+{# ===== BFD (P + PE) ===== #}
+{% if role in ('P', 'PE') and bfd_core %}
+bfd
+ profile core
+  detect-multiplier 3
+  receive-interval 300
+  transmit-interval 300
+ !
+exit
+!
+{% endif -%}
 {# ===== Core-facing interfaces (P + PE): OSPF + LDP ===== #}
 {% for link in core_links %}
 interface {{ link.iface }}
  ip address {{ link.addr }}/31
  ip ospf area 0
  ip ospf network point-to-point
-exit
+{% if bfd_core %} ip ospf bfd
+ ip ospf bfd profile core
+{% endif %}exit
 !
 {% endfor -%}
 {# ===== CE-facing interfaces ===== #}
@@ -79,12 +92,14 @@ router bgp {{ provider_as }}
  bgp router-id {{ loopback }}
  no bgp ebgp-requires-policy
  bgp log-neighbor-changes
-{% for peer in ibgp_peers %} neighbor {{ peer }} remote-as {{ provider_as }}
- neighbor {{ peer }} update-source lo
+{% if is_rr %} bgp cluster-id {{ loopback }}
+{% endif %}{% for peer in ibgp_peers %} neighbor {{ peer.ip }} remote-as {{ provider_as }}
+ neighbor {{ peer.ip }} update-source lo
 {% endfor %} !
  address-family ipv4 vpn
-{% for peer in ibgp_peers %}  neighbor {{ peer }} activate
-{% endfor %} exit-address-family
+{% for peer in ibgp_peers %}  neighbor {{ peer.ip }} activate
+{% if peer.rr_client %}  neighbor {{ peer.ip }} route-reflector-client
+{% endif %}{% endfor %} exit-address-family
 exit
 !
 {% for v in vrfs %}

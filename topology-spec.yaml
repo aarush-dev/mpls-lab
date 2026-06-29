@@ -11,18 +11,23 @@
 # -----------------------------------------------------------------------------
 knobs:
   # Provider core
-  p_count:  5          # P routers (LDP LSRs, OSPF-only, no BGP)
-  pe_count: 5          # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs)
+  p_count:  8          # P routers (LDP LSRs, OSPF-only, no BGP)
+  pe_count: 10         # PE routers (LERs: OSPF+LDP+MP-BGP VPNv4+VRFs)
 
   # Customer sites — total CE nodes = branch + hub + dc
-  branch_count: 16     # branch CEs  (small, single uplink, CORP+VOICE)
-  hub_count:    4      # hub CEs     (regional, CORP+VOICE+GUEST, WG hub)
+  branch_count: 24     # branch CEs  (small, single uplink, CORP+VOICE)
+  hub_count:    6      # hub CEs     (regional, CORP+VOICE+GUEST, WG hub)
   dc_count:     4      # datacenter CEs (CORP+VOICE+GUEST, WG spoke)
+  pe_dual_homing: true
+  bfd_core: true
+  hub_hub_wg: true
+  route_reflector: true      # RR at pe_count=10 — C(10,2)=45 full-mesh → 17 RR sessions
+  rr_nodes: [pe1, pe2]       # pe3..pe10 are RR clients
   # Option A — true per-VRF host separation: ONE host container per (site, VRF).
   #   branch=CORP,VOICE (2 hosts); hub/dc=CORP,VOICE,GUEST (3 hosts).
   #   hosts = branch*2 + hub*3 + dc*3 = 16*2 + 4*3 + 4*3 = 56.
   # Total containers ≈ p_count + pe_count + (branch+hub+dc) + hosts
-  #   = 5 + 5 + 24 + 56 = 90 containers — safe on 108 GB / 19 cores
+  #   = 8 + 10 + 34 + 78 = 130 containers.
   #   (target mid-size enterprise; stay in 80–95 range for deploy reliability).
   # (host count is DERIVED from each site's VRF membership; no per-site knob.)
 
@@ -51,16 +56,10 @@ underlay:
 # -----------------------------------------------------------------------------
 overlay:
   pe_bgp:
-    # DECISION: full-mesh iBGP kept at pe_count=5 → C(5,2)=10 VPNv4 sessions.
-    # That is comfortably small and converges reliably; route-reflection would
-    # require new template + model code (RR cluster-id, rr-client neighbors, P
-    # routers carrying VPNv4) for no convergence benefit at this scale — YAGNI.
-    # ponytail THRESHOLD: revisit RR only beyond ~pe_count=8 (C(8,2)=28 sessions)
-    # where the n^2 mesh starts to hurt; set route_reflector=true + rr_node then.
-    route_reflector: false
-    rr_node: null
-    # All PEs peer with each other via loopback (update-source lo).
-    # Families: ipv4 vpn (VPNv4 labeled unicast).
+    # RR enabled at pe_count=10: C(10,2)=45 full-mesh → 17 sessions with 2 RRs.
+    # pe1+pe2 are RR nodes (cluster-id=loopback); pe3..pe10 are clients.
+    # route_reflector/rr_nodes live in knobs (read by generate.py via k.get()).
+    # All PEs peer via loopback (update-source lo). Families: ipv4 vpn (VPNv4).
 
 # -----------------------------------------------------------------------------
 # VRFs
