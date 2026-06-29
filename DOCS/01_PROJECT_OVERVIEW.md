@@ -92,15 +92,15 @@ The three VRFs are:
                           ┌─────── MPLS PROVIDER CORE ───────┐
                           │                                   │
                    ┌──────┴──────┐                     ┌─────┴──────┐
-                   │    P1-P5    │◄────── OSPF+LDP ────│  P1-P5     │
-                   │  (5 P-core  │     full mesh       │  (same set)│
-                   │   routers)  │                     └─────┬──────┘
+                   │    P1-P8    │◄────── OSPF+LDP ────│  P1-P8     │
+                   │  (8 P-core  │     full mesh       │  (same set)│
+                   │   routers)  │     BFD 300ms       └─────┬──────┘
                    └──────┬──────┘                           │
                           │                                   │
              ┌────────────┼────────────┐                     │
              │            │            │                      │
-          ┌──┴──┐      ┌──┴──┐      ┌──┴──┐   ← 5 PE routers (MP-BGP VPNv4 mesh)
-          │ PE1 │      │ PE2 │ ...  │ PE5 │
+          ┌──┴──┐      ┌──┴──┐      ┌──┴──┐   ← 10 PE routers (RR: pe1+pe2; clients: pe3-pe10)
+          │ PE1 │      │ PE2 │ ...  │PE10 │
           └──┬──┘      └──┬──┘      └──┬──┘
              │            │            │
      ┌───────┼────┐  ┌────┼───┐  ┌────┼───┐
@@ -136,11 +136,11 @@ The three VRFs are:
 
 ### FRRouting (FRR) as the Network OS
 
-The competition suggested EVE-NG or GNS3 (graphical network simulators), which would have required running full commercial router operating system images — large, licensed, and difficult to automate. FRR is the open-source routing suite that ships inside many commercial routers and runs natively in a Docker container. It implements real OSPF, BGP, LDP, and MPLS — not simplified simulations. Each FRR container uses about 50–150 MB of RAM, which is why 90 of them fit comfortably on a 108 GB machine. Because FRR supports AgentX (a protocol extension that lets FRR publish its routing tables over SNMP), the same SNMP polling that a real NOC uses against production routers works unchanged against these containers.
+The competition suggested EVE-NG or GNS3 (graphical network simulators), which would have required running full commercial router operating system images — large, licensed, and difficult to automate. FRR is the open-source routing suite that ships inside many commercial routers and runs natively in a Docker container. It implements real OSPF, BGP, LDP, and MPLS — not simplified simulations. Each FRR container uses about 50–150 MB of RAM, which is why 130 of them fit comfortably on a 108 GB machine. Because FRR supports AgentX (a protocol extension that lets FRR publish its routing tables over SNMP), the same SNMP polling that a real NOC uses against production routers works unchanged against these containers.
 
 ### Containerlab as the Orchestrator
 
-Containerlab is a tool that does for network containers what Docker Compose does for application containers: it reads a YAML file describing nodes and links, creates Docker containers, wires virtual Ethernet interfaces between them, and tears everything down cleanly. The entire 90-node topology is defined in a single generated `clab.yml` file. Containerlab also provides the `netem` subcommand used by the fault injectors to add delay, jitter, loss, and rate limiting to any link.
+Containerlab is a tool that does for network containers what Docker Compose does for application containers: it reads a YAML file describing nodes and links, creates Docker containers, wires virtual Ethernet interfaces between them, and tears everything down cleanly. The entire 130-node topology is defined in a single generated `clab.yml` file. Containerlab also provides the `netem` subcommand used by the fault injectors to add delay, jitter, loss, and rate limiting to any link.
 
 ### Code Generation from a Single Spec
 
@@ -152,7 +152,7 @@ Each site has one host container per VRF rather than one shared host. This means
 
 ### VictoriaMetrics + Grafana + Loki
 
-This stack was chosen because it is the de facto standard for cloud-native telemetry and the entire stack runs offline. VictoriaMetrics is a drop-in replacement for Prometheus with better write throughput and smaller disk footprint — important when collecting 30-second interval metrics from 90 nodes. Loki stores logs as compressed, indexed streams without requiring a full-text search index per log line, keeping disk usage manageable. Grafana provides the NOC dashboard view. All three run as Docker containers defined in `telemetry/docker-compose.yml`.
+This stack was chosen because it is the de facto standard for cloud-native telemetry and the entire stack runs offline. VictoriaMetrics is a drop-in replacement for Prometheus with better write throughput and smaller disk footprint — important when collecting 30-second interval metrics from 130 nodes. Loki stores logs as compressed, indexed streams without requiring a full-text search index per log line, keeping disk usage manageable. Grafana provides the NOC dashboard view. All three run as Docker containers defined in `telemetry/docker-compose.yml`.
 
 ### FastAPI as the ML Team Contract
 
@@ -201,7 +201,7 @@ The Parquet schema has 21 columns per row. Each row represents one 30-second tim
 | `lead_time_s` | float | Seconds from fault injection start to `t_impact` |
 | `time_to_impact_s` | float | Seconds remaining until impact at this timestamp |
 
-The `time_to_impact_s` column is the key ML target for a regression model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies which of the seven fault types is active.
+The `time_to_impact_s` column is the key ML target for a regression model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies which of the twelve fault types is active.
 
 **Raw telemetry endpoints** give the team access to the underlying signals if they need to engineer custom features:
 
@@ -259,7 +259,7 @@ This document covers only Phases 1 and 2. The data API is the contract that allo
 Bring up the entire environment — network lab, telemetry stack, and data API — with these three commands:
 
 ```bash
-# 1. Deploy the full 90-container network topology
+# 1. Deploy the full 130-container network topology
 cd /root/LAB/topology
 sudo containerlab deploy -t clab.yml
 
@@ -293,7 +293,7 @@ cd /root/LAB/topology && sudo containerlab destroy -t clab.yml
 | File | Purpose |
 |------|---------|
 | `/root/LAB/topology-spec.yaml` | Single declarative spec controlling the entire network scale |
-| `/root/LAB/generator/generate.py` | Jinja2 generator: spec → all 90 node configs |
+| `/root/LAB/generator/generate.py` | Jinja2 generator: spec → all 130 node configs |
 | `/root/LAB/topology/clab.yml` | Generated Containerlab topology file |
 | `/root/LAB/controller/controller.py` | SD-WAN path selection + Prometheus metrics |
 | `/root/LAB/trafficgen/trafficgen.py` | Diurnal traffic simulation |
