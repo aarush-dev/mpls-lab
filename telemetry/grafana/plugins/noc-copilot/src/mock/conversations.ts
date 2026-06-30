@@ -77,10 +77,10 @@ export const ASSISTANT_CONVO: ChatMessage[] = [
 
 | Rank | Site | Risk Score | Primary Signal | TTI |
 |------|------|-----------|----------------|-----|
-| 1 | CE-Branch-7  | 94% 🔴 | Interface congestion, RX queue 97% | 11 min |
-| 2 | CE-Branch-12 | 71% 🟠 | WireGuard rekey timeout risk | 31 min |
-| 3 | CE-Branch-3  | 44% 🟡 | BGP hold timer drift (indirect — PE-3 cascade) | ~25 min |
-| 4 | CE-Branch-8  | 38% 🟡 | Tunnel jitter accumulation via Hub-2 | ~38 min |
+| 1 | CE-Branch-7  | 94% CRIT | Interface congestion, RX queue 97% | 11 min |
+| 2 | CE-Branch-12 | 71% WARN | WireGuard rekey timeout risk | 31 min |
+| 3 | CE-Branch-3  | 44% WARN | BGP hold timer drift (indirect — PE-3 cascade) | ~25 min |
+| 4 | CE-Branch-8  | 38% WARN | Tunnel jitter accumulation via Hub-2 | ~38 min |
 
 **Recommended pre-actions:**
 1. CE-Branch-7: Immediately reduce traffic via QoS DSCP remarking or reroute to Hub-3 alternate path

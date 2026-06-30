@@ -2,128 +2,133 @@ import React from 'react';
 import type { ChatMessage } from '../types';
 
 
-const DS = {
-  bg: '#020617',
-  card: '#0E1223',
-  elevated: '#1E293B',
-  border: '#334155',
-  borderSubtle: '#1A253B',
-  text: '#F8FAFC',
-  muted: '#94A3B8',
-  dim: '#475569',
-  critical: '#EF4444',
-  criticalBg: 'rgba(239,68,68,0.08)',
-  criticalGlow: 'rgba(239,68,68,0.25)',
-  warning: '#F59E0B',
-  warningBg: 'rgba(245,158,11,0.08)',
-  ok: '#22C55E',
-  okBg: 'rgba(34,197,94,0.08)',
-  info: '#3B82F6',
-  infoBg: 'rgba(59,130,246,0.08)',
-  ai: '#818CF8',
-  aiBg: 'rgba(129,140,248,0.08)',
-  aiBorder: 'rgba(129,140,248,0.25)',
+const G = {
+  bg:    '#111217',
+  card:  '#181b1f',
+  elev:  '#1e2128',
+  bord:  '#2c2e33',
+  text:  '#d9d9d9',
+  muted: '#8e8e8e',
+  dim:   '#5a5a6a',
+  crit:  '#f2495c',
+  warn:  '#ff9830',
+  ok:    '#73bf69',
+  info:  '#5794f2',
 };
-
 
 function MiniChart() {
   const data = [12,14,13,16,18,17,21,24,23,27,31,29,33,38,42];
-  const W=260,H=75;
-  const min=Math.min(...data),max=Math.max(...data);
+  const W=260, H=72;
+  const min=Math.min(...data), max=Math.max(...data);
   const tx=(i:number)=>(i/(data.length-1))*W;
-  const ty=(v:number)=>H-((v-min)/(max-min+1))*(H-18)-8;
+  const ty=(v:number)=>H-((v-min)/(max-min+1))*(H-16)-6;
   const pts=data.map((v,i)=>tx(i)+','+ty(v)).join(' ');
   const slaY=ty(35);
-  const gridYs=[0.25,0.5,0.75].map(p=>H-(p*(H-18))-8);
+  const grids=[0.3,0.6].map(p=>H-(p*(H-16))-6);
   return (
-    <div style={{ marginTop:10, background:'rgba(0,0,0,0.3)', borderRadius:6, padding:'8px 10px', border:'1px solid '+DS.border }}>
-      <div style={{ fontSize:10, color:DS.muted, marginBottom:5, fontFamily:'ui-monospace,monospace' }}>CE-Hub-2 · Tunnel Latency (ms) · 2h window</div>
-      <svg viewBox={"0 0 "+W+" "+H} style={{ width:'100%', height:H }}>
+    <div style={{ marginTop:10, background:G.bg, borderRadius:4, padding:'8px 10px', border:'1px solid '+G.bord }}>
+      <div style={{ fontSize:10, color:G.muted, marginBottom:5, fontFamily:'ui-monospace,monospace' }}>
+        CE-Hub-2 · Tunnel Latency (ms) · 2h
+      </div>
+      <svg viewBox={'0 0 '+W+' '+H} style={{ width:'100%', height:H }}>
         <defs>
-          <linearGradient id="mcg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={DS.info} stopOpacity="0.25"/>
-            <stop offset="100%" stopColor={DS.info} stopOpacity="0"/>
+          <linearGradient id="clg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={G.info} stopOpacity="0.2"/>
+            <stop offset="100%" stopColor={G.info} stopOpacity="0"/>
           </linearGradient>
         </defs>
-        {gridYs.map((y,i)=><line key={i} x1="0" y1={y} x2={W} y2={y} stroke={DS.border} strokeWidth="0.5" opacity="0.6"/>)}
-        <line x1="0" y1={slaY} x2={W} y2={slaY} stroke={DS.warning} strokeWidth="1" strokeDasharray="4,3" opacity="0.8"/>
-        <text x={W-2} y={slaY-3} fill={DS.warning} fontSize="8" textAnchor="end">SLA 35ms</text>
-        <polygon points={"0,"+H+" "+pts+" "+W+","+H} fill="url(#mcg)"/>
-        <polyline points={pts} fill="none" stroke={DS.info} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx={tx(data.length-1)} cy={ty(data[data.length-1])} r="3" fill={DS.info}/>
-        <text x={tx(data.length-1)-4} y={ty(data[data.length-1])-6} fill={DS.critical} fontSize="10" fontWeight="700" textAnchor="end">42ms ▲</text>
+        {grids.map((y,i)=><line key={i} x1="0" y1={y} x2={W} y2={y} stroke={G.bord} strokeWidth="0.5"/>)}
+        <line x1="0" y1={slaY} x2={W} y2={slaY} stroke={G.warn} strokeWidth="1" strokeDasharray="4,3" opacity="0.7"/>
+        <text x={W-2} y={slaY-3} fill={G.warn} fontSize="8" textAnchor="end">SLA 35ms</text>
+        <polygon points={'0,'+H+' '+pts+' '+W+','+H} fill="url(#clg)"/>
+        <polyline points={pts} fill="none" stroke={G.info} strokeWidth="1.5" strokeLinecap="round"/>
+        <circle cx={tx(data.length-1)} cy={ty(data[data.length-1])} r="3" fill={G.crit}/>
+        <text x={tx(data.length-1)-4} y={ty(data[data.length-1])-6} fill={G.crit} fontSize="10"
+          fontWeight="700" textAnchor="end">42ms</text>
       </svg>
     </div>
   );
 }
 
 function Line({ text }: { text: string }) {
-  if (!text.trim()) return <div style={{ height:5 }}/>;
-  // Section headers: **WORD WORD**
+  if (!text.trim()) return <div style={{ height:4 }}/>;
+
+  // ALL-CAPS header lines: **WORD WORD**
   if (/^\*\*[A-Z][^a-z]+\*\*$/.test(text.trim())) {
-    const label = text.trim().slice(2,-2);
     return (
-      <div style={{ fontSize:10, fontWeight:700, color:DS.muted, letterSpacing:'0.1em',
-        marginTop:10, marginBottom:3, textTransform:'uppercase' as const }}>
-        {label}
+      <div style={{ fontSize:10, fontWeight:700, color:G.muted, letterSpacing:'0.1em',
+        marginTop:10, marginBottom:2 }}>
+        {text.trim().slice(2,-2)}
       </div>
     );
   }
-  // Table separator rows (|---|---|)
+
+  // Table separator row
   if (text.startsWith('|') && /^[|\s-]+$/.test(text)) return null;
-  // Table data rows
+
+  // Table data row
   if (text.startsWith('|')) {
-    const cells = text.split('|').filter(c=>c.trim()).map(c=>c.trim());
+    const cells = text.split('|').filter(c => c.trim()).map(c => c.trim());
     return (
-      <div style={{ display:'grid', gridTemplateColumns:'repeat('+cells.length+',1fr)',
-        gap:6, fontSize:11, padding:'4px 0', borderBottom:'1px solid '+DS.borderSubtle }}>
-        {cells.map((c,j)=>{
-          const bold = c.match(/^\*\*(.+)\*\*$/);
+      <div style={{ display:'flex', gap:8, fontSize:11, padding:'3px 0',
+        borderBottom:'1px solid '+G.bord }}>
+        {cells.map((c, j) => {
+          const parts = c.split(/(\*\*[^*]+\*\*)/g);
           return (
-            <span key={j} style={{ color:j===0?DS.muted:DS.text, fontWeight:j===0?400:400 }}>
-              {bold ? <strong style={{ color:'#C7D2FE' }}>{bold[1]}</strong> : c}
+            <span key={j} style={{ flex:1, color:j===0?G.muted:G.text }}>
+              {parts.map((p,k) => p.startsWith('**')
+                ? <strong key={k} style={{ color:G.text, fontWeight:600 }}>{p.slice(2,-2)}</strong>
+                : p)}
             </span>
           );
         })}
       </div>
     );
   }
-  // Bullet points
+
+  // Bullet
   if (text.startsWith('• ') || text.startsWith('* ')) {
-    const content = text.slice(2);
-    const parts = content.split(/(\*\*[^*]+\*\*)/g);
+    const body = text.slice(2);
+    const parts = body.split(/(\*\*[^*]+\*\*)/g);
     return (
-      <div style={{ display:'flex', gap:7, fontSize:13, lineHeight:1.6, color:DS.text, marginBottom:1 }}>
-        <span style={{ color:DS.muted, flexShrink:0, marginTop:2 }}>·</span>
-        <span>{parts.map((p,j)=>p.startsWith('**')
-          ? <strong key={j} style={{ color:'#C7D2FE', fontWeight:600 }}>{p.slice(2,-2)}</strong>
+      <div style={{ display:'flex', gap:7, fontSize:13, lineHeight:1.6, color:G.text, marginBottom:1 }}>
+        <span style={{ color:G.muted, flexShrink:0 }}>·</span>
+        <span>{parts.map((p,j) => p.startsWith('**')
+          ? <strong key={j} style={{ color:G.text, fontWeight:600 }}>{p.slice(2,-2)}</strong>
           : <span key={j}>{p}</span>)}</span>
       </div>
     );
   }
-  // Numbered list
+
+  // Numbered
   if (/^\d+\.\s/.test(text)) {
-    const [num, ...rest] = text.split(/\.\s(.+)/);
-    const content = rest.join('. ');
-    const parts = content.split(/(`[^`]+`)/g);
-    return (
-      <div style={{ display:'flex', gap:8, fontSize:13, lineHeight:1.6, color:DS.text, marginBottom:2 }}>
-        <span style={{ color:DS.ai, fontWeight:700, flexShrink:0, fontFamily:'ui-monospace,monospace', fontSize:11 }}>{num}.</span>
-        <span>{parts.map((p,j)=>p.startsWith('`')
-          ? <code key={j} style={{ background:'rgba(129,140,248,0.12)', border:'1px solid rgba(129,140,248,0.25)',
-              borderRadius:3, padding:'0 4px', fontSize:11, color:'#C7D2FE', fontFamily:'ui-monospace,monospace' }}>{p.slice(1,-1)}</code>
-          : <span key={j}>{p}</span>)}</span>
-      </div>
-    );
+    const m = text.match(/^(\d+)\.\s(.+)$/);
+    if (m) {
+      const body = m[2];
+      const parts = body.split(/(`[^`]+`)/g);
+      return (
+        <div style={{ display:'flex', gap:8, fontSize:13, lineHeight:1.6, color:G.text, marginBottom:2 }}>
+          <span style={{ color:G.info, fontWeight:700, flexShrink:0,
+            fontFamily:'ui-monospace,monospace', fontSize:11 }}>{m[1]}.</span>
+          <span>{parts.map((p,j) => p.startsWith('`')
+            ? <code key={j} style={{ background:G.elev, border:'1px solid '+G.bord,
+                borderRadius:3, padding:'0 4px', fontSize:11,
+                fontFamily:'ui-monospace,monospace' }}>{p.slice(1,-1)}</code>
+            : <span key={j}>{p}</span>)}</span>
+        </div>
+      );
+    }
   }
-  // Regular line with inline bold + code
+
+  // Regular with bold + code
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return (
-    <div style={{ fontSize:13, lineHeight:1.7, color:DS.text }}>
-      {parts.map((p,j)=>{
-        if (p.startsWith('**')) return <strong key={j} style={{ color:'#C7D2FE', fontWeight:600 }}>{p.slice(2,-2)}</strong>;
-        if (p.startsWith('`')) return <code key={j} style={{ background:'rgba(129,140,248,0.12)', border:'1px solid rgba(129,140,248,0.25)',
-          borderRadius:3, padding:'0 4px', fontSize:11, color:'#C7D2FE', fontFamily:'ui-monospace,monospace' }}>{p.slice(1,-1)}</code>;
+    <div style={{ fontSize:13, lineHeight:1.7, color:G.text }}>
+      {parts.map((p, j) => {
+        if (p.startsWith('**')) return <strong key={j} style={{ color:G.text, fontWeight:600 }}>{p.slice(2,-2)}</strong>;
+        if (p.startsWith('`')) return <code key={j} style={{ background:G.elev, border:'1px solid '+G.bord,
+          borderRadius:3, padding:'0 4px', fontSize:11,
+          fontFamily:'ui-monospace,monospace' }}>{p.slice(1,-1)}</code>;
         return <span key={j}>{p}</span>;
       })}
     </div>
@@ -132,31 +137,29 @@ function Line({ text }: { text: string }) {
 
 export function CopilotPanel({ messages }: { messages: ChatMessage[] }) {
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {messages.map((msg,i)=>{
-        const isUser = msg.role==='user';
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      {messages.map((msg, i) => {
+        const isUser = msg.role === 'user';
         return (
-          <div key={i} style={{ display:'flex', gap:10, flexDirection:isUser?'row-reverse':'row', alignItems:'flex-start' }}>
-            {/* Avatar */}
-            <div style={{ width:26, height:26, borderRadius:'50%', flexShrink:0, marginTop:1,
-              display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:700,
-              background: isUser ? '#1D4ED8' : '#312E81',
-              color: '#E0E7FF',
-              border: '1px solid '+(isUser ? 'rgba(59,130,246,0.4)' : 'rgba(129,140,248,0.4)'),
-            }}>
-              {isUser?'ME':'AI'}
+          <div key={i} style={{ display:'flex', gap:8, flexDirection:isUser?'row-reverse':'row', alignItems:'flex-start' }}>
+            {/* Label badge */}
+            <div style={{ width:28, height:20, borderRadius:3, flexShrink:0, marginTop:2,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:9, fontWeight:700, letterSpacing:'0.06em',
+              background: isUser ? G.elev : G.elev,
+              color: isUser ? G.info : G.muted,
+              border:'1px solid '+G.bord }}>
+              {isUser ? 'YOU' : 'AI'}
             </div>
             {/* Bubble */}
             <div style={{
-              background: isUser
-                ? 'linear-gradient(135deg, #1E3A5F 0%, #1a3158 100%)'
-                : 'linear-gradient(135deg, #0A1628 0%, #0D1B35 100%)',
-              border: '1px solid '+(isUser ? 'rgba(59,130,246,0.25)' : DS.borderSubtle),
-              borderLeft: isUser ? undefined : '2px solid '+DS.ai,
-              borderRadius: isUser ? '12px 3px 12px 12px' : '3px 12px 12px 12px',
-              padding:'10px 14px', maxWidth:'86%',
+              background: isUser ? '#1a2233' : G.card,
+              border:'1px solid '+(isUser ? '#2d4a6a' : G.bord),
+              borderLeft: isUser ? undefined : '2px solid '+G.info,
+              borderRadius:4,
+              padding:'9px 12px', maxWidth:'87%',
             }}>
-              {msg.content.split('\n').map((l,j)=><Line key={j} text={l}/>)}
+              {msg.content.split('\n').map((l,j) => <Line key={j} text={l}/>)}
               {msg.showChart && <MiniChart/>}
             </div>
           </div>

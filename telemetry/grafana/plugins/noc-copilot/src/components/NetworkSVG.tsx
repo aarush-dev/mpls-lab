@@ -1,33 +1,18 @@
 import React, { useState } from 'react';
 import type { NetworkNode, NetworkLink } from '../types';
 
+const HC: Record<string, string> = { critical:'#f2495c', warning:'#ff9830', ok:'#73bf69' };
+const SZ: Record<string, number> = { P:7, PE:8, 'CE-Hub':9, 'CE-Branch':7, 'CE-DC':8 };
 
-const DS = {
-  bg: '#020617',
-  card: '#0E1223',
-  elevated: '#1E293B',
-  border: '#334155',
-  borderSubtle: '#1A253B',
-  text: '#F8FAFC',
-  muted: '#94A3B8',
-  dim: '#475569',
-  critical: '#EF4444',
-  criticalBg: 'rgba(239,68,68,0.08)',
-  criticalGlow: 'rgba(239,68,68,0.25)',
-  warning: '#F59E0B',
-  warningBg: 'rgba(245,158,11,0.08)',
-  ok: '#22C55E',
-  okBg: 'rgba(34,197,94,0.08)',
-  info: '#3B82F6',
-  infoBg: 'rgba(59,130,246,0.08)',
-  ai: '#818CF8',
-  aiBg: 'rgba(129,140,248,0.08)',
-  aiBorder: 'rgba(129,140,248,0.25)',
-};
-
-
-const HC: Record<string,string> = { critical:DS.critical, warning:DS.warning, ok:DS.ok };
-const SZ: Record<string,number> = { P:17, PE:13, 'CE-Hub':13, 'CE-Branch':10, 'CE-DC':12 };
+// POP boundary boxes [x, y, w, h, label]
+const POP_BOXES: [number, number, number, number, string][] = [
+  [8,   10, 152, 100, 'POP-1 · Area 1'],
+  [173, 10, 152, 100, 'POP-2 · Area 2'],
+  [338, 10, 152, 100, 'POP-3 · Area 3'],
+  [503, 10, 152, 100, 'POP-4 · Area 4'],
+  [668, 10, 152, 100, 'POP-5 · Area 5'],
+  [833, 10, 152, 100, 'POP-6 · Area 6'],
+];
 
 interface Props {
   nodes: NetworkNode[];
@@ -38,80 +23,121 @@ interface Props {
 
 function NodeShape({ node, cx, cy, size, color, selected, hovered }:
   { node: NetworkNode; cx:number; cy:number; size:number; color:string; selected:boolean; hovered:boolean }) {
-  const s = size + (hovered ? 3 : 0);
-  const isBad = node.health !== 'ok';
-  const fill = selected ? color+'40' : isBad ? color+'20' : 'rgba(248,250,252,0.04)';
-  const stroke = selected ? '#F8FAFC' : color;
-  const sw = selected ? 2.5 : isBad ? 2 : 1;
-  const glowEl = isBad ? (
-    <>
-      <circle cx={cx} cy={cy} r={s+10} fill="none" stroke={color} strokeWidth="0.5" opacity="0.2"/>
-      <circle cx={cx} cy={cy} r={s+5} fill="none" stroke={color} strokeWidth="1" opacity="0.35"/>
-    </>
-  ) : null;
-  if (node.role==='P') {
-    const pts=Array.from({length:6},(_,i)=>{const a=(i*60-30)*Math.PI/180;return (cx+s*Math.cos(a))+','+(cy+s*Math.sin(a));}).join(' ');
-    return <g>{glowEl}<polygon points={pts} fill={fill} stroke={stroke} strokeWidth={sw}/></g>;
+  const s = hovered ? size + 2 : size;
+  const fill = selected ? color + '35' : node.health !== 'ok' ? color + '18' : '#1e2128';
+  const stroke = selected ? '#d9d9d9' : color;
+  const sw = selected ? 2 : node.health !== 'ok' ? 1.5 : 1;
+
+  if (node.role === 'CE-Hub') {
+    return <path d={`M${cx},${cy-s} L${cx+s},${cy} L${cx},${cy+s} L${cx-s},${cy} Z`}
+      fill={fill} stroke={stroke} strokeWidth={sw}/>;
   }
-  if (node.role==='CE-Hub') {
-    return <g>{glowEl}<path d={"M"+cx+","+(cy-s)+" L"+(cx+s)+","+cy+" L"+cx+","+(cy+s)+" L"+(cx-s)+","+cy+" Z"} fill={fill} stroke={stroke} strokeWidth={sw}/></g>;
+  if (node.role === 'CE-DC') {
+    return <rect x={cx-s} y={cy-s} width={s*2} height={s*2} rx="2"
+      fill={fill} stroke={stroke} strokeWidth={sw}/>;
   }
-  if (node.role==='CE-DC') {
-    return <g>{glowEl}<rect x={cx-s} y={cy-s} width={s*2} height={s*2} rx="3" fill={fill} stroke={stroke} strokeWidth={sw}/></g>;
-  }
-  return <g>{glowEl}<circle cx={cx} cy={cy} r={s} fill={fill} stroke={stroke} strokeWidth={sw}/></g>;
+  return <circle cx={cx} cy={cy} r={s} fill={fill} stroke={stroke} strokeWidth={sw}/>;
 }
 
 export function NetworkSVG({ nodes, links, onNodeClick, selectedId }: Props) {
-  const [hovered, setHovered] = useState<string|null>(null);
-  const nm = Object.fromEntries(nodes.map(n=>[n.id,n]));
-  const bands = [{y:40,lbl:'P CORE'},{y:160,lbl:'PE LAYER'},{y:275,lbl:'HUB / DC'},{y:390,lbl:'BRANCHES'}];
+  const [hovered, setHovered] = useState<string | null>(null);
+  const nm = Object.fromEntries(nodes.map(n => [n.id, n]));
+
   return (
-    <svg viewBox="0 0 1020 470" style={{ width:'100%', height:'100%', background:DS.bg, borderRadius:8, display:'block' }}>
-      {/* Layer bands */}
-      {[{y:10,h:100},{y:130,h:100},{y:248,h:100},{y:358,h:90}].map((b,i)=>(
-        <rect key={i} x={0} y={b.y} width={1020} height={b.h} fill="rgba(248,250,252,0.01)" rx={0}/>
+    <svg viewBox="0 0 1000 450" style={{ width:'100%', height:'100%', background:'#111217', display:'block', borderRadius:6 }}>
+
+      {/* Layer labels */}
+      {[
+        { y:60,  lbl:'P CORE' },
+        { y:190, lbl:'PE' },
+        { y:295, lbl:'HUB / DC' },
+        { y:390, lbl:'BRANCH' },
+      ].map(({ y, lbl }) => (
+        <text key={lbl} x="3" y={y} fill="#3a3a4a" fontSize="8" fontWeight="600"
+          letterSpacing="0.08em" writingMode="tb" textAnchor="middle">{lbl}</text>
       ))}
-      {bands.map(b=>(
-        <text key={b.lbl} x="8" y={b.y+12} fill={DS.dim} fontSize="9" fontWeight="600" letterSpacing="0.1em" textTransform="uppercase">{b.lbl}</text>
+
+      {/* POP boundary boxes */}
+      {POP_BOXES.map(([x, y, w, h, lbl], i) => (
+        <g key={i}>
+          <rect x={x} y={y} width={w} height={h} rx="3"
+            fill="rgba(255,255,255,0.01)" stroke="#2c2e33"
+            strokeWidth="1" strokeDasharray="5,3"/>
+          <text x={x + w / 2} y={y - 2} textAnchor="middle"
+            fill="#5a5a6a" fontSize="7.5" letterSpacing="0.06em">{lbl}</text>
+        </g>
       ))}
+
       {/* Links */}
-      {links.map((l,i)=>{
-        const s=nm[l.source],t=nm[l.target];
-        if (!s||!t) return null;
-        const c=HC[l.health];
-        return <line key={i} x1={s.x} y1={s.y} x2={t.x} y2={t.y}
-          stroke={c} strokeWidth={l.health==='ok'?1:1.5}
-          opacity={l.health==='ok'?0.12:0.7}
-          strokeDasharray={l.health==='critical'?'5,3':'none'}/>;
-      })}
-      {/* Nodes */}
-      {nodes.map(node=>{
-        const color=HC[node.health];
-        const size=SZ[node.role]||11;
-        const isBad=node.health!=='ok';
+      {links.map((l, i) => {
+        const s = nm[l.source], t = nm[l.target];
+        if (!s || !t) return null;
+        const c = HC[l.health];
+        const isOk = l.health === 'ok';
         return (
-          <g key={node.id} onClick={()=>onNodeClick(node)}
-            onMouseEnter={()=>setHovered(node.id)} onMouseLeave={()=>setHovered(null)}
+          <line key={i}
+            x1={s.x} y1={s.y} x2={t.x} y2={t.y}
+            stroke={c}
+            strokeWidth={isOk ? 0.8 : 1.4}
+            opacity={isOk ? 0.18 : 0.75}
+            strokeDasharray={l.health === 'critical' ? '4,3' : undefined}/>
+        );
+      })}
+
+      {/* Nodes */}
+      {nodes.map(node => {
+        const color = HC[node.health];
+        const size = SZ[node.role] ?? 7;
+        const isBad = node.health !== 'ok';
+        return (
+          <g key={node.id}
+            onClick={() => onNodeClick(node)}
+            onMouseEnter={() => setHovered(node.id)}
+            onMouseLeave={() => setHovered(null)}
             style={{ cursor:'pointer' }}>
             <NodeShape node={node} cx={node.x} cy={node.y} size={size}
-              color={color} selected={node.id===selectedId} hovered={hovered===node.id}/>
-            <text x={node.x} y={node.y+size+14} textAnchor="middle"
-              fill={isBad?color:DS.dim}
-              fontSize={isBad?9.5:8.5} fontWeight={isBad?700:400}
-              letterSpacing={isBad?"0.01em":"0"}>
+              color={color} selected={node.id === selectedId} hovered={hovered === node.id}/>
+            <text x={node.x} y={node.y + size + 10} textAnchor="middle"
+              fill={isBad ? color : '#5a5a6a'}
+              fontSize={node.role === 'P' ? 7 : 8}
+              fontWeight={isBad ? 600 : 400}>
               {node.label}
             </text>
           </g>
         );
       })}
-      {/* Legend */}
-      <g transform="translate(830,14)">
-        <rect x="-8" y="-4" width="108" height="62" rx="5" fill={DS.card} stroke={DS.border} strokeWidth="0.5"/>
-        {([['Critical',DS.critical],['Warning',DS.warning],['OK',DS.ok]] as [string,string][]).map(([lbl,col],i)=>(
-          <g key={lbl} transform={"translate(0,"+(i*18)+")"}>
-            <circle cx="5" cy="8" r="4" fill={col+'20'} stroke={col} strokeWidth="1.5"/>
-            <text x="14" y="12" fill={DS.muted} fontSize="10">{lbl}</text>
+
+      {/* Branch count note */}
+      <text x="664" y="448" fill="#5a5a6a" fontSize="8" textAnchor="end">
+        showing 10 of 24 branches
+      </text>
+
+      {/* Health legend */}
+      <g transform="translate(820, 415)">
+        <rect x="-4" y="-4" width="178" height="30" rx="3"
+          fill="#181b1f" stroke="#2c2e33" strokeWidth="0.5"/>
+        {([['Critical','#f2495c'],['Warning','#ff9830'],['OK','#73bf69']] as [string,string][]).map(([lbl, col], i) => (
+          <g key={lbl} transform={`translate(${i * 58}, 0)`}>
+            <circle cx="5" cy="8" r="4" fill={col + '20'} stroke={col} strokeWidth="1.5"/>
+            <text x="13" y="12" fill="#8e8e8e" fontSize="9">{lbl}</text>
+          </g>
+        ))}
+      </g>
+
+      {/* Shape legend */}
+      <g transform="translate(14, 415)">
+        <rect x="-4" y="-4" width="185" height="30" rx="3"
+          fill="#181b1f" stroke="#2c2e33" strokeWidth="0.5"/>
+        {([
+          ['circle', 'P / PE / Branch', 0],
+          ['diamond', 'Hub CE', 80],
+          ['square', 'DC CE', 148],
+        ] as [string, string, number][]).map(([shape, lbl, ox]) => (
+          <g key={shape} transform={`translate(${ox}, 0)`}>
+            {shape === 'circle'  && <circle cx="5" cy="8" r="4" fill="#1e2128" stroke="#5a5a6a" strokeWidth="1"/>}
+            {shape === 'diamond' && <path d="M5,3 L9,8 L5,13 L1,8 Z" fill="#1e2128" stroke="#5a5a6a" strokeWidth="1"/>}
+            {shape === 'square'  && <rect x="1" y="3" width="8" height="8" rx="1" fill="#1e2128" stroke="#5a5a6a" strokeWidth="1"/>}
+            <text x="14" y="12" fill="#8e8e8e" fontSize="8">{lbl}</text>
           </g>
         ))}
       </g>
