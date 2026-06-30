@@ -1,0 +1,24 @@
+{
+  "id": "noc-copilot",
+  "name": "NOC Copilot",
+  "type": "app",
+  "info": {
+    "author": { "name": "NOC Team" },
+    "description": "Air-gapped predictive NOC copilot — Phases 3-6 visual demo",
+    "version": "1.0.0",
+    "updated": "2026-06-30",
+    "logos": { "small": "img/logo.svg", "large": "img/logo.svg" }
+  },
+  "includes": [
+    { "type": "page", "name": "Predictive Analytics", "path": "/a/noc-copilot/predictive",    "role": "Viewer", "icon": "chart-line", "addToNav": true, "defaultNav": true },
+    { "type": "page", "name": "Network Map",           "path": "/a/noc-copilot/network-map",   "role": "Viewer", "icon": "sitemap",    "addToNav": true },
+    { "type": "page", "name": "Fault Injector",        "path": "/a/noc-copilot/fault-injector","role": "Viewer", "icon": "bolt",       "addToNav": true },
+    { "type": "page", "name": "Alerts",                "path": "/a/noc-copilot/notifications", "role": "Viewer", "icon": "bell",       "addToNav": true },
+    { "type": "page", "name": "AI Copilot",            "path": "/a/noc-copilot/assistant",     "role": "Viewer", "icon": "comment-alt","addToNav": true }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "grafanaVersion": "11.0.0",
+    "plugins": []
+  }
+}
