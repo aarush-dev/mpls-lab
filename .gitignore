@@ -25,3 +25,6 @@ __pycache__/
 
 # Windows WSL artifacts
 *:Zone.Identifier
+
+# Claude Code skills (installed via uipro — reinstall with: uipro init --ai claude)
+.claude/skills/
