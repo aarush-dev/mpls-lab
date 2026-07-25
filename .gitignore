@@ -23,5 +23,8 @@ __pycache__/
 *.pyc
 *.log
 
+# Node modules
+node_modules/
+
 # Windows WSL artifacts
 *:Zone.Identifier
