@@ -65,7 +65,7 @@ JSON (auditable, ponytail-commented in code). Measured:
 ## Schema == dataapi canonical
 
 `generate.py` imports `dataapi/export.COLUMNS` as the single source of truth for
-the 21 columns and their order; dtypes are matched to the real Parquet
+the 40 columns and their order; dtypes are matched to the real Parquet
 (`is_fault` bool, metrics float64, label strings object, `vrf` null like the real
 capture). **Real + synthetic concatenate cleanly** (`check.py` proves it), so the
 ML team can train on either or both.

@@ -317,7 +317,7 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 3. Fetch flows from nfacctd (aggregated bytes/packets per source/destination/port/VRF).
 4. Fetch labels from `labels.jsonl` (injected faults with t_start/t_impact/lead_time).
 5. Normalize all to a common schema (one row per (time, device, signal)) and join on device + time.
-6. Export as labeled Parquet: 21 columns (time, device, site_type, vrf, interface, traffic counters, tunnel metrics, BGP/OSPF neighbor counts, flow stats, is_fault, fault_type, lead_time_s, severity, scenario_id).
+6. Export as labeled Parquet: 40 columns (time, device, site_type, vrf, interface, traffic counters, tunnel metrics, interface error/discard counters, queue depth, transceiver DOM readings, device CPU/memory, routing-table and LSDB size, chassis temperature/power/fan/PSU, flow stats, is_fault, fault_type, lead_time_s, severity, scenario_id).
 
 **ML training** uses this Parquet: each row is a 30-second time bucket; features are metrics (latency, loss, jitter, traffic), events (adjacency changes), flows (top talkers); label is `is_fault` or `fault_type` or `lead_time_s`. Models can be:
 - **Supervised anomaly detection:** train on labeled faults to recognize fault signatures (random forest, XGBoost, neural nets).
@@ -398,6 +398,53 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 ```
 
 ---
+
+## Device-Health / Environmental Terms
+
+**DOM / DDM (Digital Optical Monitoring / Digital Diagnostic Monitoring)** — the
+SFF-8472 standard that exposes five readings from an optical transceiver:
+temperature, supply voltage, laser bias current, Tx power and Rx power. In the
+dataset: `xcvr_temp_c`, `xcvr_rx_power_dbm`, `xcvr_tx_bias_ma`. **Modelled here** —
+containers have no optics.
+
+**Laser bias current** — the drive current a transceiver applies to its laser
+diode. As the diode ages its quantum efficiency falls, so the control loop pushes
+more current to hold output power constant. A steadily rising bias is the classic
+weeks-ahead predictor of laser failure. When bias climbs *while* Rx power falls and
+no link-down event occurs, that divergence is the signature of the `gray_failure`
+scenario.
+
+**ENTITY-SENSOR-MIB (RFC 3433)** — the standard SNMP MIB real routers use to expose
+physical sensors (`entPhySensorValue`, `entPhySensorType`, `entPhySensorScale`,
+`entPhySensorPrecision`). Our modelled chassis metrics mirror its shape so the
+dataset is structurally comparable to real gear.
+
+**Idle-dominated power** — network devices draw most of their maximum power at zero
+load. Measured on a Cisco CRS-3: 11.07 kW idle against 12.3 kW maximum (Vishwanath
+et al., IEEE JSAC 2014). Consequently `device_power_watts` is modelled as
+`P_idle + (P_max - P_idle) x utilization` with `P_idle = 0.87 x P_max`, **not** as a
+quantity proportional to traffic.
+
+**Thermal mass** — a chassis heats and cools gradually, so `device_temp_c` lags
+load rather than tracking it instantly (implemented as an EMA toward the target
+temperature). The lag is what makes temperature a *precursor* rather than a
+restatement of utilization.
+
+**Arrhenius vs linear temperature coupling** — the Arrhenius model predicts failure
+rates roughly doubling per 10–15 °C. Field data disagrees in the normal operating
+range: below ~50 °C internal device temperature, errors grow **linearly** with
+temperature (El-Sayed et al., SIGMETRICS 2012). `temp_failure_scale()` is therefore
+linear.
+
+**Per-POP ambient temperature** — devices in one POP share an inlet temperature,
+because real racks heat together. This makes `device_temp_c` spatially correlated
+across the topology graph, giving a graph-aware model a signal that no per-device
+metric provides.
+
+**Queue backlog** — bytes standing in an interface's qdisc tree
+(`q_backlog_bytes`, read from `tc -s qdisc`). The queue fills *before* latency
+rises and long before loss starts, so it leads `tunnel_latency_ms`. **Real**, not
+modelled.
 
 ## Related Documentation
 

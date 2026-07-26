@@ -126,6 +126,28 @@ def _fault_signatures(f, tun_nf):
         "node_failure":   {"lat_peak": base_lat, "loss_peak": 1.0, "jit_peak": base_jit, "lead_s": 1.0, "kind": "iface_down"},
         "asymmetric_loss": {"lat_peak": base_lat * 1.1, "loss_peak": 4.0, "jit_peak": base_jit * 1.5, "lead_s": 30.0, "kind": "tunnel_ramp"},
         "brownout":       {"lat_peak": 45.0, "loss_peak": 1.5, "jit_peak": 6.0, "lead_s": 55.0, "kind": "tunnel_ramp"},
+        # --- core / catastrophic / correlated (faults/orchestrator.py SCENARIOS) ---
+        # ponytail: these were missing, so the synthetic set only ever contained
+        #   7 of the 21 implemented scenario types and no core faults at all.
+        #   lead_s values track the per-scenario table in DOCS/03.
+        "p_node_failure":  {"lat_peak": base_lat * 1.3, "loss_peak": 2.0, "jit_peak": base_jit * 2.0, "lead_s": 5.0, "kind": "iface_down"},
+        "pop_isolation":   {"lat_peak": base_lat * 1.6, "loss_peak": 6.0, "jit_peak": base_jit * 2.5, "lead_s": 3.0, "kind": "iface_down"},
+        "core_partition":  {"lat_peak": base_lat * 1.8, "loss_peak": 8.0, "jit_peak": base_jit * 3.0, "lead_s": 3.0, "kind": "iface_down"},
+        "srlg_cut":        {"lat_peak": base_lat * 1.4, "loss_peak": 4.0, "jit_peak": base_jit * 2.2, "lead_s": 2.0, "kind": "iface_down"},
+        "core_congestion": {"lat_peak": 55.0, "loss_peak": 2.5, "jit_peak": 10.0, "lead_s": 45.0, "kind": "tunnel_ramp"},
+        "ospf_area_flap":  {"lat_peak": base_lat * 1.2, "loss_peak": 1.0, "jit_peak": base_jit * 2.0, "lead_s": 4.0, "kind": "iface_churn"},
+        "path_asymmetry":  {"lat_peak": 30.0, "loss_peak": 0.4, "jit_peak": 4.0, "lead_s": 20.0, "kind": "tunnel_ramp"},
+        "rr_failure":      {"lat_peak": base_lat, "loss_peak": 1.2, "jit_peak": base_jit, "lead_s": 3.0, "kind": "iface_churn"},
+        # gray_failure is the long-precursor, weak-signal case: barely visible in
+        # tunnel metrics, but it degrades the optics (rx power sags, laser bias
+        # climbs) with NO link-down event. That optical divergence is the only
+        # early signal, which is exactly why the DOM columns were added.
+        "gray_failure":    {"lat_peak": base_lat * 1.15, "loss_peak": 1.8, "jit_peak": base_jit * 1.3, "lead_s": 90.0, "kind": "tunnel_ramp"},
+        "mpls_underlay_failure": {"lat_peak": base_lat * 1.3, "loss_peak": 2.0, "jit_peak": base_jit * 1.8, "lead_s": 4.0, "kind": "iface_down"},
+        "ldp_session_flap":      {"lat_peak": base_lat * 1.1, "loss_peak": 0.8, "jit_peak": base_jit * 1.6, "lead_s": 3.0, "kind": "iface_churn"},
+        "hub_spoke_congest":     {"lat_peak": 70.0, "loss_peak": 5.0, "jit_peak": 14.0, "lead_s": 40.0, "kind": "tunnel_ramp"},
+        "bgp_cascade":           {"lat_peak": base_lat * 1.2, "loss_peak": 1.5, "jit_peak": base_jit * 2.0, "lead_s": 3.0, "kind": "iface_churn"},
+        "controller_drift":      {"lat_peak": 38.0, "loss_peak": 3.0, "jit_peak": 5.0, "lead_s": 25.0, "kind": "tunnel_ramp"},
     }
     out = {}
     for ft, dft in defaults.items():
@@ -144,6 +166,41 @@ def _fault_signatures(f, tun_nf):
         else:
             sig["_src"] = "default"
         out[ft] = sig
+    return out
+
+
+def _device_health(df):
+    """Baselines for the device-health / error-counter features.
+
+    These columns only exist in captures taken after the device-health feature
+    set landed, so every statistic falls back to a documented default and is
+    marked "_src":"default" when the source capture predates them.
+
+    Error/discard rates are expressed per 30s step (the counters are cumulative;
+    what the generator needs is the increment). Defaults describe a HEALTHY
+    fabric: errors are rare, discards near-zero, queues shallow.
+    """
+    defaults = {
+        "err_rate_per_step":      0.004,   # ifInErrors increments per step
+        "discard_rate_per_step":  0.02,    # ifInDiscards increments per step
+        "q_backlog_bytes":        900.0,   # shallow standing queue
+        "q_drops_per_step":       0.01,
+        "cpu_pct":                4.0,     # FRR control plane at rest
+        "mem_pct":                2.5,
+        "bgp_msg_per_step":       6.0,     # keepalives dominate when stable
+        "rib_routes":             120.0,
+        "ospf_lsa_count":         90.0,
+    }
+    out = {}
+    for key, dflt in defaults.items():
+        col = {"cpu_pct": "cpu_pct", "mem_pct": "mem_pct",
+               "rib_routes": "rib_routes",
+               "ospf_lsa_count": "ospf_lsa_count"}.get(key)
+        s = df[col].dropna() if (col and col in df.columns) else pd.Series(dtype=float)
+        if len(s) >= 5:
+            out[key] = {"mean": float(s.mean()), "std": float(s.std()), "_src": "real"}
+        else:
+            out[key] = {"mean": dflt, "std": dflt * 0.35, "_src": "default"}
     return out
 
 
@@ -178,6 +235,7 @@ def build_profile(real_path):
         "tunnel_baseline": tun_baseline,
         "tunnel_baseline_by_site": tun_baseline_by_site,
         "fault_signatures": _fault_signatures(f, tun_nf),
+        "device_health": _device_health(df[~df.is_fault]),
         "real_fault_fraction": float(df.is_fault.mean()),
         "inventory": _inventory(df),
         # octet counter seed: real counters start large (mid-run capture). Seed

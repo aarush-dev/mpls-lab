@@ -31,7 +31,31 @@ Two-file split, `faults/injectors.py` (primitives) + `faults/orchestrator.py` (s
 
 Synthetic side mirrors this without a lab: `synthetic/calibrate.py` derives per-fault-type peak values + lead_time from a real capture into `profile.json`; `synthetic/generate.py:_inject_faults()` (120-295) vectorized-numpy overlays episodes with the same `t_start/t_impact/t_end` + ramp semantics, plus a 12% cascade chance (second fault on a different device mid-episode).
 
-## Adding temperature + power_consumption
+## Device-health feature set — BUILT
+
+Implemented. Schema went 21 -> 40 columns; see `DOCS/SPEC-NOTES.md` for the decisions
+and `DOCS/03_TECHNICAL_CODE_GUIDE.md` for the per-column contract. Literature the model
+shapes come from, with citations, is in the header of `telemetry/envmodel.py`.
+
+Key sources:
+
+| Source | What it fixed in our model |
+|---|---|
+| Vishwanath, Hinton, Ayre, Tucker, *Modeling Energy Consumption in High-Capacity Routers and Switches*, IEEE JSAC 2014 | Router power is idle-dominated (CRS-3: 11.07 kW idle / 12.3 kW max), not proportional to load. Set `IDLE_FRAC = 0.87`. |
+| Mytton, *Network energy use not directly proportional to data volume*, J. Industrial Ecology 2024 | Same point against kWh/GB-style proportional models. |
+| arXiv 2602.22339, *Power Consumption Patterns Using Telemetry Data* (2026) | Real power regressed on 1400+ params over 10k machines gives R² = 0.33. Forced deliberate noise injection so power is not a giveaway label. |
+| El-Sayed, Stefanovici, Amvrosiadis, Hwang, Schroeder, *Temperature Management in Data Centers: Why Some (Might) Like It Hot*, SIGMETRICS 2012 | Below ~50 °C, errors grow **linearly** with temperature, not exponentially. Rejected Arrhenius for a linear coupling. |
+| ClusterRCA, arXiv 2506.20673 | Interface error/discard counters (`rx_crc_errors_phy` and friends) are the top-ranked network failure signal. Motivated adding the IF-MIB error OIDs — the highest value-per-effort change in the set. |
+| SFF-8472 (DOM/DDM) | Rising laser bias with falling rx power = laser end-of-life. Gave `gray_failure` its first dedicated precursor. |
+| RFC 3433 ENTITY-SENSOR-MIB | Metric shape for temp/fan/voltage/power, so the dataset matches how real routers expose sensors. |
+| arXiv 2102.03616, *A Data Augmented Bayesian Network for Node Failure Prediction in Optical Networks* | Uses data augmentation precisely because real failure data is scarce — external support for the synthetic generator's existence. |
+
+**Honest limitation.** Temperature, power, fan, PSU and optical columns are modelled;
+containers have no sensors. A model trained on them learns our transfer function, not
+physics. The real-vs-modelled split is stated per-column in `DOCS/03`. The measured
+columns (error counters, queue depth, CPU/memory, routing churn) carry no such caveat.
+
+## Original plan (superseded by the section above)
 
 These containers are Linux netns, not real hardware — no ambient sensor exists. Has to be modelled, correlated to load/faults, same pattern as `controller.py`'s tunnel model. Plan:
 
@@ -54,4 +78,7 @@ Second option wins — reuse the exact pipeline already proven for `ospf_neighbo
 - `synthetic/calibrate.py`: add `_env_baseline()` deriving per-site_type temp/power mean+std from the real capture (same `_src: real|default` fallback pattern as `_tunnel_baseline`).
 - `synthetic/generate.py`: add a `_gen_env()` row-builder alongside `_gen_interfaces`/`_gen_tunnels`, and extend `_inject_faults` with a new `kind="env_spike"` so fault episodes also perturb temp/power (reuses the existing vectorized ramp/decay math, just two more arrays).
 
-Not implemented yet — this is a design plan pending approval before the code lands.
+Built, with two corrections the implementation forced: `IDLE_FRAC = 0.87` rather than a
+small idle term (the literature says power is idle-dominated), and chassis load driven by
+the diurnal forwarding curve rather than container CPU (CPU sits near 5%, which left the
+features almost constant).

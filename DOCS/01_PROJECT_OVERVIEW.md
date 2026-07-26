@@ -194,7 +194,7 @@ print(df.shape)          # (rows, 21)
 print(df.columns.tolist())
 ```
 
-The Parquet schema has 21 columns per row. Each row represents one 30-second time bucket for one (device, entity) pair, where entity is either a network interface or a WireGuard tunnel:
+The Parquet schema has 40 columns per row. Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
 
 | Column | Type | Description |
 |--------|------|-------------|

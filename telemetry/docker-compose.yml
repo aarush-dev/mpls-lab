@@ -154,6 +154,29 @@ services:
       - victoriametrics
     restart: unless-stopped
 
+  # --- Device health / environmental metrics pusher --------------------------
+  # Real: container CPU+memory, qdisc queue backlog/drops, BGP msg counters,
+  # RIB size, OSPF LSDB size. Modelled: chassis temp/power/fan/PSU and SFF-8472
+  # transceiver DOM (see telemetry/envmodel.py for the model provenance).
+  # ponytail: same image + same push loop as ldp-metrics; nothing new to build.
+  env-metrics:
+    image: noc-controller:0.1
+    container_name: noc-env-metrics
+    entrypoint: ["/bin/bash", "-c", "while true; do python3 /app/env-metrics.py 2>/dev/null | python3 -c \"import sys,urllib.request; urllib.request.urlopen('http://172.20.20.50:8428/api/v1/import/prometheus', data=sys.stdin.buffer.read())\" 2>/dev/null; sleep 30; done"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./env-metrics.py:/app/env-metrics.py:ro
+      - ./envmodel.py:/app/envmodel.py:ro
+      # env-metrics.py resolves topology-meta relative to its own parent dir;
+      # at /app/env-metrics.py that lands on /topology/topology-meta.json.
+      - ../topology/topology-meta.json:/topology/topology-meta.json:ro
+    networks:
+      clab:
+        ipv4_address: 172.20.20.59
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+
   # --- Traffic generator (Phase 2.2) -----------------------------------------
   # Drives real cross-site TCP flows between lab host containers via BusyBox nc
   # (wbitt/network-multitool:alpine-minimal ships nc but NOT iperf3).

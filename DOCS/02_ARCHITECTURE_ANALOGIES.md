@@ -58,7 +58,7 @@ Before diving into individual pieces, here is the whole system in one diagram. R
                                 ▼
                     ┌─────────────────────────┐
                     │   ML TEAM               │
-                    │   21-column Parquet      │
+                    │   40-column Parquet      │
                     │   8.89M rows             │
                     │   is_fault, lead_time_s  │
                     └─────────────────────────┘
@@ -498,7 +498,7 @@ The **FastAPI Data API** at `localhost:8000` does the same thing for this lab. I
 | `GET /topology` | Network graph as JSON (nodes + links) |
 | `GET /datasets?build=true` | Joined, labeled Parquet — the main ML input |
 
-**The 21-column Parquet schema:**
+**The 40-column Parquet schema:**
 
 ```python
 # from dataapi/export.py
@@ -602,7 +602,7 @@ Meanwhile, the WireGuard SD-WAN overlay is running in parallel. If the MPLS path
 
 All along this path, **Telegraf is polling SNMP counters every 30 seconds**, **routers are emitting syslog messages that Promtail ships to Loki**, **PE and CE routers are exporting IPFIX flows that nfacctd collects**, and **the SD-WAN controller is emitting per-tunnel metrics every 5 seconds**. Every signal is tagged with `device="ce_branch1"` (or whichever node it came from) so the Data API can join them all into a single row in the final Parquet.
 
-That Parquet row, with its 21 columns and a ground-truth `is_fault` label, is what the ML model sees. The goal: learn to recognize the early-warning signatures (latency creep, rekey clustering, prefix churn) and predict `t_impact` before it arrives.
+That Parquet row, with its 40 columns and a ground-truth `is_fault` label, is what the ML model sees. The goal: learn to recognize the early-warning signatures (latency creep, rekey clustering, prefix churn) and predict `t_impact` before it arrives.
 
 ---
 

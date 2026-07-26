@@ -409,7 +409,7 @@ START=$(date -d '1 hour ago' +%s)
 END=$(date +%s)
 curl -o dataset_fresh.parquet "http://127.0.0.1:8000/datasets?start=${START}&end=${END}&step=30&build=true"
 
-# Expected: joins metrics + flows + events + labels into one table, 21 columns
+# Expected: joins metrics + flows + events + labels into one table, 40 columns
 # Size: ~500K–2M rows per hour (depends on step size and fault count)
 ```
 
@@ -422,7 +422,7 @@ curl -o dataset_fresh.parquet "http://127.0.0.1:8000/datasets?start=${START}&end
 import pandas as pd
 
 df = pd.read_parquet("dataset.parquet")
-print(df.shape)  # (N rows, 21 columns)
+print(df.shape)  # (N rows, 40 columns)
 print(df.columns.tolist())
 # ['ts', 'device', 'site_type', 'vrf', 'entity', 'entity_type',
 #  'if_in_octets', 'if_out_octets', 'if_oper_status',
@@ -930,22 +930,72 @@ cd /root/LAB/airgap && ./verify-airgap.sh
 | `/root/LAB/dataapi/app.py` | Data API endpoints | Add new queries or export formats |
 | `/root/LAB/dataapi/export.py` | Join metrics+labels→Parquet | Change canonical column schema |
 | `/root/LAB/telemetry/docker-compose.yml` | Telemetry stack config | Add new collectors or change image tags |
+| `/root/LAB/telemetry/envmodel.py` | Modelled chassis/optical physics (shared live+synthetic) | Retune temperature, power or DOM behaviour |
+| `/root/LAB/telemetry/env-metrics.py` | Device-health sidecar (real CPU/queue/routing + modelled sensors) | Add a device-scoped metric |
 | `/root/LAB/telemetry/grafana/dashboards/*.json` | Grafana panels | Customize dashboard visualizations |
 | `/root/LAB/synthetic/generate.py` | Synthetic data generator | Tweak diurnal curves or fault injection rates |
 | `/root/LAB/airgap/pull-and-save.sh` | Air-gap bundler | Update image list for new services |
 | `/root/LAB/airgap/verify-airgap.sh` | Air-gap validator | Change egress filter rules (rare) |
 
-### Dataset Schema (21 columns)
+### Dataset Schema (40 columns)
 
 ```
 ts, device, site_type, vrf, entity, entity_type,
 if_in_octets, if_out_octets, if_oper_status,
 tunnel_latency_ms, tunnel_jitter_ms, tunnel_loss_pct, tunnel_rekeys,
 flow_bytes, flow_packets,
-is_fault, scenario_id, fault_type, severity, lead_time_s, time_to_impact_s
+is_fault, scenario_id, fault_type, severity, lead_time_s, time_to_impact_s,
+# interface-scoped (entity_type == "interface")
+if_in_errors, if_in_discards, if_out_errors, if_out_discards,
+q_backlog_bytes, q_drops,
+xcvr_temp_c, xcvr_rx_power_dbm, xcvr_tx_bias_ma,
+# device-scoped (entity_type == "device")
+cpu_pct, mem_pct, bgp_msg_rx, bgp_msg_tx, rib_routes, ospf_lsa_count,
+device_temp_c, device_power_watts, device_fan_rpm, device_psu_voltage_v
 ```
 
 **Join key for all telemetry:** `device` (e.g., "ce_branch1", "pe1", "p3")
+
+`entity_type` is `interface`, `tunnel`, or `device`. Filter before using a column
+group — device-scoped columns are NULL on interface rows and vice versa:
+
+```python
+dev = df[df.entity_type == "device"]     # cpu, temp, power, routing state
+ifc = df[df.entity_type == "interface"]  # errors, queue, transceiver DOM
+tun = df[df.entity_type == "tunnel"]     # latency, jitter, loss, rekeys
+```
+
+### Device-health PromQL
+
+```bash
+# Interface errors/discards (REAL, SNMP IF-MIB)
+curl "localhost:8000/metrics?query=rate(interface_ifInErrors[5m])"
+curl "localhost:8000/metrics?query=rate(interface_ifOutDiscards[5m])"
+
+# Queue depth — fills before latency rises (REAL, tc)
+curl "localhost:8000/metrics?query=iface_queue_backlog_bytes"
+
+# Control-plane load + routing churn (REAL)
+curl "localhost:8000/metrics?query=node_cpu_pct"
+curl "localhost:8000/metrics?query=rib_routes"
+curl "localhost:8000/metrics?query=ospf_lsa_count"
+
+# Chassis sensors (MODELLED — see telemetry/envmodel.py)
+curl "localhost:8000/metrics?query=device_temp_c"
+curl "localhost:8000/metrics?query=device_power_watts"
+
+# Optical DOM (MODELLED) — rising bias + falling rx power = degrading path
+curl "localhost:8000/metrics?query=xcvr_tx_bias_ma"
+curl "localhost:8000/metrics?query=xcvr_rx_power_dbm"
+```
+
+Metrics are emitted by the `noc-env-metrics` sidecar (`172.20.20.59`), which runs
+`telemetry/env-metrics.py` every 30s. Run it by hand to inspect the exposition:
+
+```bash
+python3 /root/LAB/telemetry/env-metrics.py | head -40
+python3 /root/LAB/telemetry/envmodel.py      # model selftest
+```
 
 ---
 

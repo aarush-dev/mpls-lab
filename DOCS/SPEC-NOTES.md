@@ -486,6 +486,66 @@ The fault orchestrator loads this file at startup and resolves all link sets at 
 no hardcoded interface names in any fault scenario. Anti-drift: SNMP `snmp_agents.toml` and
 `nfacctd` `device_map.txt` are also emitted by the generator from the same topology data.
 
+## Device-health / environmental feature set
+
+Added 19 columns (21 -> 40). Driven by a literature review of what actually predicts
+network hardware failure; full source list in `DOCS/SIMULATION_AND_DATASET_NOTES.md`.
+
+### Why a third entity_type
+
+`entity_type` was `interface | tunnel`. Whole-box signals (CPU, RIB size, chassis
+sensors) are per-device, not per-entity. Broadcasting them onto every interface row
+would duplicate them ~11x per device. Instead there is now an `entity_type="device"`
+row per device per bucket, with `entity` set to the device name. Interface- and
+tunnel-scoped columns are NULL on it, and vice versa.
+
+### Real vs modelled — the split that matters
+
+| Real (measured) | Source |
+|---|---|
+| `if_in_errors`, `if_in_discards`, `if_out_errors`, `if_out_discards` | SNMP IF-MIB, same ifTable walk already running — 4 extra OIDs, no extra round-trips |
+| `q_backlog_bytes`, `q_drops` | `tc -s qdisc` on CE uplinks (HTB tree already present) |
+| `cpu_pct`, `mem_pct` | one `docker stats` call for all containers |
+| `bgp_msg_rx/tx`, `rib_routes`, `ospf_lsa_count` | vtysh JSON |
+
+| Modelled (no sensor exists in a container) | Model provenance |
+|---|---|
+| `device_power_watts` | Vishwanath et al., IEEE JSAC 2014: CRS-3 measured 11.07 kW idle / 12.3 kW max. Power is idle-dominated, NOT proportional to load. `P = P_idle + (P_max-P_idle)*util`, `IDLE_FRAC = 0.87`. Mytton (J. Ind. Ecology 2024) makes the same argument against kWh/GB models. |
+| `device_temp_c` | Ambient + linear load rise, with thermal mass (EMA lag). Failure coupling `temp_failure_scale()` is LINEAR, per El-Sayed et al. (SIGMETRICS 2012), whose field data shows errors growing linearly with temperature below ~50 °C — Arrhenius (2x per 10-15 °C) is a lab model that field data does not support in the normal operating range. |
+| `device_fan_rpm`, `device_psu_voltage_v` | Companions to the above; metric shape mirrors RFC 3433 ENTITY-SENSOR-MIB, which is how real routers expose temp/fan/voltage/power over SNMP. |
+| `xcvr_temp_c`, `xcvr_rx_power_dbm`, `xcvr_tx_bias_ma` | SFF-8472 DOM/DDM. Rising laser bias with falling rx power is the canonical laser end-of-life signature. |
+
+Noise is deliberate and calibrated: `POWER_SIGMA_FRAC = 0.35`. arXiv 2602.22339 regressed
+real package power on 1400+ telemetry params over 10k machines and got R² = 0.33 — real
+power is only weakly predictable from load, and a deterministic `P = f(util)` would leak
+the label.
+
+### Design decisions
+
+- **One shared model module.** `telemetry/envmodel.py` holds every modelled formula as
+  pure functions and is imported by BOTH the live sidecar (`telemetry/env-metrics.py`)
+  and the synthetic generator. Writing the physics twice would let live and synthetic
+  drift apart silently.
+- **Ambient temperature is per-POP, not per-device.** Real racks heat together. This
+  makes temperature a spatially correlated feature across the topology graph — a signal
+  a GNN can exploit and that no per-device metric provides. `pop_ambient_c()` is
+  deterministic (golden-ratio spread, no RNG) so live and synthetic agree.
+- **Chassis load is driven by FORWARDING load (the diurnal curve), not control-plane
+  CPU.** First cut used `cpu/100`; container CPU sits at ~5%, which left temperature and
+  power nearly constant and the features useless. A router's ASICs do the forwarding
+  while its CPU idles, so the diurnal offered-load curve is the correct driver. `cpu_pct`
+  remains a separate real metric in its own right.
+- **One sidecar, not six.** `env-metrics.py` walks the 70 nodes once. Separate scripts
+  per signal would mean separate `docker exec` storms over the same nodes.
+
+### Synthetic fault coverage gap (fixed alongside)
+
+`calibrate.py` only defined signatures for the 7 original edge scenarios, so the
+synthetic generator could never emit any of the 14 core/catastrophic types that
+`faults/orchestrator.py` implements — the dataset claimed 21 fault types and contained 7.
+All 21 are now defined. This also made the optical degradation path reachable:
+`gray_failure` is the scenario that drives the DOM columns.
+
 ## Validation checklist for generate.py output
 
 After generation, verify manually or via script:

@@ -30,6 +30,9 @@ DATASETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
 # canonical column order (keep stable for downstream)
+# The first 21 columns are the original schema and keep their order, so readers
+# written against it still work. Columns after them were added for the device
+# health / environmental feature set -- see the entity_type note below.
 COLUMNS = [
     "ts", "device", "site_type", "vrf", "entity", "entity_type",
     "if_in_octets", "if_out_octets", "if_oper_status",
@@ -37,13 +40,44 @@ COLUMNS = [
     "flow_bytes", "flow_packets",
     "is_fault", "scenario_id", "fault_type", "severity",
     "lead_time_s", "time_to_impact_s",
+    # --- interface-scoped additions (entity_type == "interface") ---
+    "if_in_errors", "if_in_discards", "if_out_errors", "if_out_discards",
+    "q_backlog_bytes", "q_drops",
+    "xcvr_temp_c", "xcvr_rx_power_dbm", "xcvr_tx_bias_ma",
+    # --- device-scoped additions (entity_type == "device") ---
+    "cpu_pct", "mem_pct",
+    "bgp_msg_rx", "bgp_msg_tx", "rib_routes", "ospf_lsa_count",
+    "device_temp_c", "device_power_watts", "device_fan_rpm", "device_psu_voltage_v",
 ]
+
+# entity_type values and what carries their metrics:
+#   "interface"  one row per (device, physical interface) -- SNMP IF-MIB counters,
+#                qdisc queue stats, and the transceiver (SFF-8472) readings
+#   "tunnel"     one row per (device, WireGuard tunnel)   -- SD-WAN controller
+#   "device"     one row per device, entity == device name -- whole-box signals
+#                (CPU, memory, routing-table churn, chassis sensors)
 
 # interface metric name -> column
 _IF_METRICS = {
     "interface_ifHCInOctets": "if_in_octets",
     "interface_ifHCOutOctets": "if_out_octets",
     "interface_ifOperStatus": "if_oper_status",
+    # Error/discard counters: the single highest value-per-effort signal in the
+    # set. Already on the wire in IF-MIB (we were polling the table and taking
+    # only three OIDs) and the top-ranked feature in ClusterRCA's HPC network
+    # failure diagnosis (arXiv 2506.20673), whose equivalents are
+    # rx_crc_errors_phy / rx_discards_phy / tx_discards_phy.
+    "interface_ifInErrors": "if_in_errors",
+    "interface_ifInDiscards": "if_in_discards",
+    "interface_ifOutErrors": "if_out_errors",
+    "interface_ifOutDiscards": "if_out_discards",
+    # Queue occupancy: fills BEFORE latency rises and long before loss starts.
+    "iface_queue_backlog_bytes": "q_backlog_bytes",
+    "iface_queue_drops": "q_drops",
+    # Transceiver (SFF-8472 DOM). MODELLED -- see telemetry/envmodel.py.
+    "xcvr_temp_c": "xcvr_temp_c",
+    "xcvr_rx_power_dbm": "xcvr_rx_power_dbm",
+    "xcvr_tx_bias_ma": "xcvr_tx_bias_ma",
 }
 # tunnel metric name -> column
 _TUN_METRICS = {
@@ -51,6 +85,20 @@ _TUN_METRICS = {
     "sdwan_tunnel_jitter_ms": "tunnel_jitter_ms",
     "sdwan_tunnel_loss_pct": "tunnel_loss_pct",
     "sdwan_tunnel_rekeys_total": "tunnel_rekeys",
+}
+# device-scoped metric name -> column. Emitted by telemetry/env-metrics.py; the
+# series label carrying the entity IS "device", so entity == device on these rows.
+_DEV_METRICS = {
+    "node_cpu_pct": "cpu_pct",
+    "node_mem_pct": "mem_pct",
+    "bgp_msg_rx_total": "bgp_msg_rx",
+    "bgp_msg_tx_total": "bgp_msg_tx",
+    "rib_routes": "rib_routes",
+    "ospf_lsa_count": "ospf_lsa_count",
+    "device_temp_c": "device_temp_c",
+    "device_power_watts": "device_power_watts",
+    "device_fan_rpm": "device_fan_rpm",
+    "device_psu_voltage_v": "device_psu_voltage_v",
 }
 
 
@@ -163,7 +211,10 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
     """Build the joined labeled Parquet for [start,end]; return its path."""
     iface = _collect(_IF_METRICS, "interface", "interface", start, end, step)
     tunnel = _collect(_TUN_METRICS, "tunnel", "tunnel", start, end, step)
-    base = pd.concat([iface, tunnel], ignore_index=True) if (len(iface) or len(tunnel)) \
+    # device-scoped rows: the entity label IS the device name
+    dev = _collect(_DEV_METRICS, "device", "device", start, end, step)
+    parts = [d for d in (iface, tunnel, dev) if len(d)]
+    base = pd.concat(parts, ignore_index=True) if parts \
         else pd.DataFrame(columns=["ts", "device", "site_type", "entity", "entity_type"])
 
     # flows attach per (device, ts-bucket); merge onto interface rows of that device/ts

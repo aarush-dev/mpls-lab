@@ -23,7 +23,7 @@ Everything flows in one direction: physical network containers emit signals, a t
         |
         | GET /datasets?build=true
         v
-  Labeled Parquet (21 columns, join key = "device")
+  Labeled Parquet (40 columns, join key = "device")
         |
         v
   Your ML Model
@@ -206,7 +206,7 @@ with open("/tmp/dataset.parquet", "wb") as f:
     f.write(resp.content)
 
 df = pd.read_parquet("/tmp/dataset.parquet")
-print(df.shape)           # (N_rows, 21)
+print(df.shape)           # (N_rows, 40)
 print(df.dtypes)
 print(df["is_fault"].value_counts())
 print(df["fault_type"].value_counts())
@@ -251,7 +251,7 @@ print(f"Test:  {len(test)} rows, {test['is_fault'].mean()*100:.1f}% fault")
 
 ## 3. The Dataset Schema — What Every Column Means
 
-The canonical 21-column schema is defined in `export.py` (`COLUMNS` list). Every Parquet file — both real and synthetic — has exactly these columns in this order.
+The canonical 40-column schema is defined in `export.py` (`COLUMNS` list). Every Parquet file — both real and synthetic — has exactly these columns in this order.
 
 ```python
 # From /root/LAB/dataapi/export.py
@@ -262,8 +262,19 @@ COLUMNS = [
     "flow_bytes", "flow_packets",
     "is_fault", "scenario_id", "fault_type", "severity",
     "lead_time_s", "time_to_impact_s",
+    # --- interface-scoped (entity_type == "interface") ---
+    "if_in_errors", "if_in_discards", "if_out_errors", "if_out_discards",
+    "q_backlog_bytes", "q_drops",
+    "xcvr_temp_c", "xcvr_rx_power_dbm", "xcvr_tx_bias_ma",
+    # --- device-scoped (entity_type == "device") ---
+    "cpu_pct", "mem_pct",
+    "bgp_msg_rx", "bgp_msg_tx", "rib_routes", "ospf_lsa_count",
+    "device_temp_c", "device_power_watts", "device_fan_rpm", "device_psu_voltage_v",
 ]
 ```
+
+The first 21 columns are the original schema in their original order, so readers
+written against it keep working. Columns 22–40 are the device-health feature set.
 
 **Identity columns:**
 
@@ -274,7 +285,7 @@ COLUMNS = [
 | `site_type` | str | One of `branch`, `hub`, `dc`, `pe`, `core` |
 | `vrf` | str (nullable) | Virtual network: `CORP`, `VOICE`, `GUEST`. Null on most rows (VRF not on live SNMP series). |
 | `entity` | str | The specific interface or tunnel being measured. E.g. `"eth1"` or `"ce_branch1-ce_hub1"` |
-| `entity_type` | str | Either `"interface"` or `"tunnel"` — splits every device into two row types |
+| `entity_type` | str | One of `"interface"`, `"tunnel"`, `"device"` — splits every device into three row types. `"device"` rows carry whole-box signals and set `entity` to the device name. |
 
 **Interface metrics** (only populated when `entity_type == "interface"`):
 
@@ -301,6 +312,58 @@ COLUMNS = [
 |--------|------|-------------|
 | `flow_bytes` | float64 | Total bytes across all flows for this device in this 30s bucket |
 | `flow_packets` | float64 | Total packets. Null in many rows (NetFlow not always available). |
+
+**Interface health counters** (only populated when `entity_type == "interface"`):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `if_in_errors` / `if_out_errors` | float64 | Cumulative IF-MIB error counters (ifInErrors .14 / ifOutErrors .20). **Real** — polled by SNMP. Diff between rows for the rate. |
+| `if_in_discards` / `if_out_discards` | float64 | Cumulative discard counters (ifInDiscards .13 / ifOutDiscards .19). **Real.** |
+| `q_backlog_bytes` | float64 | Bytes standing in the qdisc tree on this interface. **Real** — read from `tc -s qdisc`. Fills *before* latency rises and long before loss starts, so it leads `tunnel_latency_ms`. |
+| `q_drops` | float64 | Cumulative qdisc drops. **Real.** |
+
+**Transceiver DOM** (interface rows, physical `eth*` uplinks only — `NaN` on `lo`/`vrf_*`/`wg0`):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `xcvr_temp_c` | float64 | SFF-8472 transceiver temperature. **Modelled.** |
+| `xcvr_rx_power_dbm` | float64 | Received optical power. **Modelled.** Sags as a path degrades. |
+| `xcvr_tx_bias_ma` | float64 | Laser bias current. **Modelled.** Rises as the diode ages or the path degrades — the canonical weeks-ahead optical failure predictor. The `gray_failure` scenario is the one that moves these: rx power falls while bias climbs, with **no** `if_oper_status` change. That divergence is its only early signal. |
+
+**Device-scoped signals** (only populated when `entity_type == "device"`):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `cpu_pct` / `mem_pct` | float64 | Container CPU / memory percent. **Real** — from `docker stats`. Control-plane churn (SPF re-runs, BGP reconvergence) burns CPU before it shows in routing state. |
+| `bgp_msg_rx` / `bgp_msg_tx` | float64 | Cumulative BGP messages across all peers. **Real** — vtysh. |
+| `rib_routes` | float64 | Routes installed in the RIB. **Real.** Drops during withdrawal storms. |
+| `ospf_lsa_count` | float64 | OSPF LSDB size. **Real.** Churns during area flaps. |
+| `device_temp_c` | float64 | Chassis temperature. **Modelled.** Carries thermal mass, so it *lags* load — that lag is what makes it a precursor rather than a restatement of utilization. |
+| `device_power_watts` | float64 | Chassis power draw. **Modelled.** Idle-dominated (see below). |
+| `device_fan_rpm` | float64 | Fan speed. **Modelled.** Flat below a 30 °C knee, then ramps — a second, lagging thermal view. |
+| `device_psu_voltage_v` | float64 | 12 V rail. **Modelled.** Sags slightly under load. |
+
+> **Real vs modelled — read this before training.** Containers have no thermal, power
+> or optical sensors, so those columns are **modelled**, not measured; a model trained
+> on them learns our generator's transfer function, not physics. The model *shapes* are
+> taken from the literature and documented with citations in `telemetry/envmodel.py`:
+> power is idle-dominated (`P_idle ≈ 0.87 × P_max`, after Vishwanath et al., IEEE JSAC
+> 2014, who measured 11.07 kW idle against 12.3 kW max on a CRS-3 — router power is
+> *not* proportional to load); temperature-to-error coupling is **linear**, not
+> Arrhenius, following El-Sayed et al. (SIGMETRICS 2012), who found error rates grow
+> linearly with temperature below ~50 °C in field data; optical behaviour follows
+> SFF-8472. Substantial noise is injected deliberately — arXiv 2602.22339 regressed real
+> package power on 1400+ telemetry parameters across 10k machines and got R² = 0.33, so
+> a noiseless `P = f(util)` would be a giveaway label rather than a sensor reading.
+>
+> **Ambient temperature is shared per POP, not per device.** Real racks heat together,
+> so `device_temp_c` is spatially correlated across the topology graph. That correlation
+> is deliberate: it gives a graph-aware model a signal that per-device metrics cannot.
+>
+> **Do not compare raw fault/healthy means on `device_power_watts`.** Fault targets skew
+> heavily toward CE devices, which draw ~70 W against a P router's ~2900 W, so the naive
+> aggregate shows power *falling* under fault. Compare within-device (paired): power then
+> rises under fault on 79% of devices.
 
 **Label columns — the training targets:**
 
@@ -560,7 +623,7 @@ That is the entire extension. The label schema, the `/datasets` join, and the sy
 
 ## 6. Synthetic Data
 
-The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 21-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
+The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 40-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
 
 **What was built:** 8.89M rows covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signatures (how much latency rises, how long the precursor lasts) are derived from real lab captures via `calibrate.py`.
 
@@ -1103,6 +1166,8 @@ The hardest scenarios to predict early are `bgp_flap` (lead_time=2s), `node_fail
 | `/root/LAB/synthetic/profile.json` | Calibration parameters (written by calibrate.py) |
 | `/root/LAB/ragcorpus/` | Runbooks + topology map for LLM RAG retrieval |
 | `/root/LAB/telemetry/docker-compose.yml` | VictoriaMetrics, Loki, Grafana, Telegraf stack |
+| `/root/LAB/telemetry/envmodel.py` | Modelled chassis/power/optical physics; imported by both the live sidecar and the synthetic generator (single source of truth). Cites its literature in the module header. |
+| `/root/LAB/telemetry/env-metrics.py` | `noc-env-metrics` sidecar: real CPU/memory, queue depth, routing churn + modelled chassis and DOM sensors |
 
 ---
 
