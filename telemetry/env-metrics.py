@@ -162,12 +162,16 @@ def queue_stats(device, iface):
     backlog = drops = 0
     toks = out.split()
     for i, tk in enumerate(toks):
-        if tk == "backlog" and i + 1 < len(toks):
-            v = toks[i + 1]
-            backlog += _bytes(v)
-        if tk == "dropped" and i + 1 < len(toks):
+        # tc prints "(dropped 6, overlimits 0 ...)" -- the leading paren is part
+        # of the token, so strip punctuation before comparing.
+        t = tk.strip("(),")
+        if i + 1 >= len(toks):
+            continue
+        if t == "backlog":
+            backlog += _bytes(toks[i + 1])
+        elif t == "dropped":
             try:
-                drops += int(toks[i + 1].rstrip(","))
+                drops += int(toks[i + 1].strip("(),"))
             except ValueError:
                 pass
     return backlog, drops
@@ -214,14 +218,21 @@ def rib_routes(device):
 
 
 def ospf_lsa_count(device):
-    """LSDB size -- churns during area flaps and reconvergence."""
+    """LSDB size -- churns during area flaps and reconvergence.
+
+    FRR nests the LSAs per area: {routerId, areas: {<area>: {routerLinkStates:
+    [...], summaryLinkStates: [...], ...}}}. An ABR appears in two areas, so
+    summing across areas is the correct total.
+    """
     d = vtj(device, "show ip ospf database json")
     n = 0
-    for k, v in d.items():
-        if isinstance(v, dict) and k.lower().endswith("lsa"):
-            n += len(v)
-        elif isinstance(v, list):
-            n += len(v)
+    for area in (d.get("areas") or {}).values():
+        if not isinstance(area, dict):
+            continue
+        for k, v in area.items():
+            # every LSA bucket is a list named *LinkStates / *Lsa
+            if isinstance(v, list) and (k.endswith("LinkStates") or k.endswith("Lsa")):
+                n += len(v)
     return n
 
 
@@ -272,14 +283,24 @@ def main():
          [f'node_mem_pct{{device="{d}"}} {stats[d][1]:.3f}'
           for d in ALL_NODES if d in stats])
 
-    # ---- REAL: queue backlog / drops on CE uplinks ---------------------------
+    # ---- REAL: queue backlog / drops on CE interfaces ------------------------
+    # eth0 = WAN transport veth: always carries a real qdisc (the per-site netem
+    #        the generator installs) plus the WireGuard overlay and telemetry.
+    # eth1 = a PE uplink: root is noqueue until a fault installs netem on it, so
+    #        it reads 0 when healthy and becomes non-zero exactly under fault.
+    # ponytail: these two, not a walk of every interface -- per-VRF uplink indices
+    #   vary per node (ce_branch1's CORP uplink is eth2), and a full walk would be
+    #   ~5 docker execs per CE per cycle for interfaces that are mostly idle.
     q_rows_b, q_rows_d = [], []
     for d in CE_NODES:
         if d not in stats:
             continue
-        backlog, drops = queue_stats(d, "eth1")
-        q_rows_b.append(f'iface_queue_backlog_bytes{{device="{d}",interface="eth1"}} {backlog}')
-        q_rows_d.append(f'iface_queue_drops{{device="{d}",interface="eth1"}} {drops}')
+        for iface in ("eth0", "eth1"):
+            backlog, drops = queue_stats(d, iface)
+            q_rows_b.append(
+                f'iface_queue_backlog_bytes{{device="{d}",interface="{iface}"}} {backlog}')
+            q_rows_d.append(
+                f'iface_queue_drops{{device="{d}",interface="{iface}"}} {drops}')
     emit("iface_queue_backlog_bytes", "Bytes queued in the qdisc tree", "gauge", q_rows_b)
     emit("iface_queue_drops", "Cumulative qdisc drops", "counter", q_rows_d)
 

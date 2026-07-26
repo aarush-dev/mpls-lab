@@ -49,8 +49,38 @@ sudo modprobe wireguard && echo "wg OK"   # else use userspace wireguard-go / st
   `vrflite` underlay (L3VPN emulated with VRFs — control-plane/telemetry/fault signals unchanged).
 - Load needed modules at boot via `/etc/modules-load.d/` then `wsl --shutdown`.
 - `cls_u32` must be loaded for the QoS DSCP `tc` filters (loadable, not built-in on this WSL2
-  kernel; not auto-loaded → filters fail after reboot). It is now in
-  `/etc/modules-load.d/noc-lab.conf` (along with `mpls_router`/`mpls_iptunnel`/`mpls_gso`).
+  kernel; not auto-loaded → filters fail after reboot). It is in
+  `/etc/modules-load.d/noc-lab.conf` (along with `mpls_router`/`mpls_gso`).
+
+### dockerd will not start after a WSL restart until `bridge` is loaded
+
+`CONFIG_BRIDGE=m` on this kernel and nothing auto-loads it, so a cold WSL boot gives:
+
+```
+Failed to create bridge docker0 via netlink   error="operation not supported"
+failed to start daemon: Error initializing network controller: \
+  error creating default "bridge" network: operation not supported
+```
+
+`service docker start` then fails, and after a few retries systemd gives up with
+"Start request repeated too quickly" — which hides the real cause. Fix:
+
+```bash
+sudo modprobe bridge br_netfilter ip6_tables ip6table_filter
+sudo systemctl reset-failed docker.service   # clear the retry lockout
+sudo service docker start
+```
+
+`/etc/modules-load.d/noc-lab.conf` now carries these so it survives a reboot.
+
+**Do NOT list `mpls_iptunnel` there.** It is built in on this kernel
+(`CONFIG_MPLS_ROUTING=y`), so `modprobe` FATALs on it at every boot. Verify what is a
+module vs built-in before adding entries:
+
+```bash
+zcat /proc/config.gz | grep -E "^CONFIG_(BRIDGE|NET_VRF|MPLS_ROUTING|VETH)="
+# =m -> needs modules-load.d;  =y -> built in, leave it out
+```
 - Raise inotify limits for large labs: `fs.inotify.max_user_instances`, `max_user_watches`.
 
 ## Status of Phase 0 (remote)
