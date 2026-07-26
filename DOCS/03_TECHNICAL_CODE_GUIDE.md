@@ -152,6 +152,7 @@ A label record looks like:
 {
   "scenario_id": "congestion-ce_branch1-a3f92b1c",
   "type": "congestion",
+  "target": {"device": "ce_branch1", "interface": "eth1"},
   "device": "ce_branch1",
   "severity": "high",
   "t_start": "2026-06-21T10:00:00Z",
@@ -159,11 +160,16 @@ A label record looks like:
   "t_end": "2026-06-21T10:01:30Z",
   "lead_time": 52.0,
   "impact_method": "vm_threshold",
-  "signature": "latency+jitter creep then loss on the affected site's tunnels"
+  "probe": "max(sdwan_tunnel_latency_ms{device=\"ce_branch1\"})",
+  "baseline_value": 24.1,
+  "impact_value": 8.3,
+  "signature": "latency+jitter creep then loss on the affected site's tunnels",
+  "dry_run": false,
+  "error": null
 }
 ```
 
-`lead_time` is the gap in seconds between fault start and user-visible impact — this is what your ML model is trying to predict ahead of time.
+`target` is always a dict (was sometimes a bare string) — `{"device": ...}` at minimum, plus scenario-specific keys like `interface`. `dry_run` is present on every row; `error` is set on failure. `impact_method` is one of `vm_threshold` (probe crossed a real threshold), `modelled` (fixed delay after `t_start`, no observable probe), `modelled_fallback` (probe existed but never crossed threshold before timeout), or `probe_unavailable` (probe returned nothing for the whole window). `lead_time` is the gap in seconds between fault start and user-visible impact — this is what your ML model is trying to predict ahead of time. (`faults/orchestrator.py:611-633`)
 
 ### /topology — Graph JSON for GNNs
 
@@ -283,7 +289,7 @@ written against it keep working. Columns 22–40 are the device-health feature s
 | `ts` | str (ISO UTC) | 30-second bucket timestamp |
 | `device` | str | Node name. Join key across all signals. E.g. `"ce_branch1"` |
 | `site_type` | str | One of `branch`, `hub`, `dc`, `pe`, `core` |
-| `vrf` | str (nullable) | Virtual network: `CORP`, `VOICE`, `GUEST`. Null on most rows (VRF not on live SNMP series). |
+| `vrf` | str (nullable) | Virtual network: `CORP`, `VOICE`, `GUEST`. Populated only on `vrf_*` sub-interface rows (Telegraf regex-extracts it from `ifDescr`, e.g. `vrf_CORP` → `CORP`; `telemetry/telegraf/telegraf.conf:188-196`) — null on physical uplinks, tunnels, and device rows, which is most of the table. |
 | `entity` | str | The specific interface or tunnel being measured. E.g. `"eth1"` or `"ce_branch1-ce_hub1"` |
 | `entity_type` | str | One of `"interface"`, `"tunnel"`, `"device"` — splits every device into three row types. `"device"` rows carry whole-box signals and set `entity` to the device name. |
 
@@ -310,8 +316,8 @@ written against it keep working. Columns 22–40 are the device-health feature s
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `flow_bytes` | float64 | Total bytes across all flows for this device in this 30s bucket |
-| `flow_packets` | float64 | Total packets. Null in many rows (NetFlow not always available). |
+| `flow_bytes` | float64 | Total bytes across all flows for this device in this 30s bucket. **Real data only** — always `NaN` in synthetic output (the flow pillar isn't synthesised yet; `synthetic/generate.py:619-626`). |
+| `flow_packets` | float64 | Total packets. Null in many rows (NetFlow not always available); always `NaN` in synthetic output, same reason. |
 
 **Interface health counters** (only populated when `entity_type == "interface"`):
 
@@ -413,7 +419,7 @@ A model that predicts `is_fault=True` at `ts=10:00:00` (52 seconds early) scores
 | `policy_drift` | Route-map config change causes traffic to take a suboptimal path. Observable as a BGP path selection change. | BGP soft-clear in Loki; subtle metric shift |
 | `node_failure` | The routing daemon (bgpd) is killed hard. Watchdog restarts it within seconds–minutes. | Interface down + BGP process gap in events |
 | `asymmetric_loss` | Loss only on the outbound direction. Latency stays normal. Hard to diagnose manually. | `tunnel_loss_pct` up, `tunnel_latency_ms` near-normal |
-| `brownout` | Hard rate cap on uplink bandwidth. Queue builds, latency rises, loss comes late. | `tunnel_latency_ms` climb under load |
+| `brownout` | Hard rate cap on uplink bandwidth (netem `rate`). No probe: the controller's netem readback only parses `delay`/`loss`, and wg0 RTT doesn't traverse `eth1`, so the rate cap has no telemetry-path observable. `impact_method: modelled`, fixed 4s lead. | None — not observable in tunnel telemetry (`faults/orchestrator.py:267-286`) |
 
 ### MPLS-Core / Catastrophic / Correlated Fault Scenarios (Phase 6)
 
@@ -485,7 +491,7 @@ print(label["lead_time"], "seconds of precursor signal")
 
 ### Running a Full Fault Campaign
 
-The campaign scheduler uses Poisson-distributed arrivals (realistic burstiness) and runs concurrent faults on different devices. This is how the 8.89M-row dataset was collected.
+The campaign scheduler uses Poisson-distributed arrivals (realistic burstiness) and runs concurrent faults on different devices. This is how real (small) telemetry captures are collected — the ~18.1M-row figure elsewhere in this guide is synthetic-generator output (Section 6), not campaign-collected data.
 
 ```bash
 # 1-hour campaign, ~1 fault per 2 minutes, reproducible seed
@@ -522,22 +528,31 @@ curl "localhost:8000/datasets?start=$((NOW-3600))&end=$NOW&build=true" -o campai
 ```python
 # Understanding the lead time distribution
 df[df["is_fault"]].groupby("fault_type")["lead_time_s"].agg(["mean", "min", "max"])
+```
 
-#                  mean   min    max
-# bgp_flap          2.0   2.0    2.0   (transient; hard to catch early)
-# brownout         55.0  55.0   55.0   (slow buildup; easiest to predict)
-# congestion       52.0  38.0   66.0   (ramp; 38-66s window)
-# tunnel_degrade   40.0  25.0   55.0
-# policy_drift      3.0   3.0    3.0   (nearly instant)
-# node_failure      1.0   1.0    1.0   (no precursor)
-# asymmetric_loss  30.0  20.0   45.0
+Two different lead-time regimes feed this column, and they do not agree:
+
+- **Live orchestrator** (`faults/orchestrator.py`) fixes `lead_time` to `impact_delay_s` for every `impact_method: modelled` scenario (deterministic, no min/max spread) and to the real probe-threshold-crossing time for `vm_threshold` scenarios (varies run to run). Current `impact_delay_s`: `bgp_flap`=2, `policy_drift`=3, `node_failure`=1, `brownout`=4 (`faults/orchestrator.py:195,230,245,284`). `brownout` lost its probe and moved from `vm_threshold` to `modelled` — its lead is now a fixed 4.0s, not the old 55.0s ramp estimate (`faults/orchestrator.py:280-286`).
+- **Synthetic generator** (`synthetic/generate.py:470`) samples `lead = max(gamma(2.0, lead_s/2), 4*step)` — **every** fault type is floored at `4 * step` (120 s at the default 30 s step), regardless of its calibrated `lead_s` in `synthetic/calibrate.py`. Since the shipped dataset is dominated by synthetic rows (millions vs a handful of real campaign rows), `lead_time_s` in practice is `>= 120s` for effectively every `fault_type`, including the short ones below.
+
+Calibrated targets in `synthetic/calibrate.py:129-157` (pre-floor `lead_s`, informational only — actual synthetic output is floored to >=120s regardless):
+
+```
+#                  lead_s  kind
+# bgp_flap            2.0  iface_churn
+# brownout            55.0 tunnel_ramp   (still 55.0 here; only the live orchestrator's fixed impact_delay_s=4 changed)
+# congestion          50.0 tunnel_ramp
+# tunnel_degrade      40.0 tunnel_ramp
+# policy_drift         3.0 iface_churn
+# node_failure         1.0 iface_down
+# asymmetric_loss     30.0 tunnel_ramp
 # --- core/catastrophic (Phase 6) ---
-# p_node_failure    5.0   3.0   10.0   (OSPF convergence is the precursor)
-# srlg_cut          2.0   2.0    2.0   (correlated; sudden)
-# core_congestion  45.0  30.0   60.0   (ramp on backbone link)
-# ospf_area_flap    4.0   2.0    8.0   (SPF churn window)
-# rr_failure        3.0   2.0    5.0   (BGP withdraw propagation)
-# gray_failure     90.0  60.0  120.0  (hardest to detect; longest precursor)
+# p_node_failure       5.0 iface_down
+# srlg_cut             2.0 iface_down
+# core_congestion     45.0 tunnel_ramp
+# ospf_area_flap       4.0 iface_churn
+# rr_failure           3.0 iface_churn
+# gray_failure        90.0 tunnel_ramp
 ```
 
 ---
@@ -625,7 +640,7 @@ That is the entire extension. The label schema, the `/datasets` join, and the sy
 
 The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 40-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
 
-**What was built:** 8.89M rows covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signatures (how much latency rises, how long the precursor lasts) are derived from real lab captures via `calibrate.py`.
+**What was built:** `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) produces roughly 18.1M rows (`entities_per_tick × ticks`, 899 entities/tick = 661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`; `--scale` only controls fault-episode density, not row count) covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signatures (how much latency rises, how long the precursor lasts) are derived from real lab captures via `calibrate.py`. **The on-disk `synthetic/output/synthetic_1781481600_d7.0_s30_x3.0.parquet` is a stale June artifact** (exactly 8,890,560 rows) from a smaller, no-longer-existing 441-entities-per-tick topology — it is not reproducible from the command above on current code. It has 21 columns, predates the current 40-column feature set, and lacks the synthetic-marker metadata (`synthetic=true`, `generator`, `calibrated_from`) that `check.py` gate 0 now requires — it fails the current checker. Regenerate it with the command above before using it.
 
 ### Generating More Data
 
@@ -788,11 +803,13 @@ knobs:
   inter_pop_redundancy: 2   # Parallel links per inter-POP adjacency (SRLG-paired)
   inter_pop_chords: [[1,4],[2,5],[3,6]]  # Extra backbone chords beyond the ring
 
-  # --- Edge (unchanged) ---
-  branch_count: 16     # Branch sites (small, CORP+VOICE only)
-  hub_count:    4      # Hub sites (CORP+VOICE+GUEST, WireGuard hubs)
+  # --- Edge ---
+  branch_count: 24     # Branch sites (small, CORP+VOICE only)
+  hub_count:    6      # Hub sites (CORP+VOICE+GUEST, WireGuard hubs)
   dc_count:     4      # DC sites (CORP+VOICE+GUEST, WireGuard spokes)
 ```
+
+(`topology-spec.yaml:25-27`. 28 spokes (branch+dc) × 6 hubs = 168 spoke-hub WireGuard tunnels, plus 3 hub-hub pairs (adjacent hubs 0+1, 2+3, 4+5) = 171 tunnels total — `generator/generate.py:471-491`.)
 
 Total lab containers: 70 FRR nodes (24 P + 12 PE + 34 CE) + 78 host containers = **148**. Plus 9 telemetry/infra containers (~157 total).
 
@@ -825,13 +842,14 @@ In `topology-spec.yaml`, under the `vrfs:` section:
 vrfs:
   # ... existing CORP, VOICE, GUEST ...
   IOT:
-    rd_community: "65000:40"
-    dscp_class: BE
+    rd_community: "65000:40"   # this is the route-TARGET (RT), not the RD — see below
     qos_priority: 4
     sites: [branch, hub]    # which site types get this VRF
 ```
 
-The generator derives all CE VRF configs, PE route-distinguishers, and QoS classes from this. No per-node config editing needed.
+Despite its name, `rd_community` supplies the RT (`rt vpn both <value>`) on every PE, not the RD. The actual VPNv4 RD is derived per-PE as `<pe_loopback>:<last field of rd_community>` (e.g. `10.255.2.2:10`), so identical customer prefixes from two sites stay distinct NLRIs (`generator/generate.py:400-403`, `topology-spec.yaml:67-69`). DSCP marking is not per-VRF — it's set per bandwidth class under `qos.classes[]` (`topology-spec.yaml:172-187`), and is a label only: there is no DSCP u32 filter anywhere; each CE uplink shapes with its own VRF's class as the `tc htb default`.
+
+The generator derives all CE VRF configs, PE route-targets/RDs, and QoS classes from this. No per-node config editing needed.
 
 ---
 
@@ -1145,7 +1163,7 @@ Recommended action: [runbook resolution section]
 | Per-scenario recall | Separate metrics per `fault_type` | All 21 types >0.70 |
 | Copilot accuracy | Human evaluation of runbook grounding | Zero hallucinated device names |
 
-The hardest scenarios to predict early are `bgp_flap` (lead_time=2s), `node_failure` (lead_time=1s), `srlg_cut` (lead_time=2s), and `rr_failure` (lead_time=3s). Acceptable to catch these post-impact. The highest-value early predictions are `brownout` (lead_time=55s), `congestion` (lead_time=52s), `core_congestion` (~45s), and `gray_failure` (up to 120s — long precursor but very weak signal).
+In the live orchestrator, the hardest scenarios to predict early are `bgp_flap` (fixed lead=2s), `node_failure` (fixed lead=1s), `brownout` (now fixed lead=4s, since it lost its probe — see Section 4), `srlg_cut` (fixed lead=2s), and `rr_failure` (fixed lead=3s). Acceptable to catch these post-impact. In the synthetic dataset, none of this holds: `synthetic/generate.py:470` floors every fault type's lead at `4 * step` (120s at the default step), so `lead_time_s` is >=120s across the board there regardless of scenario.
 
 ---
 
@@ -1162,7 +1180,7 @@ The hardest scenarios to predict early are `bgp_flap` (lead_time=2s), `node_fail
 | `/root/LAB/faults/labels/labels.jsonl` | Ground truth written by each fault run |
 | `/root/LAB/synthetic/calibrate.py` | Derives profile.json from real Parquet |
 | `/root/LAB/topology/topology-meta.json` | POP metadata (ABRs, SRLGs, inter-POP links) emitted by generator; consumed by fault orchestrator and data API |
-| `/root/LAB/synthetic/generate.py` | Generates 8.89M-row synthetic dataset |
+| `/root/LAB/synthetic/generate.py` | Generates synthetic dataset (~18.1M rows at `--days 7 --scale 3`, 899 entities/tick) |
 | `/root/LAB/synthetic/profile.json` | Calibration parameters (written by calibrate.py) |
 | `/root/LAB/ragcorpus/` | Runbooks + topology map for LLM RAG retrieval |
 | `/root/LAB/telemetry/docker-compose.yml` | VictoriaMetrics, Loki, Grafana, Telegraf stack |

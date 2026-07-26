@@ -70,7 +70,10 @@ def events(
 
 @app.get("/flows")
 def flows(limit: int = Query(500), device: str = Query(None)):
-    return {"rows": sources.flow_rows(limit=limit, device=device)}
+    try:
+        return {"rows": sources.flow_rows(limit=limit, device=device)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"flow source error: {e}")
 
 
 @app.get("/labels")
@@ -98,9 +101,10 @@ def datasets(
         path = export.build_dataset(start, end, step)
         return FileResponse(path, media_type="application/octet-stream",
                             filename=os.path.basename(path))
-    existing = sorted(glob.glob(os.path.join(export.DATASETS_DIR, "*.parquet")))
+    existing = glob.glob(os.path.join(export.DATASETS_DIR, "*.parquet"))
     if not existing:
         raise HTTPException(404, "no dataset built yet; call with build=true")
-    path = existing[-1]
+    # by window END, not the lexicographic filename sort (which orders by START)
+    path = max(existing, key=lambda p: int(os.path.basename(p).split("_")[2]))
     return FileResponse(path, media_type="application/octet-stream",
                         filename=os.path.basename(path))

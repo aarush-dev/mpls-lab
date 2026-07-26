@@ -120,8 +120,8 @@ Branch CEs only get CORP and VOICE (not GUEST); skip vrf_idx=2 for branch sites.
 
 Example (branch0, CORP): 10.1.0.0/30 → PE=10.1.0.1, CE=10.1.0.2
 Example (branch0, VOICE): 10.1.1.0/30 → PE=10.1.1.1, CE=10.1.1.2
-Example (hub0, CORP): 10.1.0.16/30 → PE=10.1.0.17, CE=10.1.0.18
-  (hub0 has site_linear_idx=4 → 4*4=16)
+Example (hub0, CORP): 10.1.0.96/30 → PE=10.1.0.97, CE=10.1.0.98
+  (hub0 has site_linear_idx=24, after 24 branches → 24*4=96)
 
 ### Customer LANs (/24) — Option A, one per (site, VRF)
 
@@ -137,12 +137,13 @@ site_linear_idx k, vrf_idx v (CORP=0, VOICE=1, GUEST=2):
 ```
 
 Collision-free: each site owns the contiguous block [k*4 .. k*4+3]; only slots
-0..2 are used (slot 3 spare), so per-site ranges never overlap. With 8 sites the
-max third octet is 7*4+2 = 30.
+0..2 are used (slot 3 spare), so per-site ranges never overlap. With 34 sites
+(24 branch + 6 hub + 4 dc, k=0..33) the max third octet is 33*4+2 = 134
+(`generator/generate.py:332` asserts `lin_idx*4+2 < 256`, plenty of headroom).
 
 Examples:
   branch0 CORP:  192.168.0.0/24    branch0 VOICE: 192.168.1.0/24
-  hub0 (idx 4) CORP: 192.168.16.0/24  hub0 GUEST: 192.168.18.0/24
+  hub0 (idx 24) CORP: 192.168.96.0/24  hub0 GUEST: 192.168.98.0/24
 
 The CE's per-VRF bgpd process (`router bgp <asn> vrf vrf_<VRF>`) advertises
 only its own VRF's /24 via `network` statement — no per-neighbor outbound filters
@@ -154,21 +155,31 @@ them into VPNv4 automatically — no explicit PE network statements needed.
 
 ### CE BGP ASNs
 
+`ce_asn_base` (`topology-spec.yaml:145-148`): branch=65101, hub=65201, dc=65301. `asn = asn_base[site_type] + (idx-1)` (`generate.py:315`):
+
 ```
-branch CE{i} (1-based): AS = 65100 + i      → 65101..65104
-hub    CE{i}:           AS = 65200 + i      → 65201..65202
-dc     CE{i}:           AS = 65300 + i      → 65301..65302
+branch CE{i} (1-based): AS = 65100 + i      → 65101..65124  (24 branches)
+hub    CE{i}:           AS = 65200 + i      → 65201..65206  (6 hubs)
+dc     CE{i}:           AS = 65300 + i      → 65301..65304  (4 dc)
 ```
 
 ### WireGuard overlay
 
+`generate.py:441-459`. The dc block sits at `.101+`, not adjacent to hub/branch, so the
+range stays disjoint as branch_count grows (a `.21..` dc block would have collided with
+the branch spoke range once branch_count passed ~10):
+
 ```
-hub CE{i}:     172.16.0.{i}/24      → 172.16.0.1, 172.16.0.2
-branch CE{i}:  172.16.0.{10+i}/24  → 172.16.0.11..172.16.0.14
-dc     CE{i}:  172.16.0.{20+i}/24  → 172.16.0.21..172.16.0.22
+hub CE{i}:     172.16.0.{i}/24        → 172.16.0.1..172.16.0.6      (6 hubs)
+branch CE{i}:  172.16.0.{10+i}/24     → 172.16.0.11..172.16.0.34    (24 branches)
+dc CE{i}:      172.16.0.{100+i}/24    → 172.16.0.101..172.16.0.104  (4 dc)
 ```
 
-Each spoke peers to both hubs (two `[Peer]` entries in wg0.conf). Hubs peer to all spokes. Keys are generated via `wg genkey | tee privkey | wg pubkey > pubkey` at generation time; pubkeys are cross-injected into peer configs.
+Every spoke (branch + dc, 28 total) peers to **all 6 hubs**, not just two — 168
+spoke-hub tunnels (`generate.py:471-486`). With `hub_hub_wg: true`, adjacent hub
+pairs (hub1+hub2, hub3+hub4, hub5+hub6) also get a direct hub-hub tunnel — 3 more.
+Keys are generated via `wg genkey | tee privkey | wg pubkey > pubkey` at generation
+time; pubkeys are cross-injected into peer configs.
 
 ## FRR config conventions (from martimy/clab_mpls_frr reference)
 
@@ -306,8 +317,9 @@ At `pe_count=12`: C(12,2) = 66 iBGP sessions as full-mesh is impractical. Route-
 mode is mandatory and auto-enabled by `generate.py` when `pe_count > 5`.
 
 Current configuration: `route_reflector: true`, `rr_nodes: ["pe1","pe2"]`. pe1 and pe2 serve
-as RR servers (they peer to each other as standard iBGP). pe3–pe12 are RR clients, each
-peering only to pe1 and pe2 — resulting in 12 × 2 = 24 iBGP sessions total.
+as RR servers (they peer to each other as standard iBGP, 1 session). pe3–pe12 (10 clients)
+each peer only to pe1 and pe2 (2 sessions each, 20 total) — **21 iBGP sessions total**
+(`generate.py:278-295`), vs. 66 for full mesh.
 
 Full-mesh iBGP is still used when `pe_count ≤ 5` and `route_reflector: false`.
 
@@ -398,14 +410,17 @@ POST http://172.20.20.50:8428/api/v1/import/prometheus
 | `ospf_spf_last_duration_ms` | `{device}` | P+PE | SPF compute time; elevated during area_flap |
 | `ospf_spf_last_executed_ms` | `{device}` | P+PE | Msec-since-boot of last SPF run; jumps on each reconvergence |
 | `mpls_lsp_count` | `{device}` | P+PE | Installed MPLS forwarding entries (~107/node under normal operation) |
-| `bgp_peer_established` | `{device}` | PE only | Established iBGP/VPNv4 peers (RR pe1/pe2 = 22; client PEs = 4) |
+| `bgp_peer_established` | `{device}` | PE only | Distinct established iBGP peers (a peer active in both `ipv4Unicast` and `ipv4Vpn` counts once — was double-counted before this repair pass): RR pe1/pe2 = 11; client PEs = 2 |
 
 These metrics map directly to the new fault scenarios: `ospf_area_flap` → spikes in
 `ospf_spf_last_duration_ms`; `p_node_failure` / `srlg_cut` / `pop_isolation` → drops in
 `ospf_neighbor_state`; `rr_failure` → collapse of `bgp_peer_established` on the affected RR.
 
-**SNMP coverage extended:** Telegraf SNMP agents scaled 52 → **70** (spliced from the
-generator-emitted `snmp_agents.toml`, which now includes p9–p24 and pe11–pe12).
+**SNMP coverage extended:** Telegraf SNMP agents scaled 52 → **70**
+(`telemetry/telegraf/telegraf.conf:27-`, verified by count), now including p9–p24 and
+pe11–pe12. This list is a hand-maintained static array, not generator-derived — there is
+no `snmp_agents.toml` (that generator emission was deleted; see "topology-meta.json
+contract" above).
 
 **Grafana NOC Overview:** 7 → **11 panels** (added: OSPF Adjacency State, OSPF SPF Duration,
 MPLS LSP Count, BGP Peers Established).
@@ -483,13 +498,17 @@ Schema:
 ```
 
 The fault orchestrator loads this file at startup and resolves all link sets at runtime —
-no hardcoded interface names in any fault scenario. Anti-drift: SNMP `snmp_agents.toml` and
-`nfacctd` `device_map.txt` are also emitted by the generator from the same topology data.
+no hardcoded interface names in any fault scenario. Anti-drift: `nfacctd`'s
+`topology/telemetry/device_map.txt` is also emitted by the generator from the same topology
+data (`generate.py:706-729`). There is no `snmp_agents.toml` — that emission was deleted.
+Telegraf's SNMP agent list (`telemetry/telegraf/telegraf.conf`) is a hand-maintained static
+list, not generator-derived; its own comment still refers to the deleted file as something
+it "duplicates" — stale, but out of scope for this doc (it's in code, not here).
 
 ## Device-health / environmental feature set
 
 Added 19 columns (21 -> 40). Driven by a literature review of what actually predicts
-network hardware failure; full source list in `DOCS/SIMULATION_AND_DATASET_NOTES.md`.
+network hardware failure; sources cited inline in the real-vs-modelled table below.
 
 ### Why a third entity_type
 
@@ -557,4 +576,53 @@ After generation, verify manually or via script:
    LANs share a /24. Total hosts = sum over sites of #VRFs served (=78 with 24 branch + 6 hub + 4 dc).
 4. LDP is only on P and PE nodes, only on core-facing interfaces (never CE-facing).
 5. All loopbacks participate in OSPF; all CE-facing interfaces on PE are VRF-bound and NOT in OSPF.
-6. WireGuard: each spoke has exactly 2 `[Peer]` entries (one per hub); each hub has `(branch_count + dc_count)` `[Peer]` entries.
+6. WireGuard: each spoke has exactly `hub_count` `[Peer]` entries (one per hub, currently 6); each hub has `(branch_count + dc_count)` `[Peer]` entries plus 1 more if it's in a `hub_hub_wg` pair.
+
+## Decisions from the 2026-07-26 repair pass (105 audit findings)
+
+**Tunnel telemetry is labelled SIMULATED, not faked as measured.** The old HELP
+text implied `sdwan_tunnel_latency_ms`/`_jitter_ms`/`_loss_pct` were straight
+measurements. They aren't: only the wg0 ping layer is real, the congestion term
+is an M/M/1 model, and the fault term is a netem *qdisc-config* readback, not
+something the ping actually traversed (`controller/controller.py:150-181`). A
+consumer trusting these as ground-truth measurements would draw the wrong
+conclusion about what the model can learn from them, so the HELP strings now
+say SIMULATED outright (`controller.py:8-13`) instead of leaving the gap
+implicit. Honesty about provenance beats a nicer-sounding metric name.
+
+**Three scenarios (`hub_spoke_congest`, `bgp_cascade`, `brownout`) dropped their
+`vm_threshold` probes and became `impact_method: modelled`.** Their probes
+threshold on metrics those scenarios don't actually move in an observable way
+(`faults/orchestrator.py:267-283`, `325-342`, `348-361`) — the old code was
+claiming a real measurement it couldn't produce. Downgrading to a fixed-delay
+`modelled` impact is honest about what the orchestrator actually knows for
+these three; a fabricated `vm_threshold` label would silently poison
+`impact_method`-conditioned downstream analysis.
+
+**The airgap verifier was rewritten because it always passed.** The old capture
+ran on `eth0`, which the host's MASQUERADE rule already NATs — so a src-net
+filter for container subnets can never match there, and the check was a
+guaranteed no-op (`airgap/verify-airgap.sh`, "3. Runtime egress" section).
+Moved to `tcpdump -i any` (bridge-side, pre-NAT) plus real failure paths for
+missing tcpdump / empty pcap / zero running containers / an actual
+`docker pull` during the window. A gate that cannot fail is not a gate.
+
+**Lead time is floored at `4 * step`** (120 s at the default 30 s step) in the
+synthetic generator (`synthetic/generate.py:13`), overriding whatever the
+calibrated value from the real capture says. A precursor window shorter than a
+few buckets gives a model no usable signal to train on regardless of what
+really happened in the lab — floor it rather than ship unlearnable positives.
+
+**Both `dataapi/datasets/` and `synthetic/output/` are a mix of stale and current
+files — check each before trusting it.** 4 of the 5 `dataapi/datasets/*.parquet`
+files are pre-repair 21-column exports and fail `check_dataset.py`'s schema
+check; only `dataset_1785032386_1785033870_30s.parquet` (40 columns) passes.
+One of the 4 stale files, `dataset_1782715445_1782719045_30s.parquet`, also has
+`is_fault.sum() == 0` — a relic of the pre-fix single-bucket-instant label join.
+`synthetic/output/` is similarly mixed: several files (including the largest,
+`synthetic_..._d7.0_s30_x3.0.parquet`, 8,890,560 rows from `--days 7 --scale 3`)
+are 21-column and predate both the 40-column feature set and the mandatory
+`synthetic=true` Parquet metadata `check.py` gate 0 now requires, so they fail
+the current checker; other files in the same directory are already 40-column.
+Verify column count and run the relevant `check*.py` before using any shipped
+file rather than assuming freshness from the directory name.

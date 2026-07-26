@@ -1,8 +1,8 @@
 # Plan — Air-Gapped Predictive Copilot: Full Network Simulation + Telemetry (Phases 1–2)
 
 > Handoff note: this plan was researched and approved in a remote authoring environment.
-> Build/deploy it on the **local agent / workstation** (full kernel + 18 cores / 120 GB / 300 GB).
-> See `docs/PHASE0-ENVIRONMENT.md` for what was verified remotely and what the local agent must
+> Build/deploy it on the **local agent / workstation** (full kernel + 19 cores / 108 GB / 1007 GB).
+> See `DOCS/PHASE0ENVIRONMENT.md` for what was verified remotely and what the local agent must
 > re-check on its own kernel before deploying.
 
 ## Context
@@ -19,7 +19,7 @@ make its output realistic (diurnal traffic, congestion ramps, flap precursors, t
 policy drift) and optionally augment with a calibrated generator for ML scale.
 
 ### Environment
-Build and deploy on the local workstation (18 cores / 120 GB RAM / 300 GB disk). **Everything is
+Build and deploy on the local workstation (19 cores / 108 GB RAM / 1007 GB disk). **Everything is
 built and deployed in ONE environment — the full lab, full node count, no smaller/validation
 variant.** Work is committed to git. Docker present; Containerlab to be installed; build-time
 egress for image pulls (air-gap is enforced at runtime, verified later).
@@ -66,7 +66,7 @@ egress for image pulls (air-gap is enforced at runtime, verified later).
 ## Target Architecture (sized to need, not hardcoded)
 
 A large multi-site **enterprise SD-WAN over a provider MPLS core**, generated from a small spec
-so node counts are parameters (scale up freely on 120 GB):
+so node counts are parameters (scale up freely on 108 GB):
 
 - **Provider core:** several **P** routers (LDP LSRs) + multiple **PE** routers (LERs running
   MP-BGP VPNv4 / L3VPN, per-customer VRFs). Core IGP = OSPF; transport = LDP; PE mesh/RR for VPNv4.

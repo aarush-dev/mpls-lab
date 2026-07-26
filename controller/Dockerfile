@@ -7,9 +7,7 @@
 FROM docker:cli AS docker-cli
 FROM python:3.11-slim
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-RUN apt-get update \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir pyyaml
+RUN pip install --no-cache-dir pyyaml
 WORKDIR /app
 COPY controller/topo.py controller/controller.py /app/controller/
 COPY trafficgen/diurnal.py /app/trafficgen/

@@ -16,10 +16,12 @@ networks:
 volumes:
   vm-data:
   grafana-data:
+  loki-data:
 
 services:
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.103.0
+    pull_policy: never
     container_name: tele-victoriametrics
     command:
       - "-storageDataPath=/victoria-metrics-data"
@@ -36,12 +38,20 @@ services:
 
   grafana:
     image: grafana/grafana:11.1.0
+    pull_policy: never
     container_name: tele-grafana
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # AIR-GAP: grafana's defaults.ini enables all of these, so the container
+      # would otherwise dial stats.grafana.org and grafana.com on a timer.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_ANALYTICS_FEEDBACK_LINKS_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -57,6 +67,7 @@ services:
 
   telegraf:
     image: telegraf:1.31.1
+    pull_policy: never
     container_name: tele-telegraf
     volumes:
       - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
@@ -70,6 +81,7 @@ services:
 
   nfacctd:
     image: pmacct/nfacctd:v1.7.9
+    pull_policy: never
     container_name: tele-nfacctd
     volumes:
       - ./nfacctd/nfacctd.conf:/etc/pmacct/nfacctd.conf:ro
@@ -84,10 +96,14 @@ services:
 
   loki:
     image: grafana/loki:3.1.0
+    pull_policy: never
     container_name: tele-loki
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
       - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      # loki.yaml sets path_prefix /loki — without this volume every chunk and
+      # index lives in the container layer and dies on recreate.
+      - loki-data:/loki
     ports:
       - "3100:3100"
     networks:
@@ -97,6 +113,7 @@ services:
 
   promtail:
     image: grafana/promtail:3.1.0
+    pull_policy: never
     container_name: tele-promtail
     command: ["-config.file=/etc/promtail/promtail.yaml"]
     volumes:
@@ -118,14 +135,16 @@ services:
   # `docker exec clab-sdwan_mpls_noc-<node> tc qdisc show dev eth1`.
   # Build: docker build -t noc-controller -f controller/Dockerfile . (from /root/LAB)
   controller:
-    image: noc-controller:0.1   # pinned for air-gap; pull_policy: never (pre-loaded via load-offline.sh)
+    image: noc-controller:0.1   # pinned for air-gap; pre-loaded via load-offline.sh
+    pull_policy: never
     container_name: noc-controller
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Mount the SCALED spec over the image's baked-in copy so the controller
-      # models the full 34-node topology (5P/5PE/16branch/4hub/4dc), not the
-      # stale build-time spec.
-      - /root/LAB/topology-spec.yaml:/app/topology-spec.yaml:ro
+      # models the current topology, not the stale build-time spec. Relative to
+      # this compose file — an absolute /root/LAB path makes docker silently
+      # create an empty DIRECTORY on any host where the repo lives elsewhere.
+      - ../topology-spec.yaml:/app/topology-spec.yaml:ro
     environment:
       DIURNAL_PERIOD: "3600"
       TOPO_SPEC: /app/topology-spec.yaml
@@ -140,10 +159,13 @@ services:
   # Uses noc-controller image (has docker CLI + python). Loops every 30s,
   # runs ldp-metrics.sh, pushes Prometheus text to VM import API.
   # ponytail: reuses controller image; no new image build or air-gap update.
+  # A failing push is left UNREDIRECTED on purpose: `docker logs noc-ldp-metrics`
+  # is the only signal that the collector is dead (container stays Up either way).
   ldp-metrics:
     image: noc-controller:0.1
+    pull_policy: never
     container_name: noc-ldp-metrics
-    entrypoint: ["/bin/bash", "-c", "while true; do /app/ldp-metrics.sh 2>/dev/null | python3 -c \"import sys,urllib.request; urllib.request.urlopen('http://172.20.20.50:8428/api/v1/import/prometheus', data=sys.stdin.buffer.read())\" 2>/dev/null; sleep 30; done"]
+    entrypoint: ["/bin/bash", "-c", "while true; do /app/ldp-metrics.sh 2>/dev/null | python3 -c \"import sys,urllib.request; urllib.request.urlopen('http://172.20.20.50:8428/api/v1/import/prometheus', data=sys.stdin.buffer.read())\"; sleep 30; done"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./telegraf/ldp-metrics.sh:/app/ldp-metrics.sh:ro
@@ -161,8 +183,9 @@ services:
   # ponytail: same image + same push loop as ldp-metrics; nothing new to build.
   env-metrics:
     image: noc-controller:0.1
+    pull_policy: never
     container_name: noc-env-metrics
-    entrypoint: ["/bin/bash", "-c", "while true; do python3 /app/env-metrics.py 2>/dev/null | python3 -c \"import sys,urllib.request; urllib.request.urlopen('http://172.20.20.50:8428/api/v1/import/prometheus', data=sys.stdin.buffer.read())\" 2>/dev/null; sleep 30; done"]
+    entrypoint: ["/bin/bash", "-c", "while true; do python3 /app/env-metrics.py 2>/dev/null | python3 -c \"import sys,urllib.request; urllib.request.urlopen('http://172.20.20.50:8428/api/v1/import/prometheus', data=sys.stdin.buffer.read())\"; sleep 30; done"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./env-metrics.py:/app/env-metrics.py:ro
@@ -185,13 +208,14 @@ services:
   # nfacctd captures flows. Backend=nc; sim backend available for offline testing.
   # Build: docker build -t noc-trafficgen -f trafficgen/Dockerfile . (from /root/LAB)
   trafficgen:
-    image: noc-trafficgen:0.1   # pinned for air-gap; pull_policy: never (pre-loaded via load-offline.sh)
+    image: noc-trafficgen:0.1   # pinned for air-gap; pre-loaded via load-offline.sh
+    pull_policy: never
     container_name: noc-trafficgen
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Same scaled-spec mount as controller so trafficgen drives flows across
       # all scaled sites, not just the build-time set.
-      - /root/LAB/topology-spec.yaml:/app/topology-spec.yaml:ro
+      - ../topology-spec.yaml:/app/topology-spec.yaml:ro
     environment:
       DIURNAL_PERIOD: "3600"
       TRAFFICGEN_BACKEND: "nc"

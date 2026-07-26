@@ -6,6 +6,13 @@ preference picks the primary hub), derives per-tunnel metrics, does latency/loss
 path selection with failover, and exposes everything as Prometheus text on HTTP
 so Telegraf (Phase 2) scrapes it directly — no extra dependency.
 
+WHAT IS AND IS NOT MEASURED (the emitted series are SIMULATED, see
+render_prometheus HELP text): the wg0 RTT/loss is measured; the congestion,
+jitter and loss-burst terms are modelled; and the FAULT term is neither — it is
+the netem impairment read back out of the site uplink's qdisc *config*, because
+the wg0 ping does not traverse that uplink. Fault scenarios that threshold on
+these series are thresholding a modelled value.
+
 # ponytail: tunnel latency is MEASURED — a background pool pings the hub's wg0 IP
 #   from inside each spoke (`docker exec ... ping -I wg0`) on a ~45s cadence and
 #   caches min/avg/max/loss; update() reads the cache each tick and layers the
@@ -30,6 +37,7 @@ import random
 import subprocess
 import sys
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "trafficgen"))
@@ -75,7 +83,6 @@ class TunnelState:
         self.site = spec["site"]
         self.site_type = spec["site_type"]
         self.hub = spec["hub"]
-        self.spoke_wg = spec["spoke_wg"]
         self.hub_wg = spec["hub_wg"]
         self.vrfs = spec["vrfs"]
         # Propagation reference (ms): seeded at a minimal floor, refreshed to the
@@ -91,8 +98,11 @@ class TunnelState:
         self.jitter_ms = 0.5 + self.base_ms * 0.04
         self.loss_pct = 0.0
         self.rekeys = 0  # cumulative WireGuard rekey counter
-        # Deterministic per-tunnel RNG so the noise realization is stable per tunnel.
-        self._rng = random.Random(hash(self.tunnel) & 0xFFFFFFFF)
+        # Deterministic per-tunnel RNG so the noise realization is stable per
+        # tunnel AND across restarts. NOT hash(): CPython randomises str hashing
+        # per process unless PYTHONHASHSEED is set, which reseeded every tunnel
+        # on every controller restart. crc32 is stable by definition.
+        self._rng = random.Random(zlib.crc32(self.tunnel.encode()))
         # Correlated-jitter state: an AR(1) random walk (not white noise) so jitter
         # wanders the way real path jitter does, with brief excursions.
         self._jit_walk = 0.0
@@ -119,9 +129,14 @@ class TunnelState:
     def _measure_rtt(self):
         """Ping the hub's wg0 overlay IP from inside this spoke over wg0.
 
-        Returns (avg_ms, jitter_ms, loss_pct) or None on any failure (graceful
-        fallback). busybox ping: `round-trip min/avg/max = a/b/c ms` + `N% packet
-        loss`; no mdev, so jitter = max-min.
+        Returns (avg_ms, jitter_ms, loss_pct), or None when the ping could not be
+        run/parsed at all (graceful fallback). busybox ping: `round-trip
+        min/avg/max = a/b/c ms` + `N% packet loss`; no mdev, so jitter = max-min.
+
+        At 100% loss there is NO round-trip line, so avg_ms is None — that is a
+        REAL result (the tunnel is dead) and must not be discarded, otherwise the
+        cache freezes at the last healthy values and the telemetry keeps
+        reporting a pre-outage RTT through a total outage.
         """
         cname = f"clab-sdwan_mpls_noc-{self.site}"
         try:
@@ -144,7 +159,9 @@ class TunnelState:
                 if len(nums) >= 3:
                     mn, avg, mx = (float(nums[0]), float(nums[1]), float(nums[2]))
         if avg is None:
-            return None
+            # Unreachable (total loss) vs unparseable output: only the former is
+            # a measurement worth caching.
+            return (None, 0.0, loss) if loss >= 100.0 else None
         return avg, max(0.0, mx - mn), loss
 
     def _read_netem(self):
@@ -180,8 +197,13 @@ class TunnelState:
                     loss_pct = _parse_pct(toks[i + 1])
         return delay_ms, loss_pct
 
-    def update(self, now):
+    def update(self, now, netem=None):
         """Recompute modelled metrics for this tick, coupled to the diurnal curve.
+
+        `netem` is the (delay_ms, loss_pct) readback for this tunnel's SITE,
+        hoisted by Controller.tick() so it costs one docker exec per site per
+        tick instead of one per tunnel (6 tunnels share every spoke's uplink).
+        Passing None falls back to reading it here.
 
         The same curve that drives offered load (diurnal.util) drives congestion
         here, so telemetry and traffic move together. A nonlinear M/M/1-style
@@ -195,9 +217,10 @@ class TunnelState:
         cong = max((diurnal.util(hod, v) for v in self.vrfs), default=0.3) * wk
         cong = max(0.0, min(0.985, cong))  # cap below 1 so the queue term stays finite
 
-        # eth1 readback = the FAULT term: faults inject netem on the per-VRF uplink
-        # (eth1), which the wg0 ping does NOT traverse, so we still fold it in here.
-        netem_delay, netem_loss = self._read_netem()
+        # eth1 readback = the FAULT term. NOT a measurement: it is the impairment
+        # someone CONFIGURED on the uplink, read back out of the qdisc, because
+        # the wg0 ping does not traverse eth1. See render_prometheus() HELP text.
+        netem_delay, netem_loss = netem if netem is not None else self._read_netem()
 
         # --- Measured propagation (ping over wg0, cached) -------------------------
         # The per-site eth0 netem the generator emits is what the ping actually sees.
@@ -205,7 +228,13 @@ class TunnelState:
         # it. Empty/None → minimal floor (NOT the deleted geography model).
         if self._measured is not None:
             meas_avg, meas_jit, meas_loss = self._measured
-            self.base_ms = meas_avg          # keep the failover baseline on real RTT
+            if meas_avg is None:
+                # Tunnel unreachable (100% loss): no RTT to report. Hold the last
+                # latency baseline and let the measured 100% loss dominate, so a
+                # total outage is visible instead of looking pre-outage healthy.
+                meas_avg = self.base_ms
+            else:
+                self.base_ms = meas_avg      # keep the failover baseline on real RTT
         else:
             meas_avg, meas_jit, meas_loss = MEASURE_FLOOR_MS, 0.0, 0.0
 
@@ -397,11 +426,19 @@ class Controller:
     def tick(self, now=None):
         """Advance the model one step; return (rekey_events, path_events)."""
         now = now or time.time()
-        self._drift = {k: v for k, v in self._drift.items()
+        # list() the snapshot: _drift is mutated by HTTP handler threads, and
+        # iterating it live raced with a POST ("dict changed size during
+        # iteration" would kill this loop).
+        self._drift = {k: v for k, v in list(self._drift.items())
                        if v["expires"] is None or v["expires"] > now}
+        # One netem readback per SITE per tick (all of a site's tunnels share the
+        # uplink), not one per tunnel: 28 docker execs instead of 168.
+        netem_by_site = {}
         rekeys = []
         for t in self.tunnels:
-            if t.update(now):
+            if t.site not in netem_by_site:
+                netem_by_site[t.site] = t._read_netem()
+            if t.update(now, netem=netem_by_site[t.site]):
                 rekeys.append({"event": "rekey", "tunnel": t.tunnel,
                                "site": t.site, "hub": t.hub, "count": t.rekeys})
         path_events = self.select_paths()
@@ -419,13 +456,27 @@ class Controller:
             lines.append(f"# HELP {name} {help_}")
             lines.append(f"# TYPE {name} {typ}")
 
-        metric("sdwan_tunnel_latency_ms", "measured RTT + modelled congestion (ms)", "gauge")
+        # HONESTY (do not soften): these are SIMULATED series. Each is
+        #   measured wg0 RTT/loss + a modelled congestion term + the netem
+        #   impairment READ BACK OUT OF THE QDISC CONFIG on the site's eth1.
+        # That last term is a configured value, not an observation: the wg0 ping
+        # does not traverse eth1, so nothing here measures the injected fault.
+        # It is also per-SITE, so every tunnel and every VRF of a site carries
+        # the identical addend. A fault label whose t_impact is a threshold
+        # crossing of these series is a crossing of a MODELLED series.
+        metric("sdwan_tunnel_latency_ms",
+               "SIMULATED per-tunnel RTT (ms): measured wg0 RTT + modelled congestion "
+               "+ netem delay read back from the site uplink qdisc config", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_latency_ms", t, t.latency_ms))
-        metric("sdwan_tunnel_jitter_ms", "Modelled per-tunnel jitter in ms", "gauge")
+        metric("sdwan_tunnel_jitter_ms",
+               "SIMULATED per-tunnel jitter (ms): measured wg0 max-min + modelled "
+               "congestion walk", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_jitter_ms", t, t.jitter_ms))
-        metric("sdwan_tunnel_loss_pct", "Modelled per-tunnel packet loss percent", "gauge")
+        metric("sdwan_tunnel_loss_pct",
+               "SIMULATED per-tunnel loss percent: measured wg0 loss + modelled floor/"
+               "bursts + netem loss read back from the site uplink qdisc config", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_loss_pct", t, t.loss_pct))
         metric("sdwan_tunnel_rekeys_total", "Cumulative WireGuard rekey events", "counter")
@@ -438,10 +489,15 @@ class Controller:
             st = next((t.site_type for t in self.tunnels if t.site == site), "")
             lbl = f'{{device="{site}",site="{site}",site_type="{st}",vrf="{vrf}",hub="{hub}"}}'
             lines.append(f"sdwan_path_active{lbl} 1")
-        metric("sdwan_path_changes_total", "Cumulative path-selection changes", "counter")
+        # NOTE: fabric-wide and UNLABELLED — it cannot be attributed to a device,
+        # and the modelled micro-burst RNG moves it on its own with no fault
+        # injected. Not usable as fault-impact evidence.
+        metric("sdwan_path_changes_total",
+               "Cumulative path-selection changes across the whole fabric "
+               "(unlabelled; also moves from the modelled loss bursts)", "counter")
         lines.append(f"sdwan_path_changes_total {self.path_changes}")
 
-        for site, d in self._drift.items():
+        for site in list(self._drift):
             lines.append(f'sdwan_controller_drift_active{{site="{site}"}} 1')
 
         return "\n".join(lines) + "\n"

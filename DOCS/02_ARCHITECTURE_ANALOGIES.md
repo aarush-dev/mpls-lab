@@ -30,8 +30,8 @@ Before diving into individual pieces, here is the whole system in one diagram. R
   │  │  24x ce_branch  6x ce_hub  4x ce_dc   (CE routers)  │    │      │
   │  │  + 78 host containers (one per site+VRF combination) │    │      │
   │  └────────────────────────────────────────────────────┬─┘    │      │
-  │              WireGuard SD-WAN overlay (~168 tunnels)  │      │      │
-  │                        hub-spoke topology             │      │      │
+  │              WireGuard SD-WAN overlay (168 spoke-hub +│      │      │
+  │              3 hub-hub = 171); full spoke-to-hub mesh │      │      │
   └───────────────────────────────────────────────────────┼──────┘      │
                                                           │
   ┌───────────────── TELEMETRY PIPELINE ─────────────────▼──────────────┐
@@ -59,7 +59,8 @@ Before diving into individual pieces, here is the whole system in one diagram. R
                     ┌─────────────────────────┐
                     │   ML TEAM               │
                     │   40-column Parquet      │
-                    │   8.89M rows             │
+                    │   +synthetic (~18.1M    │
+                    │   rows @ --days 7 -s 3) │
                     │   is_fault, lead_time_s  │
                     └─────────────────────────┘
 ```
@@ -80,7 +81,7 @@ In our lab:
 
 - **The highway on-ramps (PE routers — pe1 through pe12):** Twelve routers (two per POP) that sit at the boundary between the highway system and the customer's private road network. When your company's traffic enters here, the on-ramp stamps it with a label ("this belongs to Company A, destination downtown") and hands it to the highway. Each PE dual-homes to the two PE-facing P routers in its POP for resilience.
 
-- **The office buildings (CE routers — 24 of them):** Customer Edge routers, one per site. These are the company's own equipment — the building's front door. 16 branch offices, 4 regional hubs, 4 datacenters. Each CE connects to one PE via a private link.
+- **The office buildings (CE routers — 34 of them):** Customer Edge routers, one per site. These are the company's own equipment — the building's front door. 24 branch offices, 6 regional hubs, 4 datacenters (`topology-spec.yaml:25-27`). Each CE connects to one PE via a private link.
 
 - **The departments inside each building (VRFs):** Each site has separate networks for different groups of people. A visitor on the guest wifi cannot wander into the HR server. This isolation is implemented as VRFs (Virtual Routing and Forwarding) — three of them: **CORP** (staff computers), **VOICE** (IP phones), **GUEST** (visitor wifi). Even though they share the same physical hardware, they behave as completely separate networks.
 
@@ -162,31 +163,31 @@ In networking terms, this is **MPLS L3VPN** with **MP-BGP VPNv4**:
 
 - Each PE router maintains separate **VRF (Virtual Routing and Forwarding)** tables, one per customer (or in our case, one per service class: CORP, VOICE, GUEST).
 - The VRF is like a separate routing table — a completely isolated IP address space. The same IP address can appear in CORP and VOICE without conflict, because they live in different VRFs.
-- **Route Distinguisher (RD):** Every VPN route gets an extra tag prepended to make it globally unique, even if two customers use the same IP range. `65000:10` for CORP, `65000:20` for VOICE, `65000:30` for GUEST.
-- **Route Target (RT):** Controls which VRFs "import" which routes — which trucks are allowed to follow which exit signs. A CORP route is only imported by CORP VRFs at other PE routers.
+- **Route Target (RT):** Controls which VRFs "import" which routes — which trucks are allowed to follow which exit signs. A CORP route is only imported by CORP VRFs at other PE routers. RT is the shared community from the spec: `65000:10` for CORP, `65000:20` for VOICE, `65000:30` for GUEST (`topology-spec.yaml:72-85`).
+- **Route Distinguisher (RD):** Every VPN route also gets a tag that makes it globally unique, even if two customers use the same IP range. Unlike RT, the RD is **not** shared — it is derived per-PE as `<pe_loopback>:<vrf_last_octet>`, e.g. pe3 (loopback `10.255.2.3`) tags its CORP routes with RD `10.255.2.3:10`. This keeps identical customer prefixes advertised from two different sites as distinct VPNv4 NLRIs (`generator/generate.py:399-403`).
 - **MP-BGP VPNv4:** The protocol that carries VPN routes between PE routers across the MPLS core. All 12 PE routers exchange VPNv4 prefixes via Route Reflectors: pe1+pe2 act as RR servers; pe3–pe12 are RR clients that peer only with pe1+pe2 — 21 sessions instead of a C(12,2)=66-session full mesh.
 
 ```
 PE1 VRF CORP: knows 192.168.0.0/24 (branch1) and 192.168.4.0/24 (branch2)...
-PE3 VRF CORP: advertises 192.168.16.0/24 (hub1_CORP) with RD=65000:10
+PE3 VRF CORP: advertises 192.168.16.0/24 (hub1_CORP) with RD=10.255.2.3:10, RT=65000:10
 
-PE1 receives PE3's advertisement → installs in VRF CORP table only
+PE1 receives PE3's advertisement, RT=65000:10 matches its CORP import → installs in VRF CORP table only
 → CORP traffic from branch1 can reach hub1
 → VOICE traffic from branch1 CANNOT reach hub1's CORP subnet (different VRF)
 ```
 
-From the spec:
+From the spec (`topology-spec.yaml:72-85`) — `rd_community` here supplies the RT, not the RD:
 ```yaml
 vrfs:
   CORP:
-    rd_community: "65000:10"
-    dscp_class: AF31
+    rd_community: "65000:10"    # RT; RD is generated per-PE, see above
+    qos_priority: 2
   VOICE:
     rd_community: "65000:20"
-    dscp_class: EF
+    qos_priority: 1
   GUEST:
     rd_community: "65000:30"
-    dscp_class: BE
+    qos_priority: 3
     sites: [hub, dc]   # branches don't get GUEST — no visitor lounges
 ```
 
@@ -202,7 +203,7 @@ BGP has two flavors in our lab:
 
 **iBGP (internal BGP):** Sessions between routers within the provider's own network (all in AS 65000). PE routers share VPNv4 routes via Route Reflectors (pe1+pe2 as RR servers, pe3–pe12 as clients) — PE1 tells PE3: "I know how to reach the CORP subnet at branch1."
 
-**eBGP (external BGP):** Sessions between different autonomous systems. Each CE router has its own BGP AS number (branch sites: AS 65101–65116, hubs: AS 65201–65204, datacenters: AS 65301–65304). When ce_branch1 (AS 65101) wants to tell the provider's pe1 (AS 65000) about its local subnet, it sends an eBGP advertisement: "I can reach 192.168.0.0/24, come through me."
+**eBGP (external BGP):** Sessions between different autonomous systems. Each CE router has its own BGP AS number (branch sites: AS 65101–65124, hubs: AS 65201–65206, datacenters: AS 65301–65304 — `topology-spec.yaml:141-144`). When ce_branch1 (AS 65101) wants to tell the provider's pe1 (AS 65000) about its local subnet, it sends an eBGP advertisement: "I can reach 192.168.0.0/24, come through me."
 
 Here is a real snippet of what that looks like in FRR (the open-source router software running in each container):
 
@@ -271,23 +272,23 @@ That is exactly what the **SD-WAN overlay** is. It is a second network that runs
 
 In our lab:
 
-- **WireGuard tunnels** are the express lanes — encrypted point-to-point tunnels between sites. There are **~168 tunnels** in a hub-spoke arrangement, plus hub-hub direct links between adjacent hub pairs (hub1↔hub2, hub3↔hub4, hub5↔hub6).
+- **WireGuard tunnels** are the express lanes — encrypted point-to-point tunnels between sites. There are **168 spoke-hub tunnels + 3 hub-hub links = 171 tunnels total**, plus hub-hub direct links between adjacent hub pairs (hub1↔hub2, hub3↔hub4, hub5↔hub6).
 - The **6 hub CEs** (ce_hub1 through ce_hub6) act as regional airports: every branch and datacenter connects through them.
-- Each spoke (branch or datacenter) connects to **2 hubs** (round-robin assignment), giving redundancy.
-- The **SD-WAN controller** (`controller/controller.py`) is the traffic management system. Every 5 seconds it measures latency, jitter, and packet loss on every tunnel, then decides which hub path each VRF should use.
+- Each of the 28 spokes (24 branches + 4 DCs) connects to **all 6 hubs** — a full spoke-to-hub mesh, not a 2-hub round-robin (`generator/generate.py:471-486`: "spokes peer to BOTH hubs; hubs peer to ALL spokes" is a stale comment left over from an earlier 2-hub design). The controller's path selection (below) then picks which of the 6 to actually use per VRF.
+- The **SD-WAN controller** (`controller/controller.py`) is the traffic management system. Every 5 seconds it renders per-tunnel latency/jitter/loss, then decides which hub path each VRF should use. These series are **SIMULATED, not fully measured**: `tunnel_latency_ms`/`jitter`/`loss` combine a real wg0 ping (measured) with a modelled congestion term and the injected fault read back out of the site's netem qdisc *config* (not observed on the wire) — see `controller/controller.py:9-14,459-481`.
 
 ```
-Hub-spoke topology:
+Full spoke-to-hub mesh (every spoke peers with every hub):
                     ┌──────────────┐
-   ce_branch1 ─────►  ce_hub1     ├──── (MPLS core) ──── ce_dc1
-   ce_branch2 ─────►  (primary)   │
-   ...                            │
-   ce_branch16────►  ce_hub2      ├──── (MPLS core) ──── ce_dc4
-   ce_dc1    ─────►  (secondary)  │
-   ...                            │
+   ce_branch1 ─────►  ce_hub1 ─┐   │
+   ce_branch2 ─────►  ce_hub2  ├───┼──── (MPLS core) ──── ce_dc1
+   ...          ╲    ce_hub3  ─┤   │
+   ce_branch24───╲──►ce_hub4   ├───┼──── (MPLS core) ──── ce_dc4
+   ce_dc1    ─────╲► ce_hub5   │   │
+   ...              ►ce_hub6 ──┘   │
                     └──────────────┘
-  Each spoke has TWO tunnels (round-robin hub assignment) for redundancy
-  ~168 tunnels total = (24 branches + 4 DCs) × 2 hubs + 6 hub-hub links
+  28 spokes x 6 hubs = 168 spoke-hub tunnels + 3 hub-hub links (adjacent pairs) = 171 total
+  Controller applies per-VRF preference + failover on top of the full mesh
 ```
 
 The controller's path selection logic applies hysteresis (to avoid flapping between paths) and per-VRF preferences:
@@ -313,14 +314,12 @@ Airlines figured out long ago that not all passengers are equal — a first-clas
 
 Networks face the same problem. A voice call is extremely sensitive to delay (even 200ms makes a conversation feel like a satellite phone call), but a bulk file transfer does not care if it finishes in 3 seconds or 5 seconds. If a voice packet and a file-transfer packet arrive at the same router at the same instant and compete for the same outgoing slot, the router needs to know which one to send first.
 
-**QoS (Quality of Service)** is the airline's priority system for packets:
+**QoS (Quality of Service)** is the airline's priority system, but in this lab it works by dedicated boarding gate rather than by luggage tag: each VRF gets its own uplink interface on the CE, so there is nothing to inspect packet-by-packet — no DSCP marking or DSCP-matching filter exists anywhere in the lab (`generator/templates/qos.sh.j2:1-4`, `topology-spec.yaml:172-190`). The `dscp` field below is a label only, carried through to describe each class's real-world analog:
+  - **EF (Expedited Forwarding, DSCP 46) = First Class** — Voice packets, 30% guaranteed bandwidth.
+  - **AF31 (Assured Forwarding, DSCP 26) = Business Class** — Corporate data, 50% guaranteed bandwidth.
+  - **BE (Best Effort, DSCP 0) = Economy** — Guest wifi traffic (hub/dc sites only), 20% best-effort remainder.
 
-- Packets get stamped with a **DSCP (Differentiated Services Code Point)** marking — a 6-bit field in the IP header. Think of it as a colored luggage tag.
-  - **EF (Expedited Forwarding, DSCP 46) = First Class** — Voice packets. Always board first. Never wait behind bulk traffic.
-  - **AF31 (Assured Forwarding, DSCP 26) = Business Class** — Corporate data. Gets guaranteed bandwidth, reasonable priority.
-  - **BE (Best Effort, DSCP 0) = Economy** — Guest wifi traffic. Gets whatever bandwidth is left over.
-
-- **HTB (Hierarchical Token Bucket)** queuing enforces these priorities on the CE router's uplink interface. It acts like the boarding gate agent who physically holds back economy passengers until first class has boarded:
+- **HTB (Hierarchical Token Bucket)** queuing enforces these percentages on each per-VRF uplink interface — the VRF's own class is the HTB `default`, since each uplink only ever carries that one VRF's traffic:
 
 ```yaml
 # from topology-spec.yaml
@@ -347,7 +346,7 @@ This matters for fault detection: when a **congestion fault** is injected, VOICE
 
 A modern international airport has hundreds of sensors — gate occupancy counters, baggage belt speed monitors, security queue cameras, aircraft fuel sensors, weather stations. All of this data feeds into a central operations center. When the system notices that security queue at gate B12 has grown from 20 people to 80 people in 10 minutes, it alerts operations *before* the flight is missed so they can open additional lanes.
 
-Our network lab has exactly the same structure. Four separate sensor systems feed into a central store:
+Our network lab has exactly the same structure. Five separate sensor systems feed into a central store:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -358,7 +357,9 @@ Our network lab has exactly the same structure. Four separate sensor systems fee
 │  Telegraf polls EVERY router EVERY 30 SECONDS                      │
 │  → pushes to VictoriaMetrics (172.20.20.50:8428)                   │
 │  Metric names: interface_ifHCInOctets, interface_ifHCOutOctets,    │
-│                interface_ifOperStatus                               │
+│                interface_ifOperStatus, interface_ifInErrors,        │
+│                interface_ifInDiscards, interface_ifOutErrors,       │
+│                interface_ifOutDiscards                              │
 │  + ldp-metrics sidecar (vtysh JSON → VictoriaMetrics, 70 nodes):  │
 │    ospf_neighbor_state, ospf_spf_last_duration_ms,                 │
 │    mpls_lsp_count, bgp_peer_established  [11 Grafana panels total] │
@@ -378,6 +379,14 @@ Our network lab has exactly the same structure. Four separate sensor systems fee
 │  Telegraf scrapes every 5s → VictoriaMetrics                       │
 │  Metrics: sdwan_tunnel_latency_ms, sdwan_tunnel_jitter_ms,         │
 │           sdwan_tunnel_loss_pct, sdwan_tunnel_rekeys_total         │
+│  SIMULATED — measured wg0 ping + modelled congestion + netem       │
+│  qdisc config read-back, NOT a live measurement (controller.py)    │
+│                                                                     │
+│  STREAM 5: Device-health + environmental (docker stats + vtysh)    │
+│  env-metrics.py serves Prometheus exposition at 172.20.20.59       │
+│  Telegraf scrapes → VictoriaMetrics                                │
+│  Metrics: cpu_pct, mem_pct, bgp_msg_rx/tx, ospf_lsa_count,         │
+│           device_temp_c, xcvr_rx_power_dbm, q_backlog_bytes, ...   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -409,6 +418,15 @@ services:
 
   controller:        # SD-WAN controller, serves tunnel metrics at :9362
     ipv4_address: 172.20.20.56
+
+  ldp-metrics:       # OSPF/LDP/MPLS/BGP sidecar (vtysh JSON → Prometheus text)
+    ipv4_address: 172.20.20.58
+
+  env-metrics:       # device-health + environmental sidecar (docker stats + vtysh)
+    ipv4_address: 172.20.20.59
+
+  trafficgen:        # drives real cross-site TCP flows (not telemetry, but shares the stack)
+    ipv4_address: 172.20.20.57
 ```
 
 All services share the same Docker network as the lab containers (`172.20.20.0/24`), so they can reach the routers directly with no NAT or firewall in the way.
@@ -430,7 +448,7 @@ tc qdisc add dev eth1 root netem delay 56ms 14ms loss 4.2%
 # This makes the router's uplink behave as if it is suffering from congestion
 ```
 
-Twenty-one fault scenarios are implemented — the original seven edge-layer scenarios plus nine new core and catastrophic scenarios added in the MPLS core redesign:
+Twenty-one fault scenarios are implemented (`faults/orchestrator.py`, one `scen_*` function each) — the original seven edge-layer scenarios, nine core/catastrophic scenarios from the MPLS core redesign, and five underlay/overlay scenarios that round out the set:
 
 | Fault Type | What it simulates | Signature in telemetry |
 |---|---|---|
@@ -440,7 +458,7 @@ Twenty-one fault scenarios are implemented — the original seven edge-layer sce
 | `policy_drift` | SD-WAN controller misconfiguration (local-pref drop) | BGP route selection shifts, Loki soft-clear events |
 | `node_failure` | BGP daemon killed (watchfrr auto-restarts it) | Brief prefix withdrawal then recovery |
 | `asymmetric_loss` | Loss only on egress direction, not ingress | Loss high, latency near-normal — hard to diagnose |
-| `brownout` | Hard bandwidth cap (queue builds but no netem delay) | Queueing latency climbs, loss appears late |
+| `brownout` | Hard bandwidth cap (queue builds but no netem delay) | Queueing latency climbs, loss appears late; impact is modelled, not probed |
 | `p_node_failure` | All interfaces of one P router go down | ospf_neighbor_state drops for all 6 POP peers; MPLS LSP reroutes via dual-homing |
 | `pop_isolation` | All inter-POP links of one POP cut | POP becomes unreachable; inter-area OSPF summaries withdrawn |
 | `core_partition` | Edge cut-set bisects the area-0 backbone ring | Two area-0 islands; cross-partition VPNv4 routes lost |
@@ -450,23 +468,33 @@ Twenty-one fault scenarios are implemented — the original seven edge-layer sce
 | `path_asymmetry` | OSPF cost raised in one direction only | Forward and return LSP paths diverge; asymmetric loss/latency |
 | `rr_failure` | BGP daemon killed on a Route Reflector (pe1 or pe2) | bgp_peer_established collapses cluster-wide; VPNv4 propagation stalls |
 | `gray_failure` | 0.5–2% loss on a backbone link, no link-down event | Slow throughput degradation; BFD stays up; only telemetry rates reveal it |
+| `mpls_underlay_failure` | P-router core interface toward a PE brought down | LDP reconverges via dual-homing (~1s with BFD); impact modelled, no probe |
+| `ldp_session_flap` | LDP session on a PE flapped N times, self-recovers | Loki `ldp_event=Down/Up`; impact modelled, no probe |
+| `hub_spoke_congest` | netem congestion ramp on a hub CE's uplink | All spokes routed through that hub degrade — but the impairment sits on the hub's eth1, which no tunnel-metric probe observes, so this is modelled only |
+| `bgp_cascade` | Cascaded BGP flaps on a hub CE | Repeated Loki ADJCHANGE, RIB churn; `sdwan_path_changes_total` is an unlabelled fabric-wide RNG counter, not attributable to this fault, so impact is modelled |
+| `controller_drift` | POSTs a latency-threshold multiplier to the SD-WAN controller for a site | `sdwan_controller_drift_active` rises; failover suppressed for the TTL window |
 
 **The ground-truth label schema** — what the ML team trains on:
 
 ```python
-# A label row in labels/labels.jsonl (one per fault scenario run):
+# A label row in labels/labels.jsonl (one per fault scenario run, faults/orchestrator.py:611-634):
 {
     "scenario_id":    "congestion-ce_branch1-a3f2c1d0",
     "type":           "congestion",
-    "target":         {"device": "ce_branch1", "interface": "eth1"},
-    "severity":       "high",
+    "target":         {"device": "ce_branch1", "interface": "eth1"},  # ALWAYS a dict now
+    "severity":       "high",                     # or null for severity-inert scenarios
     "t_start":        "2026-06-21T08:00:00Z",   # when netem was applied
     "t_impact":       "2026-06-21T08:01:23Z",   # when telemetry threshold crossed
     "t_end":          "2026-06-21T08:02:30Z",   # when fault was reverted
     "lead_time":      83.0,                      # seconds: t_impact - t_start
-    "device":         "ce_branch1"               # join key to telemetry
+    "impact_method":  "vm_threshold",             # vm_threshold | modelled_fallback | probe_unavailable | modelled
+    "device":         "ce_branch1",               # join key to telemetry
+    "dry_run":        false,                      # every row carries this now
+    "error":          null                        # set on injector failure
 }
 ```
+
+`impact_method` records how `t_impact` was derived: `vm_threshold` means a real probe crossed a threshold; `modelled_fallback` means the probe was read but never crossed; `probe_unavailable` means VictoriaMetrics returned nothing for the whole window; `modelled` means the scenario declares no probe at all (`faults/orchestrator.py:586-609`).
 
 The `lead_time` field is the prize: it tells the ML model how many seconds in advance the early warning signals appeared before the fault became user-visible. The goal is to detect faults *before* `t_impact` — during the `lead_time` window — which is why columns like `lead_time_s` and `time_to_impact_s` appear in the final dataset.
 
@@ -485,7 +513,7 @@ def run_campaign(total_duration, mean_gap=120, seed=None):
 
 When a doctor orders a blood test, they do not read the raw output of a mass spectrometer. The lab takes that raw machine output, normalizes it against reference ranges, formats it as a standard report with patient ID, test date, flagged abnormals, and units. The doctor sees one coherent document.
 
-The **FastAPI Data API** at `localhost:8000` does the same thing for this lab. It takes four raw telemetry streams from four different systems (VictoriaMetrics, Loki, nfacctd, and the label file), joins them all on the `device` key, and returns a clean Parquet file with 21 canonical columns.
+The **FastAPI Data API** at `localhost:8000` does the same thing for this lab. It takes the telemetry streams from VictoriaMetrics (SNMP, SD-WAN controller, and device-health/environmental sidecars), Loki, nfacctd, and the label file, joins them all on the `device` key, and returns a clean Parquet file with 40 canonical columns (`dataapi/schema/dataset.schema.json`).
 
 **Available endpoints:**
 
@@ -501,7 +529,7 @@ The **FastAPI Data API** at `localhost:8000` does the same thing for this lab. I
 **The 40-column Parquet schema:**
 
 ```python
-# from dataapi/export.py
+# from dataapi/export.py — SNMP + tunnel + flow columns unchanged since Phase 2
 COLUMNS = [
     # Identifiers (join keys)
     "ts",             # UTC timestamp (bucket-aligned, 30s steps)
@@ -516,7 +544,7 @@ COLUMNS = [
     "if_out_octets",  # bytes sent
     "if_oper_status", # 1=up, 2=down
 
-    # Tunnel metrics (SD-WAN controller stream)
+    # Tunnel metrics (SD-WAN controller stream) — SIMULATED, see section 6
     "tunnel_latency_ms",
     "tunnel_jitter_ms",
     "tunnel_loss_pct",
@@ -533,6 +561,19 @@ COLUMNS = [
     "severity",           # "low" | "medium" | "high"
     "lead_time_s",        # seconds from fault_start to t_impact
     "time_to_impact_s",   # seconds from this row's ts to t_impact (negative = after impact)
+
+    # Interface error/discard + queue counters (device-health stream)
+    "if_in_errors", "if_in_discards", "if_out_errors", "if_out_discards",
+    "q_backlog_bytes", "q_drops",
+
+    # Transceiver diagnostics (environmental stream)
+    "xcvr_temp_c", "xcvr_rx_power_dbm", "xcvr_tx_bias_ma",
+
+    # Control-plane load + routing state (device-health stream, vtysh JSON)
+    "cpu_pct", "mem_pct", "bgp_msg_rx", "bgp_msg_tx", "rib_routes", "ospf_lsa_count",
+
+    # Chassis environmental sensors (modelled)
+    "device_temp_c", "device_power_watts", "device_fan_rpm", "device_psu_voltage_v",
 ]
 ```
 
@@ -549,7 +590,7 @@ with open("/tmp/noc_dataset.parquet", "wb") as f:
 
 df = pd.read_parquet("/tmp/noc_dataset.parquet")
 
-print(df.shape)            # (rows, 21)
+print(df.shape)            # (rows, 40)
 print(df.dtypes)
 print(df["fault_type"].value_counts())
 
@@ -583,7 +624,7 @@ resp = requests.get("http://localhost:8000/metrics", params={
 result = resp.json()["result"]   # list of {metric: {...}, values: [[ts, val], ...]}
 ```
 
-The synthetic dataset (`synthetic/generate.py`) extends real captures to **8.89 million rows** with calibrated statistical models, giving the ML team enough data to train on without requiring days of lab uptime.
+The synthetic dataset — `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) — extends real captures to roughly **18.1 million rows** (899 entities/tick × ticks; `--scale` only controls fault-episode density, not row count) with calibrated statistical models, giving the ML team enough data to train on without requiring days of lab uptime. The on-disk `synthetic/output/*.parquet` is a stale June artifact (8,890,560 rows, 21 columns) from a smaller, no-longer-existing 441-entity topology — not the output of the command above — and needs regenerating.
 
 ---
 

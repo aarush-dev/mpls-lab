@@ -232,7 +232,7 @@
    },
    "targets": [
     {
-     "expr": "sum(sdwan_controller_drift_active)",
+     "expr": "sum(sdwan_controller_drift_active) or vector(0)",
      "legendFormat": "drifting sites"
     }
    ]
@@ -321,7 +321,7 @@
   },
   {
    "id": 11,
-   "title": "BGP peers Established (iBGP/VPNv4)",
+   "title": "BGP peers Established (distinct)",
    "type": "timeseries",
    "gridPos": {
     "x": 12,

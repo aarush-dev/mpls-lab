@@ -5,12 +5,12 @@
 #
 # Series emitted:
 #   mpls_ldp_session_state{device,peer}   5=OPERATIONAL, 1=down            (PE)
-#   bgp_vrf_prefix_count{device,vrf}       prefixes per VRF                 (PE)
+#   bgp_vrf_prefix_count{device,vrf}       RIB entries per VRF (all AFI/SAFI)(PE)
 #   ospf_neighbor_state{device,peer}       1=Full adjacency, 0=not          (P+PE)
 #   ospf_spf_last_duration_ms{device}      last SPF compute time            (P+PE)
 #   ospf_spf_last_executed_ms{device}      msec-since-boot of last SPF run  (P+PE)
 #   mpls_lsp_count{device}                 installed MPLS forwarding entries(P+PE)
-#   bgp_peer_established{device}           Established iBGP/VPNv4 peers      (PE)
+#   bgp_peer_established{device}           Distinct Established BGP peers   (PE)
 #
 # The OSPF/LSP/BGP-peer series are the MPLS precursors the predictive NOC needs:
 # area-flap → spf_* moves; node/SRLG cut → neighbor drops + lsp_count falls;
@@ -41,13 +41,25 @@ for node in $PE_NODES; do
 done
 
 # ── BGP VRF prefix count (PE) ────────────────────────────────────────────────
-echo "# HELP bgp_vrf_prefix_count Number of BGP prefixes in VRF"
+echo "# HELP bgp_vrf_prefix_count BGP RIB entries in VRF (sum of per-AFI/SAFI ribCount)"
 echo "# TYPE bgp_vrf_prefix_count gauge"
+# `show bgp vrf X summary json` has NO top-level totalPrefixes key (that key only
+# exists in `show bgp neighbor prefix-counts json`). The summary is keyed by
+# AFI/SAFI — {"ipv4Unicast": {..., "ribCount": N, ...}} — so sum ribCount.
+# No default-to-zero: a VRF with no BGP AFI/SAFI emits no sample at all rather
+# than a fake 0 that reads like a measured empty RIB.
 for node in $PE_NODES; do
   for vrf in $VRFS; do
     json=$(vtj "$node" "show bgp vrf ${vrf} summary json") || continue
-    count=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('totalPrefixes',0))" 2>/dev/null) || count=0
-    echo "bgp_vrf_prefix_count{device=\"${node}\",vrf=\"${vrf}\"} ${count}"
+    echo "$json" | NODE=$node VRF=$vrf python3 -c '
+import sys,os,json
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+fams=[v for v in d.values() if isinstance(v,dict) and "ribCount" in v]
+if fams:
+    print("bgp_vrf_prefix_count{device=\"%s\",vrf=\"%s\"} %d"
+          % (os.environ["NODE"], os.environ["VRF"], sum(v["ribCount"] for v in fams)))
+' 2>/dev/null || continue
   done
 done
 
@@ -102,8 +114,11 @@ print("mpls_lsp_count{device=\"%s\"} %d" % (node, len(d) if isinstance(d,dict) e
 done
 
 # ── BGP peer established (PE) — RR/VPNv4 control-plane health ─────────────────
-echo "# HELP bgp_peer_established Count of Established BGP peers on the default instance"
+echo "# HELP bgp_peer_established Distinct Established BGP peers on the default instance"
 echo "# TYPE bgp_peer_established gauge"
+# Peers activated in several AFI/SAFIs (ipv4Unicast AND ipv4Vpn here) appear once
+# per family in the family-less summary. Count distinct peer addresses, else a
+# healthy PE with 11 iBGP sessions reports 22.
 for node in $PE_NODES; do
   json=$(vtj "$node" "show bgp summary json") || continue
   echo "$json" | NODE=$node python3 -c '
@@ -111,11 +126,11 @@ import sys,os,json
 node=os.environ["NODE"]
 try: d=json.load(sys.stdin)
 except Exception: sys.exit(0)
-n=0
+peers=set()
 for fam,fd in d.items():
     if isinstance(fd,dict):
-        for p in (fd.get("peers") or {}).values():
-            if str(p.get("state"))=="Established": n+=1
-print("bgp_peer_established{device=\"%s\"} %d" % (node,n))
+        for addr,p in (fd.get("peers") or {}).items():
+            if str(p.get("state"))=="Established": peers.add(addr)
+print("bgp_peer_established{device=\"%s\"} %d" % (node,len(peers)))
 ' 2>/dev/null || continue
 done

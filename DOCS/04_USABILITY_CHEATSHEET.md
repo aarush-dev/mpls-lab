@@ -18,7 +18,7 @@ The lab requires:
 **Before starting:**
 ```bash
 # Check MPLS kernel support
-modprobe mpls_router 2>&1 | grep -q "^$" && echo "PASS: MPLS modules available" || echo "FAIL: enable MPLS in kernel"
+modprobe mpls_router mpls_gso mpls_iptunnel && echo "PASS: MPLS modules available" || echo "FAIL: enable MPLS in kernel"
 
 # Check Phase 0 (detailed setup)
 cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
@@ -27,6 +27,14 @@ cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
 ---
 
 ## 1. Starting Everything
+
+### Step 0: Build local images (required before generate.py — it shells into frr-node for WireGuard keygen)
+```bash
+cd /root/LAB
+docker build -t frr-node:0.1 frr-node/
+docker build -t noc-controller:0.1 -f controller/Dockerfile .
+docker build -t noc-trafficgen:0.1 -f trafficgen/Dockerfile .
+```
 
 ### Step 1: Generate all network configs from topology spec
 ```bash
@@ -39,7 +47,7 @@ python3 generate.py
 ### Step 2: Deploy the 148-container network
 ```bash
 cd /root/LAB/topology
-sudo containerlab deploy --topo clab.yml --recycle
+sudo containerlab deploy --topo clab.yml --reconfigure
 # Expected: "deployed 148 nodes" (5–10 min on cold start; networking converges ~30s after)
 ```
 
@@ -74,7 +82,7 @@ curl -s http://172.20.20.51:3000/api/health | jq '.database'
 # Expected: "ok"
 
 # At least one metric from the network
-curl -s "http://172.20.20.50:8428/api/v1/query?query=up" | jq '.data.result | length'
+curl -s "http://172.20.20.50:8428/api/v1/query?query=interface_ifHCInOctets" | jq '.data.result | length'
 # Expected: > 0 (telemetry flowing from nodes)
 ```
 
@@ -91,19 +99,21 @@ firefox http://172.20.20.51:3000 &
 # No password required (GF_AUTH_ANONYMOUS_ENABLED: true)
 ```
 
-**Panels in the NOC Dashboard (11 total):**
+**Panels in the NOC Dashboard (11 total, from `telemetry/grafana/dashboards/noc-overview.json`):**
 
-| Panel | What It Shows | Best For |
-|-------|---------------|----------|
-| **Interface Utilization (Per Device)** | ifHCInOctets, ifHCOutOctets per site/interface | Spot traffic anomalies (load asymmetry, sudden drops) |
-| **SD-WAN Tunnel Health** | latency_ms, jitter_ms, loss_pct per tunnel | Diagnose tunnel degradation precursors (ramp before loss) |
-| **BGP/OSPF Events Log** | Syslog ADJCHANGE, neighbor state churn (Loki source) | Verify routing protocol churn during BGP flap faults |
-| **Per-VRF Traffic** | ifHCInOctets grouped by vrf (CORP, VOICE, GUEST) | Isolate faults to a single VRF or verify cross-VRF isolation |
-| **Controller State** | Path changes, rekey events, policy drift signals | Confirm SD-WAN controller reaction to faults |
-| **OSPF Adjacency State** | ospf_neighbor_state{device,peer} 1=Full/0=not (P+PE) | Spot p_node_failure, srlg_cut, pop_isolation adjacency drops |
-| **OSPF SPF Duration** | ospf_spf_last_duration_ms + ospf_spf_last_executed_ms | Detect area_flap → SPF churn / inter-area reconvergence |
-| **MPLS LSP Count** | mpls_lsp_count{device} installed forwarding entries (P+PE) | Verify LSP table integrity after core faults |
-| **BGP Peers Established** | bgp_peer_established{device} iBGP/VPNv4 established count | See rr_failure collapse cluster-wide (pe1 RR=22 peers) |
+| Panel | PromQL | Best For |
+|-------|--------|----------|
+| **Interface RX throughput (bps)** | `rate(interface_ifHCInOctets{device=~"$device"}[5m])*8` | Spot traffic anomalies (load asymmetry, sudden drops) |
+| **Interface TX throughput (bps)** | `rate(interface_ifHCOutOctets{device=~"$device"}[5m])*8` | Spot traffic anomalies |
+| **SD-WAN tunnel latency (ms)** | `sdwan_tunnel_latency_ms` | Diagnose tunnel degradation precursors (ramp before loss) |
+| **SD-WAN tunnel loss (%)** | `sdwan_tunnel_loss_pct` | Diagnose tunnel degradation precursors |
+| **MPLS LDP session state** | `mpls_ldp_session_state` | Verify LDP session health |
+| **BGP VRF prefix count per PE** | `bgp_vrf_prefix_count` | Isolate faults to a single VRF |
+| **Controller drift active** | `sum(sdwan_controller_drift_active) or vector(0)` | Confirm SD-WAN controller reaction to faults |
+| **OSPF adjacency state (Full=1)** | `ospf_neighbor_state` | Spot p_node_failure, srlg_cut, pop_isolation adjacency drops |
+| **OSPF SPF last duration (ms)** | `ospf_spf_last_duration_ms` | Detect area_flap → SPF churn / inter-area reconvergence |
+| **MPLS LSP count (forwarding entries)** | `mpls_lsp_count` | Verify LSP table integrity after core faults |
+| **BGP peers Established (distinct)** | `bgp_peer_established` | See rr_failure collapse cluster-wide |
 
 ### VictoriaMetrics (raw time-series DB)
 ```bash
@@ -115,7 +125,7 @@ firefox http://172.20.20.50:8428/vmui &
 max(sdwan_tunnel_latency_ms{device="ce_branch1"})
 
 # BGP prefix count per PE
-bgp_prefixes{device=~"pe[0-9]"}
+bgp_vrf_prefix_count{device=~"pe.*",vrf="CORP"}
 
 # Interface packet loss over time
 increase(interface_ifOutErrors[5m])
@@ -130,7 +140,7 @@ In Grafana, click "Explore" → select "Loki" datasource.
 **Example queries:**
 ```
 # BGP adjacency changes
-{device="ce_branch1"} | "ADJCHANGE"
+{device="ce_branch1"} |= "ADJCHANGE"
 
 # All syslog from a site
 {device=~"ce_hub.*"}
@@ -201,7 +211,7 @@ python3 orchestrator.py --demo
 # View the label JSONL file
 cat /root/LAB/faults/labels/labels.jsonl | tail -1 | jq .
 
-# Expected fields:
+# Expected fields (real _label_row() schema, faults/orchestrator.py:610-632):
 # {
 #   "scenario_id": "congestion-ce_branch1-abc12345",
 #   "type": "congestion",
@@ -211,9 +221,18 @@ cat /root/LAB/faults/labels/labels.jsonl | tail -1 | jq .
 #   "t_impact": "2026-06-21T...Z",
 #   "t_end": "2026-06-21T...Z",
 #   "lead_time": 15.3,
+#   "impact_method": "vm_threshold",
+#   "probe": "sdwan_tunnel_latency_ms",
+#   "baseline_value": 5.1,
+#   "impact_value": 45.3,
+#   "signature": "latency+jitter creep then loss on the affected site's tunnels",
 #   "device": "ce_branch1",
-#   "signature": "latency+jitter creep then loss on the affected site's tunnels"
+#   "dry_run": false,
+#   "error": null
 # }
+# impact_method values: vm_threshold (measured via probe), modelled_fallback,
+# probe_unavailable, modelled (scen_hub_spoke_congest, scen_bgp_cascade,
+# scen_brownout — no probe, impact is simulated not measured)
 ```
 
 ### Verify the fault in telemetry (Grafana + PromQL)
@@ -399,7 +418,11 @@ curl 'http://127.0.0.1:8000/topology' | jq '.nodes[] | select(.role == "PE") | .
 **Get the latest pre-built dataset:**
 ```bash
 curl -o dataset.parquet 'http://127.0.0.1:8000/datasets'
-# Downloads the most recent labeled Parquet to ./dataset.parquet (~100–500 MB)
+# Downloads the most recent labeled Parquet to ./dataset.parquet
+# EXECUTED: real shipped datasets (dataapi/datasets/*.parquet) range 52 KB - 1.2 MB.
+# Only the most recently regenerated one matches the current 40-col schema
+# (check_dataset.py passes: rows=49,844 cols=40); older cached files are stale
+# 21-column pre-device-health datasets and FAIL schema validation.
 ```
 
 **Build a fresh dataset for a specific time window:**
@@ -428,7 +451,8 @@ print(df.columns.tolist())
 #  'if_in_octets', 'if_out_octets', 'if_oper_status',
 #  'tunnel_latency_ms', 'tunnel_jitter_ms', 'tunnel_loss_pct', 'tunnel_rekeys',
 #  'flow_bytes', 'flow_packets',
-#  'is_fault', 'scenario_id', 'fault_type', 'severity', 'lead_time_s', 'time_to_impact_s']
+#  'is_fault', 'scenario_id', 'fault_type', 'severity', 'lead_time_s', 'time_to_impact_s',
+#  ... + 19 more device-health/environmental columns, see Section 12 schema block]
 ```
 
 ### Quick EDA (exploratory data analysis)
@@ -516,28 +540,37 @@ print(f"Saved to fault_{scenario_id}.png")
 ## 6. Generating More Synthetic Data
 
 The lab includes a synthetic data generator calibrated to real network captures.
+Row count = `entities_per_tick × (days·86400/step)`. Current `entities_per_tick`
+is 899 (661 interfaces + 168 tunnels + 70 devices). `--scale` is a **fault-episode
+density** multiplier — it does NOT change row count. Row count scales linearly
+in `--days` only (`synthetic/README.md` is the source of truth; re-derive from
+`profile.json`'s inventory if the lab is rescaled).
 
-### Generate synthetic dataset (demo: 2 days, 10x scale)
+### Generate synthetic dataset (defaults: 2 days, step 30s)
 ```bash
 cd /root/LAB/synthetic
-python3 generate.py --days 2 --scale 10
-# Expected output: synthetic_output_TIMESTAMP.parquet (~50M rows, ~500MB)
-# Located: /root/LAB/synthetic/output/
+python3 generate.py
+# EXECUTED (current 40-col schema): rows=5,178,240, fault_rows=50,060 (0.97%),
+# precursor_rows=21,163, wall time 3m36s, file size ~90MB
+# Located: /root/LAB/synthetic/output/synthetic_<epoch>_d2.0_s30_x1.0.parquet
 ```
 
-### Scale up (7 days, 20x):
+### Scale up (7 days, scale 3 — denser faults, same row model)
 ```bash
 cd /root/LAB/synthetic
-python3 generate.py --days 7 --scale 20 --step 30
-# Expected: 8.89M rows (real-scale dataset for ML training)
-# Time: ~5 min on 19 cores
+python3 generate.py --days 7 --step 30 --scale 3
+# DERIVED (not measured against current schema): ~18.1M rows (899 x 7*86400/30)
+# A stale June artifact (synthetic_1781481600_d7.0_s30_x3.0.parquet, 8,890,560
+# rows) exists in output/ but is on the OLD 21-column/441-entity topology and
+# lacks the synthetic=true Parquet metadata check.py now requires — do not
+# use its row count as current truth; regenerate and re-measure.
 ```
 
 ### Scale down (1 day, 1x, test):
 ```bash
 cd /root/LAB/synthetic
 python3 generate.py --days 1 --scale 1
-# Quick validation: ~250K rows, ~30s
+# EXECUTED: rows=2,589,120, ~47MB, wall time 1m14s
 ```
 
 ### Adjust parameters
@@ -556,14 +589,16 @@ import pandas as pd
 # Real lab data
 df_real = pd.read_parquet("/root/LAB/dataapi/datasets/dataset.parquet")
 
-# Synthetic (matches schema exactly)
-df_synth = pd.read_parquet("/root/LAB/synthetic/output/synthetic_output_*.parquet")
+# Synthetic (matches schema exactly) — pandas doesn't glob, use glob.glob()
+import glob
+df_synth = pd.concat(
+    (pd.read_parquet(f) for f in glob.glob("/root/LAB/synthetic/output/synthetic_*.parquet")),
+    ignore_index=True,
+)
 
 # Combine for training
 df_combined = pd.concat([df_real, df_synth], ignore_index=True)
 print(f"Combined: {len(df_combined)} rows")
-
-# ML team can now train on 8.89M rows with full fault diversity
 ```
 
 ---
@@ -594,8 +629,11 @@ knobs:
 ```bash
 # Edit /root/LAB/topology-spec.yaml
 nano /root/LAB/topology-spec.yaml
-# Change:
-# p_count:  2
+# Change (generator/generate.py:132-134 asserts p_count == pop_count*p_per_pop
+# and p_per_pop >= 3 — pop_count/p_per_pop MUST change together with p_count):
+# p_count:  3
+# pop_count: 1
+# p_per_pop: 3
 # pe_count: 2
 # branch_count: 4
 # hub_count: 2
@@ -607,8 +645,8 @@ python3 generate.py
 
 # Redeploy
 cd /root/LAB/topology
-sudo containerlab deploy --topo clab.yml --recycle
-# Expected: 20 containers, deploy in ~2 min
+sudo containerlab deploy --topo clab.yml --reconfigure
+# Expected: ~20 containers, deploy in ~2 min
 ```
 
 ### Scale up (150+ containers, max stable)
@@ -621,7 +659,7 @@ nano /root/LAB/topology-spec.yaml
 # dc_count: 8
 
 cd /root/LAB/generator && python3 generate.py
-cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --recycle
+cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --reconfigure
 # Expected: ~15 min deploy, intense disk I/O (kernel page table creation)
 ```
 
@@ -648,9 +686,9 @@ cd /root/LAB/airgap
 #   [pulling] victoriametrics/victoria-metrics:v1.103.0
 #   ...
 # === Saving images to /root/LAB/airgap/images ===
-#   [save] frr-node:0.1 → frr-node_0_1.tar.xz ... done
+#   [save] frr-node:0.1 → frr-node_0.1.tar.xz ... done
 #   ...
-# Total bundle size: 4.2 GB
+# Total bundle size: 619M (11 images, EXECUTED: du -sh /root/LAB/airgap/images)
 
 # Output: airgap/images/*.tar.xz + manifest.txt
 ```
@@ -674,7 +712,7 @@ cd /root/LAB/airgap
 
 # Expected output:
 # === Loading 11 image bundle(s) into Docker ===
-#   [load] frr_node_0_1.tar.xz ... Loaded image: frr-node:0.1
+#   [load] frr-node_0.1.tar.xz ... Loaded image: frr-node:0.1
 #   ...
 # === Verification: confirming expected tags present ===
 #   [ok] frr-node:0.1
@@ -688,18 +726,22 @@ cd /root/LAB/airgap
 ./verify-airgap.sh
 
 # Expected output:
+# Real script has 4 checks (SOURCE-VERIFIED, not a live run — lab was down):
 # === 1. Containerlab image-pull-policy: Never ===
-#   [PASS] All 90/90 node image entries have image-pull-policy: Never
+#   [PASS] All 148/148 node image entries have image-pull-policy: Never
 # === 2. Telemetry stack images present locally (compose won't pull) ===
 #   [PASS] Present: frr-node:0.1
 #   ...
-# === 3. Runtime egress: tcpdump on eth0 for container→public traffic (30s) ===
+# === 3. Runtime egress: tcpdump -i any, 30s capture (NOT eth0 — eth0 is
+#        post-MASQUERADE and can never match container→public traffic) ===
 #   [PASS] Zero container→public packets in 30s (lab is air-gapped at runtime)
-# === 4. Sanity: no running 'docker pull' processes ===
-#   [PASS] No docker pull processes running
+#   (FAILs if: no containers running, tcpdump missing, pcap empty/unreadable)
+# === 4. No docker image pull events since script start (docker events
+#        --filter type=image --filter event=pull) ===
+#   [PASS] No pull events observed
 #
 # ========================================
-#   PASS: 14   FAIL: 0
+#   PASS: 4   FAIL: 0
 # ========================================
 # RESULT: AIR-GAP VERIFIED
 ```
@@ -710,7 +752,7 @@ cd /root/LAB/airgap
 # All images are already loaded locally → no registry pulls needed
 
 cd /root/LAB/topology
-sudo containerlab deploy --topo clab.yml --recycle
+sudo containerlab deploy --topo clab.yml --reconfigure
 # Expected: pulls images from local Docker → NO network egress
 ```
 
@@ -854,7 +896,7 @@ vtysh JSON polling, pushed to VictoriaMetrics. SNMP now covers all 70 FRR nodes 
 | `ospf_spf_last_duration_ms` | `{device}` | P+PE | Last SPF compute time; jumps on area_flap |
 | `ospf_spf_last_executed_ms` | `{device}` | P+PE | Boot-relative timestamp of last SPF run |
 | `mpls_lsp_count` | `{device}` | P+PE | Installed MPLS forwarding entries (~107/node) |
-| `bgp_peer_established` | `{device}` | PE | Established iBGP/VPNv4 peers (RR=22, client=4) |
+| `bgp_peer_established` | `{device}` | PE | Established iBGP/VPNv4 **distinct** peers (dedup'd across AFI/SAFI); RR=11, client=2 |
 
 ```bash
 # OSPF neighbor state on P node (should be 1.0 for all peers when healthy)
@@ -863,7 +905,7 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=ospf_neighbor_state%7Bdevic
 # SPF churn — watch this spike during ospf_area_flap fault
 curl -s "http://172.20.20.50:8428/api/v1/query?query=ospf_spf_last_duration_ms" | python3 -m json.tool | head -20
 
-# BGP peers established (pe1 as RR should show 22 when healthy; drops during rr_failure fault)
+# BGP peers established (pe1 as RR should show 11 distinct peers when healthy; drops during rr_failure fault)
 curl -s "http://172.20.20.50:8428/api/v1/query?query=bgp_peer_established%7Bdevice%3D%22pe1%22%7D" | python3 -m json.tool
 
 # MPLS forwarding table size on a core P node
@@ -896,7 +938,7 @@ docker ps | grep -E "tele-|clab-sdwan" | wc -l
 docker logs clab-sdwan_mpls_noc-ce_branch1 | tail -20
 
 # Start/stop
-cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --recycle
+cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --reconfigure
 cd /root/LAB/telemetry && docker compose up -d
 cd /root/LAB/dataapi && uvicorn app:app --host 127.0.0.1 --port 8000 &
 
@@ -908,7 +950,7 @@ cd /root/LAB/faults && python3 orchestrator.py --campaign --duration 600 --mean-
 # Data
 curl http://127.0.0.1:8000/labels | jq '.rows | length'
 curl -o dataset.parquet 'http://127.0.0.1:8000/datasets'
-cd /root/LAB/synthetic && python3 generate.py --days 7 --scale 10
+cd /root/LAB/synthetic && python3 generate.py --days 7 --scale 3
 
 # Config
 cd /root/LAB/generator && python3 generate.py

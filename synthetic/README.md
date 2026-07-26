@@ -22,7 +22,8 @@ synthetic/
 ```bash
 cd synthetic
 python3 calibrate.py            # 1. build profile.json from dataapi/datasets/*.parquet
-python3 generate.py             # 2. demo: 2 days, 30s step -> output/*.parquet (~10s, ~860k rows)
+python3 generate.py             # 2. defaults: 2 days, 30s step -> output/*.parquet (5,178,240 rows,
+                                 #    40 cols, verified against the current 70-device profile.json)
 python3 check.py                # 3. verify schema/labels/ranges/concat-compat
 ```
 
@@ -78,13 +79,24 @@ ML team can train on either or both.
 | `--step`  | bucket seconds (match export) | `30` |
 | `--scale` | fault-episode **density** multiplier | `1.0` |
 
-Row count ≈ `entities × (days·86400/step)`. The demo (~860k rows) runs in ~10 s.
-For full ML scale, raise `--days` and `--scale` together:
+Row count = `entities_per_tick × (days·86400/step)`, where `entities_per_tick`
+is the current `profile.json` inventory size (661 interfaces + 168 tunnels +
+70 devices = 899, as of the live-lab recalibration). `--scale` only changes
+fault-episode density, not row count. At `entities_per_tick=899`:
 
 ```bash
-python3 generate.py --days 7 --scale 4          # ~3M rows, denser faults
-python3 generate.py --days 30 --scale 6 --step 30   # month, ML-scale
+python3 generate.py --days 2                     # default: 5,178,240 rows
+python3 generate.py --days 7 --scale 3           # ~18.1M rows, denser faults
+python3 generate.py --days 30 --scale 6 --step 30   # ~77.7M rows, month, ML-scale
 ```
+
+`entities_per_tick` moves with the lab (it was ~149 before the 70-device
+recalibration in `../DOCS/`'s "recalibrate profile.json" commit) — recompute
+from `profile.json`'s `inventory` before trusting a cached row-count figure.
+
+> Any previously generated `output/*.parquet` predating that recalibration
+> (fewer devices, 21 columns, no `synthetic=true` file metadata) is stale and
+> fails `check.py` gate 0 — regenerate rather than ship it.
 
 (To grow entity count too, scale the lab via `topology-spec.yaml` knobs, re-export
 a real window, re-run `calibrate.py` — the new inventory flows through.)

@@ -36,7 +36,7 @@ python3 orchestrator.py --scenario congestion --target ce_branch1 --dry-run   # 
 > repo root where `faults/` is a package on `sys.path`.
 >
 > ```bash
-> PYTHONPATH=/root/LAB python3 orchestrator.py --scenario mpls_underlay_failure --target p1
+> PYTHONPATH=/root/LAB python3 orchestrator.py --scenario mpls_underlay_failure --target p3
 > ```
 
 `--target` is a **device name** (node): `p1..p24`, `pe1..pe12`,
@@ -58,8 +58,8 @@ must predict within.
 |------------------|-------------|---------|
 | `scenario_id`    | string      | unique id `<type>-<target>-<hex8>` |
 | `type`           | string      | scenario type (see table below) |
-| `target`         | object      | what was hit: always `device`, plus `interface`/`vrf`/`tunnel`/`neighbor`/`process`/`rate_kbit` as relevant |
-| `severity`       | string      | `low` \| `medium` \| `high` |
+| `target`         | object      | what was hit: always a dict with a `device` key, plus `interface`/`vrf`/`tunnel`/`neighbor`/`process`/`rate_kbit` as relevant |
+| `severity`       | string/null | `low` \| `medium` \| `high`; `null` for scenarios whose injector ignores severity (`severity_inert: True` in `orchestrator.py` — link-set/process-kill faults) |
 | `t_start`        | ISO-8601 Z  | injection moment |
 | `t_impact`       | ISO-8601 Z  | first moment the effect is observable in telemetry |
 | `t_end`          | ISO-8601 Z  | fault cleared / reverted |
@@ -70,6 +70,8 @@ must predict within.
 | `impact_value`   | float/null  | probe value at threshold crossing |
 | `signature`      | string      | human-readable expected telemetry signature |
 | `device`         | string      | universal join key = node name (mirrors `target.device`) |
+| `dry_run`        | bool        | true if this row was a label-only run (lab untouched) |
+| `error`          | string/null | injector/revert exception text if the scenario failed; row is still written |
 
 ### How `t_impact` is derived (documented method)
 
@@ -83,9 +85,11 @@ must predict within.
   observable (BGP flap, policy drift, process kill), `t_impact = t_start +
   impact_delay_s` (a small modelled lag reflecting EMA smoothing / reconvergence
   time). The lag is documented per scenario in `orchestrator.py`.
-- **`modelled_fallback`** — a `vm_threshold` scenario whose probe never crossed
-  within the duration falls back to `t_impact = t_start` and is flagged so the
-  ML team can treat it as a weak label.
+- **`modelled_fallback`** — a `vm_threshold` scenario whose probe returned data
+  but never crossed the threshold within the duration falls back to
+  `t_impact = t_start` and is flagged so the ML team can treat it as a weak label.
+- **`probe_unavailable`** — a `vm_threshold` scenario whose probe returned no
+  data for the entire window (VM query error / metric absent).
 
 > Realism note (ponytail, intentional shortcut): SD-WAN tunnel metrics are
 > *modelled* by the controller (baseline + diurnal congestion + **live netem
@@ -113,20 +117,20 @@ P router that failed or the POP ABR at the cut boundary).
 | **`policy_drift`** (d) | CE VRF **route-map lowering local-preference** + soft-clear | `ce_*` | modelled (+3 s) | local-pref shift on CORP → **route-selection drift**; soft-clear ADJ event; path may deviate from policy |
 | `node_failure` (extra) | `kill -9 bgpd` (watchfrr respawns) | `pe*`/`ce_*` | modelled (+1 s) | bgpd gap → prefix withdrawal until watchfrr restart; recoverable outage |
 | `asymmetric_loss` (extra) | netem **egress-only loss** on CE uplink | `ce_*` | vm_threshold (`sdwan_tunnel_loss_pct`) | one-directional loss → loss% up while latency stays ~normal (hard-to-diagnose asymmetry) |
-| `brownout` (extra) | netem **rate cap** on CE uplink (bandwidth starvation) | `ce_*` | vm_threshold (`sdwan_tunnel_latency_ms`) | queueing latency climbs under load, loss arrives late — slow brownout, not a hard failure |
-| `mpls_underlay_failure` | `ip link set <iface> down` on a P-router CE-facing interface | `p*` | modelled (+1 s) | P-PE link down; LDP reconverges to secondary path; ~1 s with BFD enabled |
+| `brownout` (extra) | netem **rate cap** on CE uplink (bandwidth starvation) | `ce_*` | modelled (+4 s) | bandwidth starvation on the uplink; not observable in tunnel telemetry (a rate cap has no `delay`/`loss` token for `_read_netem` to pick up, and wg0 RTT doesn't traverse eth1) |
+| `mpls_underlay_failure` | `ip link set <iface> down` on a P-router CE-facing interface | non-ABR `p*` (e.g. `p3`) — ABRs rejected with `SystemExit`, they have no P-PE link | modelled (+1 s) | P-PE link down; LDP reconverges to secondary path; ~1 s with BFD enabled |
 | `ldp_session_flap` | `vtysh clear mpls ldp neighbor` N times (severity scales count) | `pe*` | modelled | LDP session torn/re-established; Loki logs `ldp_event=Down/Up`; self-recovers per cycle |
-| `hub_spoke_congest` | netem **delay+jitter+loss ramp** on hub CE uplink (eth1) | `ce_hub*` | vm_threshold (`sdwan_tunnel_latency_ms`) | hub uplink saturates; all spoke tunnels routed through this hub show rising latency |
-| `bgp_cascade` | `vtysh clear bgp *` repeated N times (severity scales count, 8 s gaps) | `ce_hub*`/`pe*` | vm_threshold (`sdwan_path_changes_total`) | repeated session clears; multiple path-switches; `sdwan_path_changes_total` increments |
+| `hub_spoke_congest` | netem **delay+jitter+loss ramp** on hub CE uplink (eth1) | `ce_hub*` | modelled (+4 s) | hub uplink congestion, injected on the hub; not observable in tunnel telemetry (`_read_netem` keys on the spoke's `site`, never the hub's) |
+| `bgp_cascade` | `vtysh clear bgp *` repeated N times (severity scales count, 8 s gaps) | `ce_hub*`/`pe*` | modelled (+2 s) | repeated BGP session clears on a hub CE; RIB churn (Loki ADJCHANGE); no probe — `sdwan_path_changes_total` is unlabelled/RNG-driven, a crossing can't be attributed to this fault |
 | `controller_drift` | HTTP POST to SD-WAN controller `/fault/drift` (raises latency threshold multiplier) | `ce_*` (site) | modelled | controller suppresses failover for the site; `sdwan_controller_drift_active` rises; clears via `/fault/drift/clear` |
 | `p_node_failure` | `MultiLinkFault` brings down **all** core interfaces of one P router atomically | `p1..p24` | modelled (+1 s) | `ospf_neighbor_state` drops to 0 for all peers of that node; traffic reroutes via mesh + PE dual-homing; `mpls_lsp_count` shifts on neighbours |
 | `pop_isolation` | `MultiLinkFault` cuts all inter-POP links of one POP → region isolated | `pop1..pop6` | modelled (+2 s) | all inter-area `ospf_neighbor_state` = 0 for the POP; PE routes to the isolated region withdraw; named Phase-6 test (excluded from Poisson campaign) |
 | `core_partition` | cuts the ring edge cut-set bisecting the backbone → two area-0 islands | `pop1` (canonical) | modelled (+2 s) | area-0 becomes split; inter-area IA routes on the cut side disappear; backbone reconverges around remaining chords; named test only |
 | `srlg_cut` | `MultiLinkFault` brings down both links in one SRLG conduit simultaneously | `srlg_pop1_2` etc. | modelled (+1 s) | correlated dual-link drop; OSPF floods two LSA removals at once; reroutes around the broken adjacency |
-| `core_congestion` | netem delay+loss **ramp** on a P-P backbone link (via `NetemImpair`) | ABR e.g. `p1` | vm_threshold (`ospf_neighbor_state`) | all LSPs transiting that link degrade; latency climbs on cross-POP flows; no link-down event |
-| `ospf_area_flap` | flap an inter-POP area-0 adjacency (`LinkFlap`) repeatedly | ABR e.g. `p1` | vm_threshold (`ospf_spf_last_duration_ms`) | repeated SPF runs (`ospf_spf_last_executed_ms` jumps); inter-area reconvergence churn; ECMP path oscillation |
+| `core_congestion` | netem delay+loss **ramp** on a P-P backbone link (via `NetemImpair`) | ABR e.g. `p1` | modelled (+4 s) | all LSPs transiting that link degrade; latency climbs on cross-POP flows; no link-down event |
+| `ospf_area_flap` | flap an inter-POP area-0 adjacency (`LinkFlap`) repeatedly | ABR e.g. `p1` | modelled (+2 s) | repeated SPF runs (`ospf_spf_last_executed_ms` jumps); inter-area reconvergence churn; ECMP path oscillation |
 | `path_asymmetry` | `OspfCostShift` raises OSPF cost in one direction only | ABR e.g. `p2` | modelled (+1 s) | forward/return paths diverge; asymmetric latency visible in tunnel metrics; traceroute-level asymmetry |
-| `rr_failure` | `kill -9 bgpd` on a route reflector (pe1 or pe2); watchfrr respawns | `pe1` / `pe2` | modelled (+1 s) | `bgp_peer_established` collapses cluster-wide; VPNv4 prefix propagation degrades until RR restarts; covers all 22 RR clients |
+| `rr_failure` | `kill -9 bgpd` on a route reflector (pe1 or pe2); watchfrr respawns | `pe1` / `pe2` | modelled (+1 s) | `bgp_peer_established` collapses cluster-wide; VPNv4 prefix propagation degrades until RR restarts; covers all 10 RR clients (pe3-pe12) |
 | `gray_failure` | netem 0.5–2% loss on a backbone P-P link, NO `link-down` event | ABR e.g. `p5` | vm_threshold (`ospf_neighbor_state` or tunnel loss) | sub-BFD loss; BFD stays up; packets drop silently; hard-to-detect; `gray_failure` label distinguishes it from hard failures |
 
 ### Injectors (`injectors.py`)

@@ -34,6 +34,7 @@ Run:
   python3 trafficgen.py --selftest
 """
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -77,11 +78,6 @@ VRF_FLOW = {
 }
 
 
-def _ce_host(node):
-    """Host container name for a CE node (h_<suffix>), per generated clab.yml."""
-    return "h_" + node[len("ce_"):] if node.startswith("ce_") else "h_" + node
-
-
 def build_plan(now, model, fault_scale=None):
     """Return a list of per-(site,vrf) flow plans for this instant.
 
@@ -113,7 +109,10 @@ def build_plan(now, model, fault_scale=None):
             u = diurnal.util(hod, vrf) * wk
             mult = fault_scale.get((site, vrf), 1.0)
             shape = VRF_FLOW[vrf]
-            rng = random.Random(hash((site, vrf, tick_bucket)) & 0xFFFFFFFF)
+            # blake2b, not hash(): Python randomizes str hashing per process, so
+            # hash((site, vrf, tick)) gave a DIFFERENT plan every run.
+            rng = random.Random(int(hashlib.blake2b(
+                f"{site}|{vrf}|{tick_bucket}".encode(), digest_size=4).hexdigest(), 16))
             # Burstiness: multiply the curve-driven flow count by a positive noise
             # factor whose spread is the VRF's burstiness. VOICE ~ steady (tight),
             # CORP/GUEST ~ spiky (wide, occasionally doubling or going quiet).
@@ -130,7 +129,9 @@ def build_plan(now, model, fault_scale=None):
                 "flows": flows, "proto": shape["proto"], "dscp": shape["dscp"],
                 "bytes_per_flow": bytes_per_flow,
                 "offered_bps": round(offered_bps),
-                "src": _ce_host(site),
+                # Full container name, VRF-qualified. The old _ce_host() dropped
+                # the VRF suffix and produced names (h_branch1) that do not exist.
+                "src": _host_cname(site, vrf),
             })
     return plans
 
@@ -187,7 +188,9 @@ def _sim_flow(port, nbytes):
 
 
 def run_sim(model, interval, ticks=None, fault_scale=None):
+    """Run the loopback simulator. Returns (bytes_sent, bytes_received)."""
     sink = _SimSink()
+    sent_total = 0
     print(json.dumps({"event": "trafficgen_up", "backend": "sim",
                       "sink_port": sink.port, "period_s": PERIOD_SECONDS}), flush=True)
     i = 0
@@ -199,13 +202,20 @@ def run_sim(model, interval, ticks=None, fault_scale=None):
             # curve shape is preserved; the JSON plan carries the true offered_bps.
             for p in plan:
                 for _ in range(p["flows"]):
-                    _sim_flow(sink.port, max(1, p["bytes_per_flow"] // 1000))
+                    sent_total += _sim_flow(sink.port, max(1, p["bytes_per_flow"] // 1000))
             total_offered = sum(p["offered_bps"] for p in plan)
             print(json.dumps({"event": "tick", "hod": plan[0]["hod"] if plan else None,
                               "offered_bps_total": total_offered,
+                              "sim_bytes_sent": sent_total,
                               "sink_bytes_rx": sink.bytes_rx}), flush=True)
             i += 1
             time.sleep(interval)
+        # Drain: the sink counts on a background thread, give it a moment.
+        for _ in range(50):
+            if sink.bytes_rx >= sent_total:
+                break
+            time.sleep(0.02)
+        return sent_total, sink.bytes_rx
     finally:
         sink.close()
 
@@ -218,17 +228,17 @@ def iperf3_commands(now, model, fault_scale=None):
     Bitrate shaped to offered_bps; -u for VOICE (UDP), TCP otherwise.
     """
     hub = model["hubs"][0]["node"]
-    sink_host = _ce_host(hub)  # h_hub1
     cmds = []
     for p in build_plan(now, model, fault_scale):
         if p["flows"] == 0:
             continue
+        sink_host = _host_cname(hub, p["vrf"])
         rate = max(1, p["offered_bps"])
         proto = "-u " if p["proto"] == "udp" else ""
         # DSCP -> tos byte (dscp<<2). EF=46->0xb8, AF31=26->0x68, BE=0->0x0.
         dscp_val = {"EF": 46, "AF31": 26, "BE": 0}[p["dscp"]]
         cmds.append(
-            f"docker exec clab-sdwan_mpls_noc-{p['src']} "
+            f"docker exec {p['src']} "
             f"iperf3 -c <{sink_host}-ip> {proto}-b {rate} -P {p['flows']} "
             f"-t {int(PERIOD_SECONDS/24)} --tos {dscp_val << 2}  # {p['vrf']} util={p['util']}"
         )
@@ -280,19 +290,32 @@ def _host_eth1_ip(cname):
     return None
 
 
-def _nc_send_flow(src_cname, dst_ip, port, total_bytes):
-    """Send total_bytes from src to dst via nc. Fire-and-forget; errors are silent."""
-    # dd produces the bytes; nc pipes them to the listener.
+def _nc_send_flow(src_cname, dst_ip, port, total_bytes, out, idx):
+    """Send total_bytes from src to dst via nc.
+
+    Records the CONFIRMED byte count (what dd was actually asked to push, and
+    only when the exec exited 0) into out[idx]; a failed exec records 0 and logs
+    why. The old version swallowed every error, so the tick log reported a large
+    byte count even when nothing reached the wire.
+    """
+    # dd produces the bytes; nc pipes them to the listener. Round, don't floor:
+    # flooring silently dropped up to 64 KiB of every non-multiple flow.
     bs = 65536
-    count = max(1, total_bytes // bs)
+    count = max(1, round(total_bytes / bs))
     cmd = f"dd if=/dev/zero bs={bs} count={count} 2>/dev/null | nc -w4 {dst_ip} {port}"
     try:
-        subprocess.run(
+        r = subprocess.run(
             ["docker", "exec", src_cname, "sh", "-c", cmd],
-            capture_output=True, timeout=30,
+            capture_output=True, text=True, timeout=30,
         )
-    except Exception:
-        pass
+        if r.returncode == 0:
+            out[idx] = count * bs
+            return
+        err = (r.stderr or "").strip()[:200]
+    except Exception as e:
+        err = f"{type(e).__name__}: {e}"
+    print(json.dumps({"event": "nc_send_failed", "src": src_cname,
+                      "dst": dst_ip, "port": port, "error": err}), flush=True)
 
 
 def _nc_listen(sink_cname, port):
@@ -319,10 +342,17 @@ def run_nc(model, interval, ticks=None, fault_scale=None):
 
     def _sink_ip(hub_node, vrf):
         key = (hub_node, vrf)
+        # Only successes are cached. Caching None permanently disabled a sink
+        # that happened to be booting during the first tick -- zero traffic for
+        # that VRF for the whole run, with nothing in the log.
         if key not in sink_ip_cache:
             cname = _host_cname(hub_node, vrf)
             ip = _host_eth1_ip(cname)
-            sink_ip_cache[key] = ip  # cache None too (no retry noise)
+            if ip is None:
+                print(json.dumps({"event": "sink_unresolved", "sink": cname,
+                                  "vrf": vrf}), flush=True)
+                return None
+            sink_ip_cache[key] = ip
         return sink_ip_cache[key]
 
     print(json.dumps({"event": "trafficgen_up", "backend": "nc",
@@ -333,7 +363,8 @@ def run_nc(model, interval, ticks=None, fault_scale=None):
         now = time.time()
         plan = build_plan(now, model, fault_scale)
         threads = []
-        tick_bytes = 0
+        planned_bytes = 0
+        confirmed = [0] * len(plan)  # per-row bytes the sender actually pushed
 
         # Group plan by VRF to pick one sink hub per VRF (round-robin across hubs).
         for row_idx, p in enumerate(plan):
@@ -349,14 +380,15 @@ def run_nc(model, interval, ticks=None, fault_scale=None):
             src_cname = _host_cname(p["site"], vrf)
             port = NC_PORT_BASE + row_idx
             nbytes = max(1024, int(p["bytes_per_flow"] * p["flows"] * NC_FLOW_SCALE))
-            tick_bytes += nbytes
+            planned_bytes += nbytes
 
             # Start listener then sender concurrently.
             lt = threading.Thread(target=_nc_listen, args=(sink_cname, port), daemon=True)
             lt.start()
             time.sleep(0.05)  # give listener time to bind
             st = threading.Thread(target=_nc_send_flow,
-                                  args=(src_cname, sink_ip, port, nbytes), daemon=True)
+                                  args=(src_cname, sink_ip, port, nbytes,
+                                        confirmed, row_idx), daemon=True)
             st.start()
             threads.append((lt, st))
 
@@ -365,9 +397,12 @@ def run_nc(model, interval, ticks=None, fault_scale=None):
             st.join(timeout=35)
 
         total_offered = sum(p["offered_bps"] for p in plan)
+        # planned = what the curve asked for; confirmed = what a sender exec that
+        # exited 0 actually pushed. They diverge whenever the lab is not reachable.
         print(json.dumps({"event": "tick", "hod": plan[0]["hod"] if plan else None,
                           "offered_bps_total": total_offered,
-                          "nc_bytes_sent": tick_bytes,
+                          "nc_bytes_planned": planned_bytes,
+                          "nc_bytes_confirmed": sum(confirmed),
                           "active_rows": len(threads)}), flush=True)
         i += 1
         time.sleep(interval)
@@ -427,11 +462,21 @@ def _selftest():
     assert "GUEST" not in vrfs_by_site["ce_branch1"], "branch should not have GUEST"
     assert "GUEST" in vrfs_by_site["ce_dc1"], "dc should have GUEST"
 
-    # Plan rows must be well-formed and non-negative.
+    # src must be the VRF-qualified container the nc backend actually execs into
+    # (h_<site>_<vrf>), not a bare h_<site> that does not exist.
     for p in peak:
-        assert p["flows"] >= 0 and p["offered_bps"] >= 0
-        assert p["src"].startswith("h_"), f"bad src {p['src']}"
-        assert p["dscp"] in ("EF", "AF31", "BE")
+        assert p["src"] == _host_cname(p["site"], p["vrf"]), f"bad src {p['src']}"
+
+    # The plan must be reproducible across PROCESSES (str hashing is randomized
+    # per process, so hash()-based seeding silently was not).
+    ref = json.dumps(build_plan(1_000_000.0, model), sort_keys=True)
+    got = subprocess.run(
+        [sys.executable, os.path.abspath(__file__), "--plan-at", "1000000"],
+        capture_output=True, text=True, timeout=60,
+        env={**os.environ, "PYTHONHASHSEED": "random"},
+    )
+    assert got.returncode == 0, f"subprocess plan failed: {got.stderr[-400:]}"
+    assert got.stdout.strip() == ref, "build_plan is not reproducible across processes"
 
     # Fault perturbation visibly changes the curve. Same `now` -> same burstiness
     # seed, so the 4x multiplier must yield strictly more GUEST flows.
@@ -443,17 +488,25 @@ def _selftest():
     pert_g = next(p["flows"] for p in perturbed if p["site"] == "ce_dc1" and p["vrf"] == "GUEST")
     assert pert_g > base_g, "fault_scale did not perturb the plan"
 
-    # iperf3 command derivation produces one cmd per active flow row.
+    # iperf3 command derivation: one cmd per active flow row, each naming a
+    # container the plan says exists (the literal "iperf3 -c" is in the f-string,
+    # so asserting on it proved nothing).
     cmds = iperf3_commands(peak_t, model)
-    assert cmds and all("iperf3 -c" in c for c in cmds), "iperf3 cmds malformed"
+    active = [p for p in peak if p["flows"]]
+    assert len(cmds) == len(active), f"iperf3 cmds {len(cmds)} != active rows {len(active)}"
+    srcs = {p["src"] for p in active}
+    assert all(any(f"docker exec {s} " in c for s in srcs) for c in cmds), \
+        "iperf3 cmd does not exec into a planned source container"
 
-    # sim backend: a couple of ticks actually move bytes through the sink.
-    run_sim(model, interval=0.0, ticks=2)
+    # sim backend: a couple of ticks must actually land bytes in the sink.
+    sim_sent, sim_rx = run_sim(model, interval=0.0, ticks=2)
+    assert sim_sent > 0, "sim sent no bytes"
+    assert sim_rx >= 0.99 * sim_sent, f"sink received {sim_rx} of {sim_sent} bytes"
 
     print(f"trafficgen selftest OK  peak_bps={peak_load:.0f} trough_bps={trough_load:.0f} "
           f"ratio={peak_load/max(1,trough_load):.1f}x weekend_bps={weekend:.0f} "
           f"voice_cv={voice_cv:.2f} corp_cv={corp_cv:.2f} "
-          f"rows={len(peak)} iperf3_cmds={len(cmds)}")
+          f"rows={len(peak)} iperf3_cmds={len(cmds)} sim_bytes={sim_rx}")
 
 
 def main():
@@ -463,6 +516,8 @@ def main():
                     help="seconds between ticks (default 30 for nc backend)")
     ap.add_argument("--ticks", type=int, default=None, help="stop after N ticks")
     ap.add_argument("--plan", action="store_true", help="print one plan as JSON lines and exit")
+    ap.add_argument("--plan-at", type=float, default=None,
+                    help="print the plan for a fixed epoch as one canonical JSON blob")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
@@ -470,6 +525,9 @@ def main():
         _selftest()
         return
     model = build_model()
+    if args.plan_at is not None:
+        print(json.dumps(build_plan(args.plan_at, model), sort_keys=True))
+        return
     if args.plan:
         for p in build_plan(time.time(), model):
             print(json.dumps(p))

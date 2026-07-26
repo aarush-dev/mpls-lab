@@ -9,8 +9,9 @@ Pulls, for a time window:
 
 Alignment: one row per (device, entity, entity_type, ts-bucket). ts buckets are
 `step`-second aligned UTC. Fault labels are LEFT-joined on device + whether the
-bucket ts falls inside any [t_start, t_end] window for that device; matched rows
-get is_fault=true + scenario fields + lead_time_s + time_to_impact_s.
+bucket interval [ts, ts+step) OVERLAPS any [t_start, t_end] window for that
+device; matched rows get is_fault=true + scenario fields + lead_time_s +
+time_to_impact_s. Interface-scoped labels only mark their own interface row.
 
 Canonical columns are fixed (see schema/) so downstream stays stable.
 
@@ -19,6 +20,7 @@ Run:  python3 export.py --start <epoch> --end <epoch> [--step 30]
 """
 import argparse
 import os
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -127,7 +129,7 @@ def _matrix_to_records(result, value_col, entity_key, entity_type):
                 continue
             recs.append({
                 "ts": _iso(int(ts)), "device": device, "site_type": site_type,
-                "entity": entity, "entity_type": entity_type,
+                "vrf": m.get("vrf"), "entity": entity, "entity_type": entity_type,
                 value_col: fval,
             })
     return recs
@@ -144,14 +146,14 @@ def _collect(metric_map, entity_key, entity_type, start, end, step):
     if not frames:
         return pd.DataFrame()
     df = pd.concat(frames, ignore_index=True)
-    keys = ["ts", "device", "site_type", "entity", "entity_type"]
+    keys = ["ts", "device", "site_type", "vrf", "entity", "entity_type"]
     # aggregate the per-metric value columns onto shared keys
     return df.groupby(keys, dropna=False).first().reset_index()
 
 
 def _flow_bucketed(start, end, step):
     """Aggregate nfacctd flows per device into step-aligned ts buckets."""
-    rows = sources.flow_rows(limit=5000)
+    rows = sources.flow_rows(limit=5000, since=start, until=end)
     recs = []
     for r in rows:
         ts = r.get("ts")
@@ -165,16 +167,27 @@ def _flow_bucketed(start, end, step):
         if epoch < start or epoch > end:
             continue
         bucket = int(epoch // step) * step
+        # keep missing counters as NaN -- "not reported" is not "measured zero"
         recs.append({"ts": _iso(bucket), "device": dev,
-                     "flow_bytes": r.get("bytes") or 0, "flow_packets": r.get("packets") or 0})
+                     "flow_bytes": r.get("bytes"), "flow_packets": r.get("packets")})
     if not recs:
+        print(f"WARN: no flow records in [{_iso(start)}, {_iso(end)}] -- "
+              "flow_bytes/flow_packets will be null", file=sys.stderr)
         return pd.DataFrame(columns=["ts", "device", "flow_bytes", "flow_packets"])
     df = pd.DataFrame(recs)
-    return df.groupby(["ts", "device"], dropna=False).sum().reset_index()
+    return df.groupby(["ts", "device"], dropna=False).sum(min_count=1).reset_index()
 
 
-def _apply_labels(df):
-    """LEFT-join the fault timeline on device + ts-in-[t_start,t_end]."""
+_SEV_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
+def _apply_labels(df, step):
+    """LEFT-join the fault timeline on device + bucket-interval overlap.
+
+    A row covers [ts, ts+step); it is faulty if that interval overlaps the
+    label's [t_start, t_end]. Instant containment (ts in [t_start, t_end])
+    would drop every window narrower than `step` -- most of the label file.
+    """
     labels = sources.label_rows()
     df["is_fault"] = False
     for c in ["scenario_id", "fault_type", "severity"]:
@@ -193,9 +206,27 @@ def _apply_labels(df):
             t_imp = _parse_iso(lab["t_impact"])
         except (KeyError, ValueError):
             continue
-        mask = (df["device"] == dev) & (df["_epoch"] >= t0) & (df["_epoch"] <= t_end)
+        mask = (df["device"] == dev) & (df["_epoch"] + step > t0) & (df["_epoch"] <= t_end)
+        # entity-scoped faults hit their own interface, not every interface on
+        # the box; tunnel/device rows stay in scope (genuinely affected).
+        # target is either a dict {device, interface|neighbor|vrf} or a bare
+        # device-name string (13 of the labels); only the former narrows scope.
+        target = lab.get("target")
+        tgt = target.get("interface") if isinstance(target, dict) else None
+        if tgt:
+            mask &= (df["entity"] == tgt) | (df["entity_type"] != "interface")
         if not mask.any():
             continue
+        # overlapping windows: keep the highest-severity label as primary rather
+        # than whichever happened to come last in the file.
+        clash = mask & df["is_fault"]
+        if clash.any():
+            print(f"WARN: {int(clash.sum())} rows already labelled "
+                  f"{sorted(df.loc[clash, 'scenario_id'].dropna().unique())}; "
+                  f"{lab.get('scenario_id')} overlaps", file=sys.stderr)
+            keep = df.loc[clash, "severity"].map(_SEV_RANK).fillna(0) >= \
+                _SEV_RANK.get(lab.get("severity"), 0)
+            mask &= ~mask.index.isin(keep[keep].index)
         df.loc[mask, "is_fault"] = True
         df.loc[mask, "scenario_id"] = lab.get("scenario_id")
         df.loc[mask, "fault_type"] = lab.get("type")
@@ -215,19 +246,19 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
     dev = _collect(_DEV_METRICS, "device", "device", start, end, step)
     parts = [d for d in (iface, tunnel, dev) if len(d)]
     base = pd.concat(parts, ignore_index=True) if parts \
-        else pd.DataFrame(columns=["ts", "device", "site_type", "entity", "entity_type"])
+        else pd.DataFrame(columns=["ts", "device", "site_type", "vrf", "entity", "entity_type"])
 
-    # flows attach per (device, ts-bucket); merge onto interface rows of that device/ts
+    # Flows are device-wide, so they attach to the device row only: merging into
+    # the whole frame would replicate one measurement across every interface and
+    # tunnel row of that (device, bucket) and inflate any naive sum ~15x.
     flows = _flow_bucketed(start, end, step)
     if not base.empty and not flows.empty:
-        base = base.merge(flows, on=["ts", "device"], how="left")
+        is_dev = base["entity_type"] == "device"
+        base = pd.concat([base[~is_dev],
+                          base[is_dev].merge(flows, on=["ts", "device"], how="left")],
+                         ignore_index=True)
 
-    # vrf is not on the live series; left null (nullable per spec). entity carries
-    # the interface/tunnel id which is what models key on.
-    if "vrf" not in base.columns:
-        base["vrf"] = pd.NA
-
-    base = _apply_labels(base)
+    base = _apply_labels(base, step)
 
     # ensure all canonical columns exist, in order
     for c in COLUMNS:
@@ -237,7 +268,11 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
 
     fname = f"dataset_{start}_{end}_{step}s.parquet"
     path = os.path.join(DATASETS_DIR, fname)
-    base.to_parquet(path, index=False)
+    # atomic: two uvicorn workers can build the same window concurrently, and a
+    # half-written Parquet has no footer.
+    tmp = f"{path}.{os.getpid()}.tmp"
+    base.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
     return path
 
 

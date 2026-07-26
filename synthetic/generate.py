@@ -10,10 +10,15 @@ the real inventory it walks `--days` of `step`-second buckets producing:
 Then it injects labeled fault EPISODES (the same scenario TYPES as faults/) with
 correct lead_time/time_to_impact semantics: a precursor is visible BEFORE
 t_impact (metric ramps up while time_to_impact_s decreases to 0), which is the
-entire point for the predictive ML team.
+entire point for the predictive ML team. Lead time is floored at 4*step so the
+ramp always spans several buckets -- several calibrated lead_s values are ~2 s,
+which is shorter than one bucket and would make the precursor a label with no
+signal behind it.
 
 Schema == dataapi/export.COLUMNS, dtypes matched to the real Parquet, so real +
-synthetic are concatenable/interchangeable for training.
+synthetic are concatenable/interchangeable for training. THIS DATA IS SYNTHETIC:
+the Parquet carries `synthetic=true` in its file-level key/value metadata and the
+filename is prefixed `synthetic_`, so it can never be mistaken for a capture.
 
 Run (demo):   python3 generate.py
 Run (scale):  python3 generate.py --days 7 --scale 4 --step 30
@@ -23,10 +28,12 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "dataapi"))
@@ -97,16 +104,24 @@ def _gen_interfaces(rng, inv, prof, times):
     q_base = dh_mean("q_backlog_bytes", 900.0)
     q_drop_rate = dh_mean("q_drops_per_step", 0.01)
 
+    # The calibrated rate is bytes per prof['step_s'] bucket; if the caller asked
+    # for a different bucket size the increment has to be rescaled or the
+    # synthetic byte rate silently drifts from the real lab's.
+    step = (times[1] - times[0]) if len(times) > 1 else float(prof.get("step_s", 30))
+    step_ratio = step / float(prof.get("step_s", step) or step)
+
     rows = []
     for dev, meta in inv.items():
         st = meta["site_type"] or "branch"
         r = rate.get(st, rate.get("branch"))
-        rin0 = r["rate_in_median"]
-        rout0 = r["rate_out_median"]
+        rin0 = r["rate_in_median"] * step_ratio
+        rout0 = r["rate_out_median"] * step_ratio
         ambient = envmodel.pop_ambient_c(_pop_of(dev))
         for ent in meta["interfaces"]:
-            # lo / vrf_* / wg0 carry little data -> scale down (keeps realism)
-            scale = 0.05 if (ent == "lo" or ent.startswith("vrf_")) else 1.0
+            # lo / vrf_* / wg0 / bare-named VRF devices (CORP, VOICE, GUEST on the
+            # PEs) carry little data -> scale down (keeps realism)
+            scale = 0.05 if (ent in ("lo", "wg0") or ent.startswith("vrf_")
+                             or ent.isupper()) else 1.0
             cin = float(seed.get(st, 1e5)) * rng.uniform(0.5, 1.5)
             cout = cin * 0.6
             # cumulative error/discard/drop counters, seeded near zero
@@ -224,7 +239,6 @@ def _gen_tunnels(rng, inv, prof, times):
     # fall back to global for site_types without tunnels in the real capture.
     global_tb = prof["tunnel_baseline"]
     by_site = prof.get("tunnel_baseline_by_site", {})
-    rk_g = global_tb["tunnel_rekeys"]
     rows = []
     for dev, meta in inv.items():
         st = meta["site_type"] or "branch"
@@ -284,6 +298,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     jit_arr  = df["tunnel_jitter_ms"].to_numpy(dtype=float, na_value=np.nan).copy()
     loss_arr = df["tunnel_loss_pct"].to_numpy(dtype=float, na_value=np.nan).copy()
     iin_arr  = df["if_in_octets"].to_numpy(dtype=float, na_value=np.nan).copy()
+    iout_arr = df["if_out_octets"].to_numpy(dtype=float, na_value=np.nan).copy()
     ops_arr  = df["if_oper_status"].to_numpy(dtype=float, na_value=np.nan).copy()
     # device-health arrays perturbed by _apply_env below
     err_arr  = df["if_in_errors"].to_numpy(dtype=float, na_value=np.nan).copy()
@@ -313,7 +328,8 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     # reconvergence) vs dataplane congestion (queues fill, errors climb).
     _CHURN = {"bgp_flap", "policy_drift", "node_failure", "rr_failure",
               "ospf_area_flap", "p_node_failure", "srlg_cut", "pop_isolation",
-              "core_partition", "bgp_cascade", "ldp_session_flap"}
+              "core_partition", "bgp_cascade", "ldp_session_flap",
+              "mpls_underlay_failure"}
     _CONGEST = {"congestion", "core_congestion", "brownout", "tunnel_degrade",
                 "hub_spoke_congest", "asymmetric_loss"}
 
@@ -324,6 +340,72 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
                      (ep - t_start) / max(lead, step),
                      np.maximum(0.0, 1.0 - (ep - t_impact) / max(dur, step)))
         return np.clip(p, 0.0, 1.0) * sevmul
+
+    def _counter_adjust(arr, mask, adj):
+        """Add adj * per-bucket-increment to a CUMULATIVE counter, integrated.
+
+        A fault must perturb the RATE, not the accumulated counter. Scaling the
+        absolute counter (the old `counter * (1 + p*0.4)`) makes it step
+        BACKWARDS when the window ends, and every rate derivation -- including
+        this repo's calibrate._octet_rate -- reads that as a counter reset.
+        `mask` must select every row of the affected entities (generation order
+        is time-ascending within an entity) so the extra/missing bytes carry
+        forward after the window, which is what a real counter does.
+        """
+        sub = arr[mask]
+        if not len(sub):
+            return
+        ent = ent_arr[mask]
+        start = np.empty(len(sub), dtype=bool)
+        start[0] = True
+        start[1:] = ent[1:] != ent[:-1]
+        inc = np.diff(sub, prepend=sub[0])
+        inc[start] = 0.0
+        extra = np.cumsum(inc * adj)
+        seg = np.flatnonzero(start)
+        off = np.repeat(extra[seg], np.diff(np.append(seg, len(sub))))
+        arr[mask] = np.round(sub + extra - off, 1)
+
+    def _iface_churn(target, t_start, t_impact, t_end, lead, dur, sevmul):
+        """Churn = up to 40% extra bytes per bucket while the episode runs."""
+        amask = (dev_arr == target) & (etype == "interface")
+        if not amask.any():
+            return
+        ep_a = epoch[amask].astype(float)
+        p = np.where(ep_a <= t_impact,
+                     (ep_a - t_start) / max(lead, step),
+                     np.maximum(0.0, 1.0 - (ep_a - t_impact) / max(dur, step)))
+        adj = np.where((ep_a >= t_start) & (ep_a <= t_end),
+                       np.clip(p, 0.0, 1.0) * sevmul * 0.4, 0.0)
+        _counter_adjust(iin_arr, amask, adj)
+
+    def _iface_down(target, t_impact, t_end):
+        """Down = oper_status 0 AND both octet counters frozen (no forwarding)."""
+        amask = (dev_arr == target) & (etype == "interface") & (ent_arr != "lo")
+        if not amask.any():
+            return
+        down = amask & (epoch > t_impact) & (epoch <= t_end)
+        if not down.any():
+            return
+        ops_arr[down] = 0.0
+        adj = np.where(down[amask], -1.0, 0.0)
+        _counter_adjust(iin_arr, amask, adj)
+        _counter_adjust(iout_arr, amask, adj)
+
+    def _tunnel_ramp(tmask, sig, p_t):
+        """Ramp latency/jitter/loss toward the signature peak.
+
+        The peak is floored at 1.15x the healthy value: several calibrated
+        lat_peak/jit_peak values sit BELOW the generated healthy mean (the
+        diurnal congestion bump raises it), so ramping straight at them made a
+        labelled degradation ramp DOWNWARD -- a fault that looks healthier than
+        healthy. A peak must be a peak.
+        """
+        lat_t = np.maximum(sig["lat_peak"], lat_arr[tmask] * 1.15)
+        jit_t = np.maximum(sig["jit_peak"], jit_arr[tmask] * 1.15)
+        lat_arr[tmask]  = np.round(lat_arr[tmask]  + p_t * (lat_t - lat_arr[tmask]), 4)
+        jit_arr[tmask]  = np.round(jit_arr[tmask]  + p_t * (jit_t - jit_arr[tmask]), 4)
+        loss_arr[tmask] = np.round(loss_arr[tmask] + p_t * sig["loss_peak"], 4)
 
     def _apply_env(win, ft, t_start, t_impact, lead, dur, sevmul):
         """Perturb the device-health features inside one fault window.
@@ -381,8 +463,11 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         sig = sigs[ft]
         kind = sig["kind"]
         target = rng.choice(pe_devs if ft in ("bgp_flap", "node_failure") and pe_devs else ce_devs)
-        lead = float(rng.gamma(2.0, max(sig["lead_s"] / 2.0, 0.5)))
-        # Gamma(k=2, scale=lead_s/2) → mean≈lead_s, CV≈0.71; always positive
+        # Gamma(k=2, scale=lead_s/2) → mean≈lead_s, CV≈0.71; always positive.
+        # Floored at 4 buckets: several calibrated lead_s are ~2 s, shorter than
+        # one bucket, which yields prog==0 at the only precursor bucket -- a
+        # time_to_impact_s>0 label with a bit-identical-to-baseline metric.
+        lead = max(float(rng.gamma(2.0, max(sig["lead_s"] / 2.0, 0.5))), 4.0 * step)
         dur_impact = float(rng.uniform(60, 240))
         t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
         t_impact = t_start + lead
@@ -395,22 +480,30 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         win = (dev_arr == target) & (epoch >= t_start) & (epoch <= t_end)
         if not win.any():
             continue
+        # Overlapping episodes on one device would silently overwrite the
+        # earlier episode's scenario_id/lead_time/time_to_impact while its ramp
+        # stays in the metrics -- labels desynced from signal. Drop the clash.
+        if (fault_col & win).any():
+            continue
 
-        fault_col[win] = True
-        sid_col[win]   = sid
-        ftype_col[win] = ft
-        sev_col[win]   = str(sev)
-        lead_col[win]  = lead
-        tti_col[win]   = np.round(t_impact - epoch[win], 1)
+        # Label ONLY rows a perturbation actually reaches. The window is
+        # device-wide but each `kind` moves one entity_type, so labelling the
+        # whole window marked ~45% of is_fault rows that are byte-identical to
+        # baseline. Device rows always move (_apply_env touches power/temp).
+        iface_sig = (kind in ("iface_churn", "iface_down")
+                     or ft in _CONGEST or ft in _CHURN or ft == "gray_failure")
+        lab = win & (etype == "device")
+        if kind == "tunnel_ramp":
+            lab = lab | (win & (etype == "tunnel"))
+        if iface_sig:
+            lab = lab | (win & (etype == "interface"))
 
-        # vectorized prog ramp (no Python loop)
-        ep_win = epoch[win].astype(float)
-        prog = np.where(
-            ep_win <= t_impact,
-            (ep_win - t_start) / max(lead, step),
-            np.maximum(0.0, 1.0 - (ep_win - t_impact) / max(dur_impact, step)),
-        )
-        prog = np.clip(prog, 0.0, 1.0) * sevmul
+        fault_col[lab] = True
+        sid_col[lab]   = sid
+        ftype_col[lab] = ft
+        sev_col[lab]   = str(sev)
+        lead_col[lab]  = lead
+        tti_col[lab]   = np.round(t_impact - epoch[lab], 1)
 
         if kind == "tunnel_ramp":
             tmask = win & (etype == "tunnel")
@@ -421,25 +514,11 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
                                (ep_t - t_start) / max(lead, step),
                                np.maximum(0.0, 1.0 - (ep_t - t_impact) / max(dur_impact, step)))
                 p_t = np.clip(p_t, 0.0, 1.0) * sevmul
-                lat_arr[tmask]  = np.round(lat_arr[tmask]  + p_t * (sig["lat_peak"]  - lat_arr[tmask]),  4)
-                jit_arr[tmask]  = np.round(jit_arr[tmask]  + p_t * (sig["jit_peak"]  - jit_arr[tmask]),  4)
-                loss_arr[tmask] = np.round(loss_arr[tmask] + p_t * sig["loss_peak"],                      4)
+                _tunnel_ramp(tmask, sig, p_t)
         elif kind == "iface_churn":
-            imask = win & (etype == "interface")
-            if imask.any():
-                ep_i = epoch[imask].astype(float)
-                p_i = np.where(ep_i <= t_impact,
-                               (ep_i - t_start) / max(lead, step),
-                               np.maximum(0.0, 1.0 - (ep_i - t_impact) / max(dur_impact, step)))
-                p_i = np.clip(p_i, 0.0, 1.0) * sevmul
-                valid = ~np.isnan(iin_arr[imask])
-                tmp = iin_arr[imask].copy()
-                tmp[valid] = np.round(tmp[valid] * (1 + p_i[valid] * 0.4), 1)
-                iin_arr[imask] = tmp
+            _iface_churn(target, t_start, t_impact, t_end, lead, dur_impact, sevmul)
         elif kind == "iface_down":
-            dmask = win & (etype == "interface") & (epoch > t_impact) & (ent_arr != "lo")
-            if dmask.any():
-                ops_arr[dmask] = 0.0
+            _iface_down(target, t_impact, t_end)
 
         # device-health features move for EVERY fault type, not just the three
         # metric "kinds" above (a fault the tunnel metrics barely register can
@@ -452,7 +531,8 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
             cascade_sig_key = rng.choice(list(sigs.keys()))
             cascade_sig = sigs[cascade_sig_key]
             cascade_t_start = t_start + lead * 0.5
-            cascade_lead = float(rng.gamma(2.0, max(cascade_sig["lead_s"] / 2.0, 0.5)))
+            cascade_lead = max(float(rng.gamma(2.0, max(cascade_sig["lead_s"] / 2.0, 0.5))),
+                               4.0 * step)
             cascade_dur = float(rng.uniform(60, 240))
             cascade_t_impact = cascade_t_start + cascade_lead
             cascade_t_end = cascade_t_impact + cascade_dur
@@ -461,13 +541,22 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
             cascade_sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(cascade_sev)]
             cascade_kind = cascade_sig["kind"]
             cwin = (dev_arr == target2) & (epoch >= cascade_t_start) & (epoch <= cascade_t_end)
-            if cwin.any():
-                fault_col[cwin] = True
-                sid_col[cwin]   = cascade_sid
-                ftype_col[cwin] = cascade_sig_key
-                sev_col[cwin]   = str(cascade_sev)
-                lead_col[cwin]  = cascade_lead
-                tti_col[cwin]   = np.round(cascade_t_impact - epoch[cwin], 1)
+            if cwin.any() and not (fault_col & cwin).any():
+                c_iface_sig = (cascade_kind in ("iface_churn", "iface_down")
+                               or cascade_sig_key in _CONGEST
+                               or cascade_sig_key in _CHURN
+                               or cascade_sig_key == "gray_failure")
+                clab = cwin & (etype == "device")
+                if cascade_kind == "tunnel_ramp":
+                    clab = clab | (cwin & (etype == "tunnel"))
+                if c_iface_sig:
+                    clab = clab | (cwin & (etype == "interface"))
+                fault_col[clab] = True
+                sid_col[clab]   = cascade_sid
+                ftype_col[clab] = cascade_sig_key
+                sev_col[clab]   = str(cascade_sev)
+                lead_col[clab]  = cascade_lead
+                tti_col[clab]   = np.round(cascade_t_impact - epoch[clab], 1)
                 if cascade_kind == "tunnel_ramp":
                     ctmask = cwin & (etype == "tunnel")
                     if ctmask.any():
@@ -476,25 +565,12 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
                                         (ep_ct - cascade_t_start) / max(cascade_lead, step),
                                         np.maximum(0.0, 1.0 - (ep_ct - cascade_t_impact) / max(cascade_dur, step)))
                         p_ct = np.clip(p_ct, 0.0, 1.0) * cascade_sevmul
-                        lat_arr[ctmask]  = np.round(lat_arr[ctmask]  + p_ct * (cascade_sig["lat_peak"]  - lat_arr[ctmask]),  4)
-                        jit_arr[ctmask]  = np.round(jit_arr[ctmask]  + p_ct * (cascade_sig["jit_peak"]  - jit_arr[ctmask]),  4)
-                        loss_arr[ctmask] = np.round(loss_arr[ctmask] + p_ct * cascade_sig["loss_peak"],                      4)
+                        _tunnel_ramp(ctmask, cascade_sig, p_ct)
                 elif cascade_kind == "iface_churn":
-                    cimask = cwin & (etype == "interface")
-                    if cimask.any():
-                        ep_ci = epoch[cimask].astype(float)
-                        p_ci = np.where(ep_ci <= cascade_t_impact,
-                                        (ep_ci - cascade_t_start) / max(cascade_lead, step),
-                                        np.maximum(0.0, 1.0 - (ep_ci - cascade_t_impact) / max(cascade_dur, step)))
-                        p_ci = np.clip(p_ci, 0.0, 1.0) * cascade_sevmul
-                        valid = ~np.isnan(iin_arr[cimask])
-                        tmp = iin_arr[cimask].copy()
-                        tmp[valid] = np.round(tmp[valid] * (1 + p_ci[valid] * 0.4), 1)
-                        iin_arr[cimask] = tmp
+                    _iface_churn(target2, cascade_t_start, cascade_t_impact,
+                                 cascade_t_end, cascade_lead, cascade_dur, cascade_sevmul)
                 elif cascade_kind == "iface_down":
-                    cdmask = cwin & (etype == "interface") & (epoch > cascade_t_impact) & (ent_arr != "lo")
-                    if cdmask.any():
-                        ops_arr[cdmask] = 0.0
+                    _iface_down(target2, cascade_t_impact, cascade_t_end)
                 _apply_env(cwin, cascade_sig_key, cascade_t_start, cascade_t_impact,
                            cascade_lead, cascade_dur, cascade_sevmul)
 
@@ -503,6 +579,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     df["tunnel_jitter_ms"]  = jit_arr
     df["tunnel_loss_pct"]   = loss_arr
     df["if_in_octets"]      = iin_arr
+    df["if_out_octets"]     = iout_arr
     df["if_oper_status"]    = ops_arr
     df["if_in_errors"]      = err_arr
     df["if_in_discards"]    = disc_arr
@@ -538,16 +615,14 @@ def generate(days, step, scale, profile_path):
             + _gen_devices(rng, inv, prof, times))
     df = pd.DataFrame(rows)
 
-    # init label + missing canonical columns
-    df["is_fault"] = False
-    for c in ["scenario_id", "fault_type", "severity"]:
-        df[c] = pd.NA
-    df["lead_time_s"] = pd.NA
-    df["time_to_impact_s"] = pd.NA
+    # init missing canonical columns. The six label columns are NOT initialised
+    # here: _inject_faults assigns all of them unconditionally on every path.
     df["vrf"] = pd.NA
     for c in ["flow_bytes", "flow_packets"]:
-        # ponytail: real capture had flows all-null (nfacctd not joined in sample);
-        # we leave them null too so synthetic matches what the real export emits.
+        # KNOWN GAP: the flow pillar is not synthesised. The real capture DOES
+        # carry sparse flow rows (~3% non-null), so this is an omission, not a
+        # match to the real export. Calibrating flow_bytes/flow_packets per
+        # site_type from those rows is the fix; until then they are null.
         df[c] = pd.NA
 
     df = _inject_faults(rng, df, inv, prof, times, step, scale)
@@ -574,7 +649,16 @@ def generate(days, step, scale, profile_path):
 
     fname = f"synthetic_{int(start)}_d{days}_s{step}_x{scale}.parquet"
     path = os.path.join(OUTDIR, fname)
-    df.to_parquet(path, index=False)
+    # Mark it synthetic IN THE FILE, not just in the filename: a renamed or
+    # re-exported copy must still be distinguishable from a real capture.
+    tbl = pa.Table.from_pandas(df, preserve_index=False)
+    tbl = tbl.replace_schema_metadata({
+        **(tbl.schema.metadata or {}),
+        b"synthetic": b"true",
+        b"generator": b"synthetic/generate.py",
+        b"calibrated_from": str(prof.get("source_parquet", "")).encode(),
+    })
+    pq.write_table(tbl, path)
     return path, df
 
 

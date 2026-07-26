@@ -56,8 +56,12 @@ for img in "${ALL_IMAGES[@]}"; do
   fname="${fname//:/_}.tar.xz"
   out="${BUNDLE_DIR}/${fname}"
 
-  if [[ -f "$out" ]]; then
-    echo "  [skip] ${fname} already exists"
+  # Skip only if the tarball is NEWER than the image it claims to contain.
+  # A bare `-f "$out"` test shipped stale local builds (fixed tags like
+  # frr-node:0.1 are rebuilt in place) while the manifest recorded the new ID.
+  img_epoch=$(date -d "$(docker inspect --format='{{.Created}}' "$img" 2>/dev/null)" +%s 2>/dev/null || echo 0)
+  if [[ -f "$out" && $(stat -c %Y "$out") -gt $img_epoch ]]; then
+    echo "  [skip] ${fname} already up to date"
   else
     echo -n "  [save] ${img} → ${fname} ... "
     docker save "$img" | xz -T0 -3 > "$out"

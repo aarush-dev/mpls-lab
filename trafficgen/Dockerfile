@@ -1,5 +1,6 @@
 # Trafficgen image. Build context = /root/LAB (repo root).
-#   docker build -t noc-trafficgen -f trafficgen/Dockerfile .
+#   docker build -t noc-trafficgen:0.1 -f trafficgen/Dockerfile .
+#   (the :0.1 tag is what telemetry/docker-compose.yml and airgap/*.sh require)
 #
 # ponytail: apt docker.io ships dockerd/proxy/init but NO `docker` CLI binary.
 #   COPY --from=docker:cli pulls just the static client at build time (egress OK);
@@ -7,9 +8,9 @@
 FROM docker:cli AS docker-cli
 FROM python:3.11-slim
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-RUN apt-get update \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir pyyaml
+# No apt layer: the old `apt-get update && rm -rf lists` installed nothing and
+# only added a build-time network dependency, which an air-gapped build cannot pay.
+RUN pip install --no-cache-dir pyyaml
 WORKDIR /app
 COPY trafficgen/trafficgen.py trafficgen/diurnal.py /app/trafficgen/
 COPY controller/topo.py /app/controller/

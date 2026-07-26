@@ -33,10 +33,9 @@ def node(device):
     return f"clab-{LAB}-{device}"
 
 
-def _sh(args, timeout=15, check=False):
-    """Run a command, return CompletedProcess. Never raises unless check=True."""
-    return subprocess.run(args, capture_output=True, text=True,
-                          timeout=timeout, check=check)
+def _sh(args, timeout=15):
+    """Run a command, return CompletedProcess. Never raises on nonzero rc."""
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
 
 def dexec(device, *cmd, timeout=15):
@@ -187,15 +186,12 @@ class LinkFlap:
 # 3. BGP flap — vtysh clear (session reset). Adjacency churn precursor.
 # ---------------------------------------------------------------------------
 class BgpFlap:
-    """Reset BGP sessions via vtysh `clear bgp`. neighbor=None clears all;
-    otherwise clears a specific neighbor IP.
+    """Reset ALL BGP sessions on a node via vtysh `clear bgp *`.
 
-    vrf=<name>  : target ONE specific VRF (original param kept for callers)
-    vrf=None    : DEFAULT — enumerate ALL BGP instances on the node (default
-                  instance + every VRF) and clear each. This is the only way
-                  to hit CE routers, which run BGP exclusively inside VRFs
-                  (vrf_CORP / vrf_VOICE / vrf_GUEST); `clear bgp *` against
-                  the default instance is a no-op on them.
+    Enumerates every BGP instance on the node (default instance + every VRF)
+    and clears each. Enumeration is the only way to hit CE routers, which run
+    BGP exclusively inside VRFs (vrf_CORP / vrf_VOICE / vrf_GUEST); `clear bgp *`
+    against the default instance is a no-op on them.
 
     # ponytail: discover VRFs dynamically via `show bgp vrf all summary`
     #   (one exec, already needed for PolicyDrift) rather than hardcoding names;
@@ -204,10 +200,8 @@ class BgpFlap:
     This is non-destructive (sessions re-establish) but produces ADJCHANGE
     syslog (-> Loki) and a routing churn signature."""
 
-    def __init__(self, device, neighbor=None, vrf=None, count=1, gap_seconds=8.0):
+    def __init__(self, device, count=1, gap_seconds=8.0):
         self.device = device
-        self.neighbor = neighbor
-        self.vrf = vrf      # None = all instances; str = one VRF only
         self.count = count
         self.gap_seconds = gap_seconds
 
@@ -224,14 +218,10 @@ class BgpFlap:
 
     def _clear_cmds(self):
         """Return list of vtysh clear commands to issue."""
-        tgt = self.neighbor or "*"
-        if self.vrf:
-            # Caller pinned one VRF explicitly.
-            return [f"clear bgp vrf {self.vrf} {tgt}"]
         # Enumerate: try the default instance first, then every VRF found.
-        cmds = [f"clear bgp {tgt}"]   # no-op on CE (default absent), harmless
+        cmds = ["clear bgp *"]   # no-op on CE (default absent), harmless
         for vrf in self._discover_vrfs():
-            cmds.append(f"clear bgp vrf {vrf} {tgt}")
+            cmds.append(f"clear bgp vrf {vrf} *")
         return cmds
 
     def apply(self):
@@ -242,7 +232,6 @@ class BgpFlap:
             if i < self.count - 1:
                 time.sleep(self.gap_seconds)
         return {"injector": "bgp_flap", "device": self.device,
-                "neighbor": self.neighbor, "vrf": self.vrf,
                 "count": self.count, "cmds": cmds}
 
     def revert(self):
@@ -358,6 +347,14 @@ class PolicyDrift:
     def apply(self):
         nb = self._detect_neighbor()
         asn = self._as_number()
+        # Without both, the config below would push literal "router bgp None
+        # vrf X" / "neighbor None ..." lines that vtysh rejects — and since the
+        # rc is not inspected, the orchestrator would still label the fault as
+        # applied. Fail loudly instead.
+        if nb is None or asn is None:
+            raise RuntimeError(
+                f"policy_drift: could not detect BGP peer/ASN on {self.device} "
+                f"{self.vrf} (neighbor={nb}, asn={asn})")
         cfg = "\n".join([
             "configure terminal",
             f"route-map {self.RMAP} permit 10",
@@ -380,6 +377,10 @@ class PolicyDrift:
     def revert(self):
         nb = self._detect_neighbor()
         asn = self._as_number()
+        if nb is None or asn is None:
+            # Nothing was (or could be) configured; don't push "bgp None" lines.
+            return {"reverted": "policy_drift", "device": self.device,
+                    "vrf": self.vrf, "note": "peer/ASN undetected; no-op"}
         cfg = "\n".join([
             "configure terminal",
             f"router bgp {asn} vrf {self.vrf}",
@@ -405,15 +406,14 @@ class MplsUnderlayFailure:
     Targets a P-PE link on the P side. With BFD+dual-homing, the affected PE
     reconverges via its secondary P uplink within ~1s.
     """
-    def __init__(self, device, iface, down_seconds=30.0):
+    def __init__(self, device, iface):
         self.device = device
         self.iface = iface
-        self.down_seconds = down_seconds
 
     def apply(self):
         dexec(self.device, "ip", "link", "set", self.iface, "down")
         return {"applied": "mpls_underlay_failure", "device": self.device,
-                "iface": self.iface, "down_seconds": self.down_seconds}
+                "iface": self.iface}
 
     def revert(self):
         dexec(self.device, "ip", "link", "set", self.iface, "up")
@@ -436,7 +436,6 @@ class LdpSessionFlap:
         self.gap_seconds = gap_seconds
 
     def apply(self):
-        import time
         for i in range(self.count):
             dexec(self.device, "vtysh", "-c",
                   f"clear mpls ldp neighbor {self.neighbor_ip}")
@@ -455,7 +454,9 @@ class LdpSessionFlap:
 # 9. Multi-link fault — down a SET of (device, iface) links at once (correlated).
 # ---------------------------------------------------------------------------
 class MultiLinkFault:
-    """Down a SET of links atomically, then bring them all back on revert().
+    """Down a SET of links (one `ip link set down` per link, issued in sequence
+    — to OSPF the set goes down staggered, not atomically), then bring them all
+    back on revert().
 
     Powers the catastrophic/correlated core faults — the link-set is computed by
     the orchestrator from topology-meta.json:
@@ -466,9 +467,8 @@ class MultiLinkFault:
     apply() only downs (orchestrator holds the duration, then calls revert()).
     revert() brings every link back up (idempotent)."""
 
-    def __init__(self, links, down_seconds=30.0):
+    def __init__(self, links):
         self.links = [tuple(l) for l in links]   # [(device, iface), ...]
-        self.down_seconds = down_seconds
 
     def _set(self, state):
         for dev, iface in self.links:
@@ -477,7 +477,7 @@ class MultiLinkFault:
     def apply(self):
         self._set("down")
         return {"injector": "multi_link_fault", "links": self.links,
-                "n_links": len(self.links), "down_seconds": self.down_seconds}
+                "n_links": len(self.links)}
 
     def revert(self):
         self._set("up")
@@ -517,13 +517,45 @@ class OspfCostShift:
 
 
 if __name__ == "__main__":
-    # quick import + instantiation selftest
-    inj = MplsUnderlayFailure("p1", "eth1", down_seconds=5.0)
-    assert inj.device == "p1" and inj.iface == "eth1"
-    inj2 = LdpSessionFlap("pe1", "10.255.1.1", count=2, gap_seconds=3.0)
-    assert inj2.count == 2
-    mlf = MultiLinkFault([("p1", "eth4"), ("p2", "eth4")], down_seconds=20.0)
-    assert len(mlf.links) == 2 and mlf.links[0] == ("p1", "eth4")
-    ocs = OspfCostShift("p1", "eth4", cost=1000, orig_cost=100)
-    assert ocs.cost == 1000 and ocs.orig_cost == 100
+    # Selftest of the COMMAND CONSTRUCTION (the part that can actually be wrong
+    # offline). Nothing here touches the lab: only pure argument formatting.
+    ni = NetemImpair.__new__(NetemImpair)   # skip __init__ (it probes the qdisc)
+    assert ni._netem_args(80, 20, 6, 0) == ["delay", "80ms", "20ms", "loss", "6%"], \
+        ni._netem_args(80, 20, 6, 0)
+    assert ni._netem_args(0, 0, 0, 512) == ["rate", "512kbit"]
+    assert ni._netem_args(30, 0, 0, 0) == ["delay", "30ms"]   # no jitter token
+    assert ni._netem_args(0, 0, 0, 0) == []                   # no-op impairment
+
+    bf = BgpFlap("ce_branch1", count=2)
+    bf._discover_vrfs = lambda: ["vrf_CORP", "vrf_VOICE"]
+    assert bf._clear_cmds() == ["clear bgp *", "clear bgp vrf vrf_CORP *",
+                                "clear bgp vrf vrf_VOICE *"], bf._clear_cmds()
+
+    # OspfCostShift revert line: explicit cost vs FRR default.
+    sent = []
+    ocs = OspfCostShift("p1", "eth4", cost=1000, orig_cost=10)
+    ocs._set_cost = sent.append
+    ocs.apply(); ocs.revert()
+    assert sent == ["ip ospf cost 1000", "ip ospf cost 10"], sent
+    ocs2 = OspfCostShift("p1", "eth4", cost=1000)
+    sent2 = []
+    ocs2._set_cost = sent2.append
+    ocs2.revert()
+    assert sent2 == ["no ip ospf cost"], sent2
+
+    # PolicyDrift must refuse to push "router bgp None" when detection fails.
+    pd = PolicyDrift("ce_branch1")
+    pd._detect_neighbor = lambda: None
+    pd._as_number = lambda: None
+    try:
+        pd.apply()
+        raise AssertionError("PolicyDrift.apply() accepted an undetected peer")
+    except RuntimeError:
+        pass
+
+    mlf = MultiLinkFault([("p1", "eth4"), ("p2", "eth4")])
+    downed = []
+    mlf._set = lambda state: downed.append(state)
+    mlf.apply(); mlf.revert()
+    assert downed == ["down", "up"], downed
     print("injectors selftest: OK")

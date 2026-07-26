@@ -22,17 +22,28 @@ deploying.
 deployed remotely. All design/research is captured in `PLAN.md`; the build happens locally.
 
 ## Local agent: verify BEFORE deploying (Phase 0 re-run)
-Run these on the workstation/WSL kernel and pick `mpls` vs `vrflite` underlay accordingly:
+Run these on the workstation/WSL kernel. There is no fallback mode: MPLS/LDP is
+emitted unconditionally for every P/PE (`topology-spec.yaml` — the `fallback.vrflite_mode`
+block that used to offer a VRF-only underlay has been deleted). If step 1 or 2 fails, fix
+the kernel; there is nothing to fall back to.
 
 ```bash
 # 1. kernel MPLS
-sudo modprobe mpls_router mpls_gso mpls_iptunnel && \
-  sudo sysctl -w net.mpls.platform_labels=1048575 && echo "MPLS OK"      # else use vrflite
+sudo modprobe mpls_router mpls_gso mpls_iptunnel; echo "modprobe exit: $?"
+sudo sysctl -w net.mpls.platform_labels=1048575 && echo "MPLS OK"
+# NOTE: `modprobe mpls_router 2>&1 | grep -q "^$"` (the old check here) ALWAYS reports
+# FAIL, even on a successful modprobe. `grep "^$"` matches a LINE that is empty, not
+# the absence of any output — and a successful `modprobe` prints zero lines (no stdout,
+# no stderr), so there is no empty line for grep to match against. `grep -q` on zero
+# lines of input exits 1 regardless of pattern (verified: `printf "" | grep -q "^$"`
+# exits 1; only `printf "\n" | grep -q "^$"` exits 0). The check was testing for a
+# blank line that a successful modprobe never emits. Check `$?` directly instead.
 
 # 2. VRF
 sudo ip link add vr0 type vrf table 100 && sudo ip link del vr0 && echo "VRF OK"
 
-# 3. netem (fault injection)
+# 3. netem (fault injection) — needs the `dummy` module loaded first
+sudo modprobe dummy
 sudo ip link add d0 type dummy && sudo tc qdisc add dev d0 root netem delay 10ms && \
   sudo tc qdisc del dev d0 root && sudo ip link del d0 && echo "netem OK"
 
@@ -40,13 +51,17 @@ sudo ip link add d0 type dummy && sudo tc qdisc add dev d0 root netem delay 10ms
 sudo ip link add v0 type veth peer name v1 && sudo ip link del v0 && echo "veth OK"
 
 # 5. wireguard (overlay)
-sudo modprobe wireguard && echo "wg OK"   # else use userspace wireguard-go / strongSwan
+sudo modprobe wireguard && echo "wg OK"
 ```
+
+Verified on this host (19 cores / 108 GB RAM / 1007 GB disk, kernel 6.18.33.1-microsoft-standard-WSL2)
+on 2026-07-26: all 5 checks PASS, including the corrected modprobe check and `netem` after
+loading `dummy`.
 
 ### WSL2 notes
 - Default WSL2 kernels often lack `CONFIG_MPLS_ROUTING`/`CONFIG_NET_VRF`. If steps 1–2 fail,
-  build a custom WSL2 kernel with those options, or run the lab in a full Linux VM, **or** use the
-  `vrflite` underlay (L3VPN emulated with VRFs — control-plane/telemetry/fault signals unchanged).
+  build a custom WSL2 kernel with those options, or run the lab in a full Linux VM. There is
+  no fallback underlay to switch to instead — MPLS/LDP is unconditional in the generator.
 - Load needed modules at boot via `/etc/modules-load.d/` then `wsl --shutdown`.
 - `cls_u32` must be loaded for the QoS DSCP `tc` filters (loadable, not built-in on this WSL2
   kernel; not auto-loaded → filters fail after reboot). It is in

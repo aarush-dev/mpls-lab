@@ -48,20 +48,20 @@ def build_model(spec=None):
     k = spec["knobs"]
     vrfs = spec.get("vrfs", {})
 
-    # Hubs: ce_hub{i} -> wg 172.16.0.{i}
+    # Hubs: ce_hub{i} -> wg 172.16.0.{i}. Only the HUB wg IP is used downstream
+    # (controller._measure_rtt pings it); spoke wg IPs and WG endpoints are the
+    # generator's business — a second copy here just went stale (it had the
+    # pre-collision DC formula and non-routable CE loopbacks as endpoints).
     hubs = []
     for i in range(1, k["hub_count"] + 1):
         hubs.append({"node": f"ce_hub{i}", "site_type": "hub",
-                     "wg_ip": f"172.16.0.{i}", "endpoint": f"10.255.4.{i}"})
+                     "wg_ip": f"172.16.0.{i}"})
 
-    # Spokes: branch -> 172.16.0.{10+i}, dc -> 172.16.0.{20+i}
     spokes = []
     for i in range(1, k["branch_count"] + 1):
-        spokes.append({"node": f"ce_branch{i}", "site_type": "branch",
-                       "wg_ip": f"172.16.0.{10 + i}", "endpoint": f"10.255.3.{i}"})
+        spokes.append({"node": f"ce_branch{i}", "site_type": "branch"})
     for i in range(1, k["dc_count"] + 1):
-        spokes.append({"node": f"ce_dc{i}", "site_type": "dc",
-                       "wg_ip": f"172.16.0.{20 + i}", "endpoint": f"10.255.5.{i}"})
+        spokes.append({"node": f"ce_dc{i}", "site_type": "dc"})
 
     # Which VRFs each site_type carries.
     site_vrfs = {}
@@ -78,7 +78,6 @@ def build_model(spec=None):
                 "site": sp["node"],
                 "site_type": sp["site_type"],
                 "hub": hub["node"],
-                "spoke_wg": sp["wg_ip"],
                 "hub_wg": hub["wg_ip"],
                 "vrfs": list(site_vrfs.get(sp["site_type"], [])),
             })

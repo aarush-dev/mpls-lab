@@ -33,10 +33,14 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import sys
 import uuid
 from datetime import datetime, timezone
 
-import injectors as inj
+# Works both as a script (`python3 orchestrator.py`, cwd=faults/) and as a module
+# (`python3 -c "import faults.orchestrator"` from the repo root).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import injectors as inj  # noqa: E402
 
 VM_URL = os.environ.get("VM_URL", "http://172.20.20.50:8428")
 LABELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labels")
@@ -54,7 +58,12 @@ def iso(dt):
 
 # --------------------------------------------------------------------------- VM
 def vm_instant(query):
-    """Run an instant PromQL query; return float value of first result or None."""
+    """Run an instant PromQL query; return float value of first result or None.
+
+    None means "no value": either the selector matched nothing OR the query
+    failed. The two are NOT the same, so a transport/parse failure is logged as
+    a probe_error event instead of being swallowed silently.
+    """
     url = f"{VM_URL}/api/v1/query?" + urllib.parse.urlencode({"query": query})
     try:
         with urllib.request.urlopen(url, timeout=5) as r:
@@ -63,26 +72,34 @@ def vm_instant(query):
         if not res:
             return None
         return float(res[0]["value"][1])
-    except Exception:
+    except Exception as e:
+        print(json.dumps({"event": "probe_error", "query": query,
+                          "error": f"{type(e).__name__}: {e}"}), flush=True)
         return None
 
 
 def poll_threshold(query, threshold, baseline=None, timeout_s=120, interval_s=3):
     """Poll `query` until it crosses `threshold` (relative to baseline if given).
 
-    Returns (t_impact_dt, observed_value) at first crossing, or (None, last) on
-    timeout. If baseline is given, crossing = value >= baseline + threshold.
+    Returns (t_impact_dt, observed_value, saw_value). On timeout t_impact is
+    None; saw_value is False when the probe returned NOTHING for the whole
+    window (VM down / metric absent / bad selector) — a different condition from
+    "the metric was there and simply never crossed".
+    If baseline is given, crossing = value >= baseline + threshold.
     """
     deadline = time.time() + timeout_s
     last = None
+    saw = False
     target = (baseline + threshold) if baseline is not None else threshold
     while time.time() < deadline:
         v = vm_instant(query)
         last = v
-        if v is not None and v >= target:
-            return now_utc(), v
+        if v is not None:
+            saw = True
+            if v >= target:
+                return now_utc(), v, True
         time.sleep(interval_s)
-    return None, last
+    return None, last, saw
 
 
 # --------------------------------------------------------------------------- labels
@@ -226,6 +243,7 @@ def scen_node_failure(target, severity, duration):
         "target": {"device": target, "process": "bgpd"},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "impact_delay_s": 1, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": "bgpd gap -> prefix withdrawal until watchfrr restart (~recoverable)",
     }
 
@@ -254,41 +272,50 @@ def scen_brownout(target, severity, duration):
     iface = _ce_uplink(target)
     rate = int(2000 * (1.1 - s))  # high severity -> tighter cap (kbit)
     injector = inj.NetemImpair(target, iface, rate_kbit=rate)
-    probe = f'max(sdwan_tunnel_latency_ms{{device="{target}"}})'
+    # NO PROBE: a `rate` cap has no observable in the telemetry path. The
+    # controller's _read_netem parses only the `delay`/`loss` tokens, and the
+    # wg0 RTT does not traverse eth1, so the advertised "queueing latency
+    # climbs" never shows up. Modelled until rate is observable.
     return {
         "type": "brownout",
         "target": {"device": target, "interface": iface, "rate_kbit": rate},
         "injector": injector, "ramp": False, "duration": duration,
-        "probe": probe, "threshold": 6.0, "impact_method": "vm_threshold",
-        "signature": "bandwidth starvation; queueing latency climbs under load, loss late",
+        "probe": None, "threshold": None, "impact_method": "modelled",
+        "impact_delay_s": 4,
+        "signature": "bandwidth starvation on the uplink (rate cap; not observable in tunnel telemetry)",
     }
 
 
 def scen_mpls_underlay_failure(target, severity, duration):
     """Bring down a P-router core interface toward a PE; LDP reconverges via dual-homing."""
-    from faults.injectors import MplsUnderlayFailure
-    # PE-facing link = the P's last core iface (P-PE links are wired after the
-    # intra/inter-POP fabric). Resolved from topology-meta so it scales with the POP layout.
+    # P-PE links are appended last, but ONLY on the POP-internal Ps — ABRs get
+    # inter-POP backbone links there instead, so [-1] on an ABR is not a P-PE
+    # link at all. Reject ABRs rather than mislabel the failure domain.
+    if target in meta()["abrs"]:
+        raise SystemExit(f"{target} is an ABR and has no P-PE link; "
+                         f"use an internal P (see topology-meta abrs)")
     iface = meta()["p_core_ifaces"][target][-1]
-    injector = MplsUnderlayFailure(target, iface, down_seconds=float(duration))
+    injector = inj.MplsUnderlayFailure(target, iface)
     return {
-        "type": "mpls_underlay_failure", "target": target, "severity": severity,
+        "type": "mpls_underlay_failure",
+        "target": {"device": target, "interface": iface},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "threshold": None, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": "P-PE link down; LDP must reconverge to secondary path (~1s with BFD)",
     }
 
 
 def scen_ldp_session_flap(target, severity, duration):
     """Flap an LDP session on a PE; self-recovers; generates LDP events in Loki."""
-    from faults.injectors import LdpSessionFlap
     sev_count = {"low": 1, "medium": 2, "high": 3}.get(str(severity), 1)
     # LDP peer = the PE's primary P uplink loopback (from the POP map, so it's a
     # real neighbour for any PE in any POP — not a hardcoded p1).
     neighbor_ip = _pe_primary_p_loopback(target)
-    injector = LdpSessionFlap(target, neighbor_ip, count=sev_count, gap_seconds=6.0)
+    injector = inj.LdpSessionFlap(target, neighbor_ip, count=sev_count, gap_seconds=6.0)
     return {
-        "type": "ldp_session_flap", "target": target, "severity": severity,
+        "type": "ldp_session_flap",
+        "target": {"device": target, "neighbor": neighbor_ip, "count": sev_count},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "threshold": None, "impact_method": "modelled",
         "signature": "LDP session cleared N times; session self-recovers; Loki logs ldp_event=Down/Up",
@@ -297,33 +324,43 @@ def scen_ldp_session_flap(target, severity, duration):
 
 def scen_hub_spoke_congest(target, severity, duration):
     """Ramp netem congestion on hub uplink; all spokes routed through this hub degrade."""
-    from faults.injectors import NetemImpair
     sev_kwargs = {
         "low":    {"delay_ms": 20,  "jitter_ms": 4,  "loss_pct": 0.5},
         "medium": {"delay_ms": 80,  "jitter_ms": 15, "loss_pct": 2.0},
         "high":   {"delay_ms": 200, "jitter_ms": 40, "loss_pct": 8.0},
     }.get(str(severity), {"delay_ms": 80, "jitter_ms": 15, "loss_pct": 2.0})
-    injector = NetemImpair(target, "eth1", **sev_kwargs)
-    probe = f'max(sdwan_tunnel_latency_ms{{source="{target}"}})'
+    injector = inj.NetemImpair(target, "eth1", **sev_kwargs)
+    # NO PROBE: the impairment sits on the HUB's eth1, but the controller folds
+    # netem only from the SPOKE's eth1 (controller.py _read_netem keys on
+    # TunnelState.site, which is always the spoke), and the wg0 ping egresses
+    # eth0. Nothing in the tunnel metrics can observe a hub-side uplink cap, so
+    # this scenario is modelled, not measured.
     return {
-        "type": "hub_spoke_congest", "target": target, "severity": severity,
+        "type": "hub_spoke_congest",
+        "target": {"device": target, "interface": "eth1"},
         "injector": injector, "ramp": True, "duration": duration,
-        "probe": probe, "threshold": 50.0, "impact_method": "vm_threshold",
-        "signature": "hub uplink congestion; all spoke tunnel latencies rise",
+        "probe": None, "threshold": None, "impact_method": "modelled",
+        "impact_delay_s": 4,
+        "signature": "hub uplink congestion (injected on the hub; not observable in tunnel telemetry)",
     }
 
 
 def scen_bgp_cascade(target, severity, duration):
     """Cascade BGP flaps on a hub CE; forces multiple path-switches; stresses RIB churn."""
-    from faults.injectors import BgpFlap
     sev_count = {"low": 1, "medium": 3, "high": 5}.get(str(severity), 3)
-    injector = BgpFlap(target, count=sev_count, gap_seconds=8.0)
-    probe = "sdwan_path_changes_total"
+    injector = inj.BgpFlap(target, count=sev_count, gap_seconds=8.0)
+    # NO PROBE: sdwan_path_changes_total is a single unlabelled fabric-wide
+    # counter that the controller increments from its own micro-burst RNG, and
+    # nothing in the controller reads BGP state — a crossing cannot be
+    # attributed to this fault. Modelled until a real BGP metric is scoped by
+    # device (see the FRR/SNMP pillar).
     return {
-        "type": "bgp_cascade", "target": target, "severity": severity,
+        "type": "bgp_cascade",
+        "target": {"device": target, "count": sev_count},
         "injector": injector, "ramp": False, "duration": duration,
-        "probe": probe, "threshold": 1.0, "impact_method": "vm_threshold",
-        "signature": "repeated BGP session clears; multiple path-switches; sdwan_path_changes_total increments",
+        "probe": None, "threshold": None, "impact_method": "modelled",
+        "impact_delay_s": 2,
+        "signature": "repeated BGP session clears on a hub CE; RIB churn (Loki ADJCHANGE)",
     }
 
 
@@ -356,7 +393,8 @@ def scen_controller_drift(target, severity, duration):
     mult = {"low": 5.0, "medium": 10.0, "high": 99.0}.get(str(severity), 10.0)
     injector = _DriftInjector(target, mult=mult, ttl_s=duration + 30)
     return {
-        "type": "controller_drift", "target": target, "severity": severity,
+        "type": "controller_drift",
+        "target": {"device": target, "latency_threshold_mult": mult},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "threshold": None, "impact_method": "modelled",
         "signature": "controller drift suppresses failover; sdwan_controller_drift_active rises",
@@ -370,12 +408,13 @@ def scen_p_node_failure(target, severity, duration):
     """Catastrophic: down ALL core ifaces of one P router (full node loss). The
     redundant POP mesh + PE dual-homing must reroute around it."""
     links = [(target, i) for i in meta()["p_core_ifaces"][target]]
-    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    injector = inj.MultiLinkFault(links)
     return {
         "type": "p_node_failure", "device": target,
         "target": {"device": target, "n_links": len(links), "links": links},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": "full P-router loss; OSPF/LDP reconverge around it via POP mesh + dual-homing",
     }
 
@@ -385,12 +424,14 @@ def scen_pop_isolation(target, severity, duration):
     is cut off (only intra-POP connectivity remains); its PEs go unreachable."""
     links = [tuple(l) for l in meta()["pop_inter_links"][target]]
     abr0 = meta()["pops"][target][0]
-    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    injector = inj.MultiLinkFault(links)
     return {
         "type": "pop_isolation", "device": abr0,
-        "target": {"pop": target, "n_links": len(links), "links": links},
+        "target": {"device": abr0, "pop": target, "n_links": len(links),
+                   "links": links},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": f"{target} isolated: all inter-POP links down; in-POP PEs unreachable from other POPs",
     }
 
@@ -405,13 +446,15 @@ def scen_core_partition(target, severity, duration):
     for rec in m["inter_pop_links"]:
         if (rec["pop_a"] in half) != (rec["pop_b"] in half):   # crossing edge
             links += [tuple(l) for l in rec["links"]]
-    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    injector = inj.MultiLinkFault(links)
+    dev = links[0][0] if links else "p1"
     return {
-        "type": "core_partition", "device": links[0][0] if links else "p1",
-        "target": {"seam": target, "half": sorted(half), "n_links": len(links),
-                   "links": links},
+        "type": "core_partition", "device": dev,
+        "target": {"device": dev, "seam": target, "half": sorted(half),
+                   "n_links": len(links), "links": links},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": "backbone ring bisected; area-0 splits into two islands until restore",
     }
 
@@ -420,12 +463,14 @@ def scen_srlg_cut(target, severity, duration):
     """Correlated fibre cut: down EVERY link in one SRLG conduit at once -- the
     redundant parallel links share a duct, so 'redundancy' doesn't save you."""
     links = [tuple(l) for l in meta()["srlgs"][target]]
-    injector = inj.MultiLinkFault(links, down_seconds=float(duration))
+    injector = inj.MultiLinkFault(links)
     return {
         "type": "srlg_cut", "device": links[0][0],
-        "target": {"srlg": target, "n_links": len(links), "links": links},
+        "target": {"device": links[0][0], "srlg": target, "n_links": len(links),
+                   "links": links},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "impact_delay_s": 2, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": "shared-risk conduit cut; all parallel inter-POP links drop together",
     }
 
@@ -466,7 +511,11 @@ def scen_path_asymmetry(target, severity, duration):
     paths diverge (path asymmetry -- a named precursor in the brief)."""
     iface = _backbone_iface(target)
     cost = int(500 + 1500 * SEVERITY[severity])
-    injector = inj.OspfCostShift(target, iface, cost=cost, orig_cost=100)
+    # _backbone_iface returns an inter-POP link on an ABR (igp_cost_inter=100)
+    # and an intra-POP/P-PE link otherwise (igp_cost_intra=10). Reverting to a
+    # hardcoded 100 would leave a cost-10 link permanently inflated.
+    orig = 100 if _p_inter_ifaces(target) else 10
+    injector = inj.OspfCostShift(target, iface, cost=cost, orig_cost=orig)
     return {
         "type": "path_asymmetry", "device": target,
         "target": {"device": target, "interface": iface, "cost": cost},
@@ -485,6 +534,7 @@ def scen_rr_failure(target, severity, duration):
         "target": {"device": target, "process": "bgpd", "role": "route_reflector"},
         "injector": injector, "ramp": False, "duration": duration,
         "probe": None, "impact_delay_s": 3, "impact_method": "modelled",
+        "severity_inert": True,
         "signature": "RR bgpd gap; VPNv4 propagation stalls (bgp_peer_established drops) until restart",
     }
 
@@ -532,6 +582,59 @@ SCENARIOS = {
 
 
 # --------------------------------------------------------------------------- run
+def _resolve_impact(spec, t_start, baseline, duration, dry_run):
+    """Return (t_impact, observed, impact_method) for one running fault.
+
+    Shared by run_scenario and _campaign_fault so both label paths agree.
+    impact_method is one of:
+      vm_threshold      the probe was read and crossed -> measured t_impact
+      modelled_fallback the probe was read but never crossed -> modelled t_impact
+      probe_unavailable the probe returned NOTHING for the whole window (VM
+                        down / metric absent / selector matches no series) ->
+                        modelled t_impact, but no telemetry stands behind it
+      modelled          the scenario declares no probe at all
+    """
+    if spec["impact_method"] == "vm_threshold" and spec.get("probe") and not dry_run:
+        t_impact, observed, saw = poll_threshold(
+            spec["probe"], spec["threshold"], baseline=baseline,
+            timeout_s=int(duration), interval_s=3)
+        if t_impact is not None:
+            return t_impact, observed, "vm_threshold"
+        method = "modelled_fallback" if saw else "probe_unavailable"
+    else:
+        observed = None
+        method = "modelled"
+    delay = spec.get("impact_delay_s", 2)
+    return (datetime.fromtimestamp(t_start.timestamp() + delay, tz=timezone.utc),
+            observed, method)
+
+
+def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
+               t_end, impact_method, baseline, observed, dry_run, error):
+    """Build the ground-truth label row (one schema, both run paths)."""
+    return {
+        "scenario_id": scenario_id,
+        "type": spec["type"] if spec else name,
+        "target": spec["target"] if spec else {"device": target},
+        # severity is recorded as null for scenarios whose injector ignores it
+        # (link-set / process-kill faults) — the column must not carry a value
+        # the fault never used.
+        "severity": None if (spec and spec.get("severity_inert")) else severity,
+        "t_start": iso(t_start),
+        "t_impact": iso(t_impact),
+        "t_end": iso(t_end),
+        "lead_time": round((t_impact - t_start).total_seconds(), 1),
+        "impact_method": impact_method,
+        "probe": spec.get("probe") if spec else None,
+        "baseline_value": baseline,
+        "impact_value": observed,
+        "signature": spec["signature"] if spec else None,
+        "device": (spec.get("device", target) if spec else target),
+        "dry_run": dry_run,
+        "error": error,
+    }
+
+
 def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
                  dry_run=False):
     """Execute one scenario end-to-end and write a label row. Returns the row."""
@@ -553,74 +656,55 @@ def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
                       "type": spec["type"], "t_start": iso(t_start),
                       "dry_run": dry_run}), flush=True)
 
-    if not dry_run:
-        if spec.get("ramp"):
-            injector.ramp(steps=ramp_steps,
-                          step_seconds=max(3.0, duration / (ramp_steps * 2)))
-        else:
-            injector.apply()
-        if spec.get("extra"):
-            spec["extra"].apply()
+    # Everything from the first mutation on is guarded: an injector/dexec
+    # failure must still revert the lab and still write a label (flagged with
+    # the error) rather than leave core links down and lose the row.
+    t_impact, observed, impact_method = t_start, None, "modelled"
+    error = None
+    try:
+        if not dry_run:
+            if spec.get("ramp"):
+                injector.ramp(steps=ramp_steps,
+                              step_seconds=max(3.0, duration / (ramp_steps * 2)))
+            else:
+                injector.apply()
+            if spec.get("extra"):
+                spec["extra"].apply()
 
-    # --- t_impact ---
-    if spec["impact_method"] == "vm_threshold" and spec.get("probe") and not dry_run:
-        t_impact, observed = poll_threshold(
-            spec["probe"], spec["threshold"], baseline=baseline,
-            timeout_s=int(duration), interval_s=3)
-        if t_impact is None:  # fell back: never crossed -> model it
-            t_impact = t_start
-            impact_method = "modelled_fallback"
-        else:
-            impact_method = "vm_threshold"
-    else:
-        impact_method = "modelled"
-        t_impact = t_start  # offset applied below
-        observed = None
+        t_impact, observed, impact_method = _resolve_impact(
+            spec, t_start, baseline, duration, dry_run)
+        print(json.dumps({"event": "impact", "scenario_id": scenario_id,
+                          "t_impact": iso(t_impact), "method": impact_method,
+                          "observed": observed}), flush=True)
 
-    # apply modelled offset
-    if impact_method.startswith("modelled"):
-        delay = spec.get("impact_delay_s", 2)
-        t_impact = datetime.fromtimestamp(t_start.timestamp() + delay, tz=timezone.utc)
+        # --- hold for the rest of the duration ---
+        elapsed = time.time() - t_start.timestamp()
+        remaining = duration - elapsed
+        if remaining > 0 and not dry_run:
+            time.sleep(remaining)
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+        print(json.dumps({"event": "scenario_error", "scenario_id": scenario_id,
+                          "error": error}), flush=True)
+    finally:
+        try:
+            if not dry_run:
+                if spec.get("extra"):
+                    spec["extra"].revert()
+                injector.revert()
+        except Exception as e:
+            error = (error or "") + f" revert_failed: {type(e).__name__}: {e}"
+            print(json.dumps({"event": "revert_error", "scenario_id": scenario_id,
+                              "error": str(e)}), flush=True)
+        t_end = now_utc()
+        print(json.dumps({"event": "revert", "scenario_id": scenario_id,
+                          "t_end": iso(t_end)}), flush=True)
 
-    print(json.dumps({"event": "impact", "scenario_id": scenario_id,
-                      "t_impact": iso(t_impact), "method": impact_method,
-                      "observed": observed}), flush=True)
-
-    # --- hold for the rest of the duration ---
-    elapsed = time.time() - t_start.timestamp()
-    remaining = duration - elapsed
-    if remaining > 0 and not dry_run:
-        time.sleep(remaining)
-
-    # --- revert ---
-    if not dry_run:
-        if spec.get("extra"):
-            spec["extra"].revert()
-        injector.revert()
-    t_end = now_utc()
-    print(json.dumps({"event": "revert", "scenario_id": scenario_id,
-                      "t_end": iso(t_end)}), flush=True)
-
-    lead_time = round((t_impact - t_start).total_seconds(), 1)
-
-    row = {
-        "scenario_id": scenario_id,
-        "type": spec["type"],
-        "target": spec["target"],
-        "severity": severity,
-        "t_start": iso(t_start),
-        "t_impact": iso(t_impact),
-        "t_end": iso(t_end),
-        "lead_time": lead_time,
-        "impact_method": impact_method,
-        "probe": spec.get("probe"),
-        "baseline_value": baseline,
-        "impact_value": observed,
-        "signature": spec["signature"],
-        "device": spec.get("device", target),
-    }
-    write_label(row)
-    print(json.dumps({"event": "label_written", "row": row}), flush=True)
+        row = _label_row(spec, scenario_id, name, target, severity, t_start,
+                         t_impact, t_end, impact_method, baseline, observed,
+                         dry_run, error)
+        write_label(row)
+        print(json.dumps({"event": "label_written", "row": row}), flush=True)
     return row
 
 
@@ -657,6 +741,8 @@ _PE_ALL      = [f"pe{i}"        for i in range(1, 13)]   # 12 PEs
 _P_ALL       = [f"p{i}"         for i in range(1, 25)]   # 24 P routers
 # core-fault pools, derived from the topology-meta POP map (single source of truth)
 _ABRS  = meta()["abrs"]                                   # ABR (backbone) P routers
+# POP-internal (PE-facing) Ps — the only ones that HAVE a P-PE link.
+_P_INTERNAL = [p for p in _P_ALL if p not in _ABRS]
 _POPS  = list(meta()["pops"].keys())                     # pop1..pop6
 _SRLGS = list(meta()["srlgs"].keys())                    # inter-POP conduits
 _RR    = ["pe1", "pe2"]                                   # route reflectors
@@ -674,7 +760,9 @@ CAMPAIGN_POOLS = {
     # node_failure (bgpd kill) — avoid PE core nodes to keep core stable;
     # actually fine on CEs and PE spokes; skip P-core entirely
     "node_failure":    _CE_ALL + _PE_ALL,
-    "mpls_underlay_failure": _P_ALL,
+    # only internal Ps have a P-PE link; an ABR target would down an inter-POP
+    # backbone conduit while the label claimed a P-PE failure.
+    "mpls_underlay_failure": _P_INTERNAL,
     "ldp_session_flap":      _PE_ALL,
     "hub_spoke_congest":     _CE_HUBS,
     "bgp_cascade":           _CE_HUBS,
@@ -709,8 +797,6 @@ _DURATION_BOUNDS = {
     "bgp_cascade":           (20, 60),
     "controller_drift":      (60, 180),
     "p_node_failure":        (15, 45),
-    "pop_isolation":         (20, 60),
-    "core_partition":        (20, 60),
     "srlg_cut":              (20, 50),
     "core_congestion":       (30, 90),
     "ospf_area_flap":        (15, 45),
@@ -718,6 +804,20 @@ _DURATION_BOUNDS = {
     "rr_failure":            (15, 40),
     "gray_failure":          (60, 180),
 }
+
+
+def _merged_seconds(intervals):
+    """Total wall seconds covered by [start, end] intervals, overlaps merged."""
+    total = 0.0
+    end = None
+    for a, b in sorted(intervals):
+        if end is None or a > end:
+            total += b - a
+            end = b
+        elif b > end:
+            total += b - end
+            end = b
+    return total
 
 
 def _campaign_fault(name, target, severity, duration, ramp_steps,
@@ -729,95 +829,84 @@ def _campaign_fault(name, target, severity, duration, ramp_steps,
             return
         active_targets.add(target)
 
+    # The target must be released whatever happens (a builder that raises used
+    # to leak it for the life of the campaign, so the device was never faulted
+    # again). Innermost finally = it can never be skipped.
     try:
-        spec = SCENARIOS[name](target, severity, duration)
-        injector = spec["injector"]
+        # Nothing below the try can be unbound in the finally: the spec build is
+        # inside the guard and every name has a value before the try.
         scenario_id = f"{name}-{target}-{uuid.uuid4().hex[:8]}"
-
-        baseline = None
-        if spec.get("probe"):
-            baseline = vm_instant(spec["probe"])
-
-        t_start = now_utc()
-        print(json.dumps({"event": "campaign_inject", "campaign_id": campaign_id,
-                          "scenario_id": scenario_id, "type": name, "target": target,
-                          "severity": severity, "duration": duration,
-                          "t_start": iso(t_start), "dry_run": dry_run}), flush=True)
-
-        if not dry_run:
-            if spec.get("ramp"):
-                injector.ramp(steps=ramp_steps,
-                              step_seconds=max(2.0, duration / (ramp_steps * 2)))
-            else:
-                injector.apply()
-            if spec.get("extra"):
-                spec["extra"].apply()
-
-        # t_impact (same logic as run_scenario)
-        if spec["impact_method"] == "vm_threshold" and spec.get("probe") and not dry_run:
-            t_impact, observed = poll_threshold(
-                spec["probe"], spec["threshold"], baseline=baseline,
-                timeout_s=int(duration), interval_s=3)
-            impact_method = "vm_threshold" if t_impact else "modelled_fallback"
-            if t_impact is None:
-                t_impact = t_start
-        else:
-            impact_method = "modelled"
-            t_impact = t_start
-            observed = None
-
-        if impact_method.startswith("modelled"):
-            delay = spec.get("impact_delay_s", 2)
-            t_impact = datetime.fromtimestamp(
-                t_start.timestamp() + delay, tz=timezone.utc)
-
-        # Hold for remainder of duration
-        elapsed = time.time() - t_start.timestamp()
-        remaining = duration - elapsed
-        if remaining > 0 and not dry_run:
-            time.sleep(remaining)
-
-    finally:
-        # Always revert, even on exception or SIGINT (finally fires on Thread.join timeout too)
+        spec = injector = None
+        baseline = observed = error = None
+        impact_method = "modelled"
+        t_start = t_impact = now_utc()
         try:
+            spec = SCENARIOS[name](target, severity, duration)
+            injector = spec["injector"]
+
+            if spec.get("probe"):
+                baseline = vm_instant(spec["probe"])
+
+            t_start = t_impact = now_utc()
+            print(json.dumps({"event": "campaign_inject", "campaign_id": campaign_id,
+                              "scenario_id": scenario_id, "type": name, "target": target,
+                              "severity": severity, "duration": duration,
+                              "t_start": iso(t_start), "dry_run": dry_run}), flush=True)
+
             if not dry_run:
+                if spec.get("ramp"):
+                    injector.ramp(steps=ramp_steps,
+                                  step_seconds=max(2.0, duration / (ramp_steps * 2)))
+                else:
+                    injector.apply()
                 if spec.get("extra"):
-                    spec["extra"].revert()
-                injector.revert()
+                    spec["extra"].apply()
+
+            t_impact, observed, impact_method = _resolve_impact(
+                spec, t_start, baseline, duration, dry_run)
+
+            # Hold for remainder of duration
+            elapsed = time.time() - t_start.timestamp()
+            remaining = duration - elapsed
+            if remaining > 0 and not dry_run:
+                time.sleep(remaining)
         except Exception as e:
-            print(json.dumps({"event": "revert_error", "scenario_id": scenario_id,
-                              "error": str(e)}), flush=True)
+            error = f"{type(e).__name__}: {e}"
+            print(json.dumps({"event": "scenario_error", "scenario_id": scenario_id,
+                              "error": error}), flush=True)
+        finally:
+            # Always revert, even on exception or SIGINT.
+            try:
+                if injector is not None and not dry_run:
+                    if spec.get("extra"):
+                        spec["extra"].revert()
+                    injector.revert()
+            except Exception as e:
+                error = (error or "") + f" revert_failed: {type(e).__name__}: {e}"
+                print(json.dumps({"event": "revert_error", "scenario_id": scenario_id,
+                                  "error": str(e)}), flush=True)
 
-        t_end = now_utc()
-        print(json.dumps({"event": "campaign_revert", "campaign_id": campaign_id,
-                          "scenario_id": scenario_id, "t_end": iso(t_end)}), flush=True)
+            t_end = now_utc()
+            print(json.dumps({"event": "campaign_revert", "campaign_id": campaign_id,
+                              "scenario_id": scenario_id, "t_end": iso(t_end)}), flush=True)
 
-        lead_time = round((t_impact - t_start).total_seconds(), 1)
-        row = {
-            "scenario_id": scenario_id,
-            "campaign_id": campaign_id,
-            "type": spec["type"],
-            "target": spec["target"],
-            "severity": severity,
-            "t_start": iso(t_start),
-            "t_impact": iso(t_impact),
-            "t_end": iso(t_end),
-            "lead_time": lead_time,
-            "impact_method": impact_method,
-            "probe": spec.get("probe"),
-            "baseline_value": baseline,
-            "impact_value": observed,
-            "signature": spec["signature"],
-            "device": target,
-        }
-        write_label(row)
-        print(json.dumps({"event": "label_written", "row": row}), flush=True)
+            row = _label_row(spec, scenario_id, name, target, severity, t_start,
+                             t_impact, t_end, impact_method, baseline, observed,
+                             dry_run, error)
+            row["campaign_id"] = campaign_id
+            write_label(row)
+            print(json.dumps({"event": "label_written", "row": row}), flush=True)
 
+            with lock:
+                stats["count"] += 1
+                stats["by_type"][name] = stats["by_type"].get(name, 0) + 1
+                # Intervals, not a running sum: faults overlap by design, so
+                # summing durations double-counts wall time (and produced
+                # negative healthy_seconds / >100% fault_pct).
+                stats["intervals"].append((t_start.timestamp(), t_end.timestamp()))
+    finally:
         with lock:
             active_targets.discard(target)
-            stats["count"] += 1
-            stats["by_type"][name] = stats["by_type"].get(name, 0) + 1
-            stats["fault_seconds"] += (t_end - t_start).total_seconds()
 
 
 def run_campaign(total_duration, mean_gap=120, seed=None, dry_run=False,
@@ -836,7 +925,7 @@ def run_campaign(total_duration, mean_gap=120, seed=None, dry_run=False,
     lock = threading.Lock()
     active_targets = set()
     threads = []
-    stats = {"count": 0, "by_type": {}, "fault_seconds": 0.0}
+    stats = {"count": 0, "by_type": {}, "intervals": []}
 
     # SIGINT handler: join all threads (their finally blocks revert)
     _stop = threading.Event()
@@ -902,15 +991,19 @@ def run_campaign(total_duration, mean_gap=120, seed=None, dry_run=False,
         for t in threads:
             t.join(timeout=300)
 
-    healthy_seconds = total_duration - stats["fault_seconds"]
+    fault_seconds = _merged_seconds(stats["intervals"])
     summary = {
         "event": "campaign_summary",
         "campaign_id": campaign_id,
         "total_incidents": stats["count"],
         "by_type": stats["by_type"],
-        "fault_seconds": round(stats["fault_seconds"], 1),
-        "healthy_seconds": round(healthy_seconds, 1),
-        "fault_pct": round(100 * stats["fault_seconds"] / total_duration, 1),
+        # union of fault windows (overlapping concurrent faults counted once)
+        "fault_seconds": round(fault_seconds, 1),
+        # sum of per-fault durations; > fault_seconds when faults overlap
+        "concurrent_fault_seconds": round(
+            sum(b - a for a, b in stats["intervals"]), 1),
+        "healthy_seconds": round(max(0.0, total_duration - fault_seconds), 1),
+        "fault_pct": round(100 * min(fault_seconds, total_duration) / total_duration, 1),
     }
     print(json.dumps(summary), flush=True)
     return summary
@@ -928,7 +1021,8 @@ def main():
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--demo", action="store_true", help="run a short demo scenario")
     ap.add_argument("--dry-run", action="store_true",
-                    help="write a label without touching the lab (schema check)")
+                    help="write a label without touching the lab (schema check); "
+                         "the row is flagged dry_run=true")
     # Campaign flags
     ap.add_argument("--campaign", action="store_true",
                     help="run a Poisson-arrival fault campaign for --duration seconds")

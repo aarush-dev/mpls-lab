@@ -48,7 +48,7 @@ Five major components were built:
 
 **A FastAPI data API.** A local HTTP server at port 8000 gives the ML team a clean, versioned interface to all of the above. They can query raw metrics, retrieve log events, download flow records, read fault labels, inspect the network topology as a graph, and — most importantly — download a pre-joined, labeled Parquet file that combines all four signal types into a single DataFrame ready for model training.
 
-**A synthetic dataset and air-gap packaging.** Because 148 lab containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures to 8.89 million rows while preserving realistic statistical properties. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
+**A synthetic dataset and air-gap packaging.** Because 148 lab containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures. Row count is `entities_per_tick × ticks`, linear in `--days` only (`--scale` only changes fault-episode density); at the current 899 entities/tick (661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`), `--days 7 --scale 3` (defaults `--days 2 --scale 1`; `synthetic/generate.py:667-669`) produces roughly 18.1 million rows. The shipped `synthetic/output/synthetic_1781481600_d7.0_s30_x3.0.parquet` (8,890,560 rows) is a stale June artifact from a smaller, no-longer-existing 441-entity topology — not reproducible from any current invocation. It's also 21 columns, predates the 40-column feature set, and fails the current `check.py` gate 0 (missing synthetic-marker metadata) — it needs regenerating. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
 
 ---
 
@@ -72,7 +72,7 @@ This makes the core fast and deterministic. The routing protocols that make MPLS
 
 ### WireGuard SD-WAN Overlay: The Secure Second Road
 
-On top of the MPLS underlay, the network runs a WireGuard-based SD-WAN (Software-Defined Wide Area Network) overlay. WireGuard is a modern, lightweight VPN (Virtual Private Network) protocol. Every branch and data center CE establishes encrypted WireGuard tunnels to the hub CEs, giving the network ~168 overlay tunnels. Adjacent hub pairs (hub1↔hub2, hub3↔hub4, hub5↔hub6) also get direct hub-hub WireGuard links for resilience. The SD-WAN controller — a Python process — monitors the health of each tunnel in real time, measures per-tunnel latency, jitter, and packet loss, and selects which tunnel each traffic class should use.
+On top of the MPLS underlay, the network runs a WireGuard-based SD-WAN (Software-Defined Wide Area Network) overlay. WireGuard is a modern, lightweight VPN (Virtual Private Network) protocol. Every branch and data center CE establishes an encrypted WireGuard tunnel to every one of the 6 hub CEs (a full spoke-to-hub mesh, not round-robin), giving the network 168 spoke-hub tunnels. Adjacent hub pairs (hub1↔hub2, hub3↔hub4, hub5↔hub6) also get direct hub-hub WireGuard links for resilience, for 171 tunnels total. The SD-WAN controller — a Python process — renders per-tunnel latency, jitter, and packet loss every 5 seconds and selects which tunnel each traffic class should use. These series are simulated, not fully measured: a real wg0 ping supplies part of the value, the rest is a modelled congestion term plus the injected fault read back from the site's netem qdisc config rather than observed on the wire (`controller/controller.py:9-14`).
 
 This two-layer architecture (MPLS underlay + WireGuard overlay) is the defining characteristic of modern enterprise SD-WAN and is explicitly named in the competition problem statement. The interaction between underlay failures and overlay degradation is where some of the most interesting predictive signals live.
 
@@ -112,8 +112,8 @@ The three VRFs are:
         │   24× ce_branch   6× ce_hub   4× ce_dc   (CE routers) │
         │   + 78 host containers (one per site+VRF combination)  │
         └────────────────────────────────────────────────────────┘
-                │  WireGuard SD-WAN overlay (~168 tunnels,
-                │  hub-spoke; adjacent hub-hub links)
+                │  WireGuard SD-WAN overlay (168 spoke-hub + 3 hub-hub
+                │  = 171 tunnels; full spoke-to-all-6-hubs mesh)
 
   Each CE site:
   ┌─────────────────────────────────────────────────┐
@@ -155,7 +155,7 @@ The core redesign was specifically motivated by making the lab's failure behavio
 
 ### FRRouting (FRR) as the Network OS
 
-The competition suggested EVE-NG or GNS3 (graphical network simulators), which would have required running full commercial router operating system images — large, licensed, and difficult to automate. FRR is the open-source routing suite that ships inside many commercial routers and runs natively in a Docker container. It implements real OSPF, BGP, LDP, and MPLS — not simplified simulations. Each FRR container uses about 50–150 MB of RAM, which is why all 148 lab containers fit comfortably on a 108 GB / 19-core machine. Because FRR supports AgentX (a protocol extension that lets FRR publish its routing tables over SNMP), the same SNMP polling that a real NOC uses against production routers works unchanged against these containers.
+The competition suggested EVE-NG or GNS3 (graphical network simulators), which would have required running full commercial router operating system images — large, licensed, and difficult to automate. FRR is the open-source routing suite that ships inside many commercial routers and runs natively in a Docker container. It implements real OSPF, BGP, LDP, and MPLS — not simplified simulations. Each FRR container uses about 50–150 MB of RAM, which is why all 148 lab containers fit comfortably on a 108 GB / 19-core machine. SNMP polling is done by net-snmp's `snmpd` (IF-MIB / standard OIDs), not by FRR itself: the FRR AgentX sub-agent is not shipped in this image (Alpine's `frr-snmp` package is ABI-mismatched with FRR 10.5.1) and `frr.conf.j2` emits no `agentx` line, so `snmpd`'s AgentX master socket has nothing attached to it (`frr-node/Dockerfile:6-10`, `frr-node/start.sh:48-51`). Telegraf gets the same interface counters and status a real NOC would poll — just from `snmpd` directly, not via an FRR routing-table subagent.
 
 ### Containerlab as the Orchestrator
 
@@ -190,11 +190,11 @@ import requests, pandas as pd, io
 
 r = requests.get("http://localhost:8000/datasets", params={"build": True})
 df = pd.read_parquet(io.BytesIO(r.content))
-print(df.shape)          # (rows, 21)
+print(df.shape)          # (rows, 40)
 print(df.columns.tolist())
 ```
 
-The Parquet schema has 40 columns per row. Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
+The Parquet schema has 40 columns per row (`dataapi/schema/dataset.schema.json`). Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -207,9 +207,9 @@ The Parquet schema has 40 columns per row. Each row represents one 30-second tim
 | `if_in_octets` | float | Bytes received on interface (cumulative counter) |
 | `if_out_octets` | float | Bytes sent on interface (cumulative counter) |
 | `if_oper_status` | float | Interface operational status (1=up, 2=down) |
-| `tunnel_latency_ms` | float | WireGuard tunnel round-trip latency in milliseconds |
-| `tunnel_jitter_ms` | float | Latency variance (jitter) in milliseconds |
-| `tunnel_loss_pct` | float | Packet loss percentage on the tunnel |
+| `tunnel_latency_ms` | float | WireGuard tunnel round-trip latency — SIMULATED: measured wg0 RTT + modelled congestion term + netem delay read back from the site's uplink qdisc config, not a live measurement of the fault (`controller/controller.py:9-14,467-469`) |
+| `tunnel_jitter_ms` | float | Latency variance — SIMULATED, same composition as above |
+| `tunnel_loss_pct` | float | Packet loss percentage on the tunnel — SIMULATED, same composition as above |
 | `tunnel_rekeys` | float | WireGuard handshake count (anomalies cluster before failures) |
 | `flow_bytes` | float | Total bytes in IPFIX flow records for this bucket |
 | `flow_packets` | float | Total packets in IPFIX flow records |
@@ -219,6 +219,19 @@ The Parquet schema has 40 columns per row. Each row represents one 30-second tim
 | `severity` | string | `low`, `medium`, or `high` |
 | `lead_time_s` | float | Seconds from fault injection start to `t_impact` |
 | `time_to_impact_s` | float | Seconds remaining until impact at this timestamp |
+
+Nineteen further columns, added by the device-health + environmental feature set, are sourced from `telemetry/env-metrics.py` (docker stats + `vtysh` JSON, not SNMP) rather than the four streams above:
+
+| Column | Description |
+|--------|-------------|
+| `if_in_errors`, `if_in_discards`, `if_out_errors`, `if_out_discards` | Interface error/discard counters |
+| `q_backlog_bytes`, `q_drops` | Queue backlog and drop counters |
+| `xcvr_temp_c`, `xcvr_rx_power_dbm`, `xcvr_tx_bias_ma` | Transceiver diagnostics |
+| `cpu_pct`, `mem_pct` | Container CPU/memory percent (control-plane load proxy) |
+| `bgp_msg_rx`, `bgp_msg_tx` | BGP messages sent/received (`vtysh show bgp summary json`) |
+| `rib_routes` | RIB route count |
+| `ospf_lsa_count` | OSPF link-state database entry count (`vtysh show ip ospf database json`) |
+| `device_temp_c`, `device_power_watts`, `device_fan_rpm`, `device_psu_voltage_v` | Modelled chassis environmental sensors |
 
 The `time_to_impact_s` column is the key ML target for a regression model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies which of the twenty-one fault types is active.
 
@@ -245,7 +258,7 @@ r = requests.get("http://localhost:8000/topology")
 # Useful for graph neural network features
 ```
 
-**The synthetic dataset** provides 8.89 million additional labeled rows in the exact same schema, calibrated to match the statistical properties of the real lab captures. It can be concatenated directly with the real data for training:
+**The synthetic dataset**, run as `python3 synthetic/generate.py --days 7 --scale 3`, produces roughly 18.1 million additional labeled rows (899 entities/tick × ticks) calibrated to match the statistical properties of the real lab captures. The on-disk `synthetic/output/*.parquet` is currently a stale June run from a smaller, since-replaced 441-entity topology (8,890,560 rows, 21 columns) and needs regenerating against the 40-column schema before use. It can be concatenated directly with the real data for training:
 
 ```python
 real = pd.read_parquet("dataapi/datasets/noc_dataset_*.parquet")
@@ -321,7 +334,7 @@ cd /root/LAB/topology && sudo containerlab destroy -t clab.yml
 | `/root/LAB/dataapi/app.py` | FastAPI endpoints — ML team's primary interface |
 | `/root/LAB/dataapi/export.py` | Joins all signals into labeled Parquet |
 | `/root/LAB/dataapi/schema/dataset.schema.json` | JSON Schema for the Parquet format |
-| `/root/LAB/synthetic/generate.py` | 8.89M-row synthetic data generator |
+| `/root/LAB/synthetic/generate.py` | Synthetic data generator (`--days 7 --scale 3` → ~18.1M rows at 899 entities/tick; defaults `--days 2 --scale 1` → 5,178,240 rows) |
 | `/root/LAB/telemetry/docker-compose.yml` | VictoriaMetrics/Grafana/Loki/Telegraf stack |
 | `/root/LAB/airgap/verify-airgap.sh` | Air-gap compliance verifier |
 | `/root/LAB/problem_statement.md` | Original competition problem statement |

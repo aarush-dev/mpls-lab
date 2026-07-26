@@ -8,9 +8,9 @@
 # Ordering matters:
 #   1. MPLS sysctls (best-effort, fails silently if kernel disallows)
 #   2. rsyslogd  — syslog forwarder; must be up BEFORE FRR so /dev/log is consumed
-#   3. snmpd     — must be up BEFORE FRR so the AgentX master socket exists
+#   3. snmpd     — UDP 161 responder polled by Telegraf
 #   4. pmacctd   — IPFIX exporter; backgrounded; tolerates unreachable collector
-#   5. FRR       — connects to snmpd AgentX master on startup (when frr-snmp is available)
+#   5. FRR       — foreground; keeps the container alive
 
 set -euo pipefail
 
@@ -41,24 +41,22 @@ sysctl -w net.mpls.platform_labels=1048575 2>/dev/null || true
 
 # ── 2. Start rsyslogd (syslog → promtail RFC5424 forwarder) ──────────────────
 # Reads /dev/log (imuxsock); forwards all messages to promtail via UDP RFC5424.
-# Guard: || true so a misconfigured rsyslog.conf doesn't kill the container.
-rsyslogd -n -f /run/rsyslog.conf &>/var/log/rsyslogd.log &
+# Backgrounded, so `set -e` won't kill the container if it dies — but it logs to
+# the container's stdout/stderr, so the failure is visible in `docker logs`.
+rsyslogd -n -f /run/rsyslog.conf &
 
-# ── 3. Start snmpd (AgentX master must be ready before FRR) ──────────────────
-# snmpd listens on UDP 161 and opens the AgentX socket at /var/agentx/master.
-# FRR's AgentX subagent will connect to that socket on startup.
+# ── 3. Start snmpd ───────────────────────────────────────────────────────────
+# snmpd listens on UDP 161. It also opens the AgentX master socket, but nothing
+# connects to it: frr-snmp is not shipped in this image (see Dockerfile) and
+# frr.conf.j2 emits no `agentx` line — so there is nothing to wait for here.
 # ponytail: use default /etc/snmp/snmpd.conf (installed by net-snmp pkg);
 # containerlab bind-mounts a node-specific one over it at runtime.
 snmpd -f -Lo &
-SNMPD_PID=$!
-
-# Wait briefly for the AgentX socket to appear before starting FRR.
-# ponytail: 2 s sleep is cheap and avoids a retry loop.
-sleep 2
 
 # ── 4. Start pmacctd (IPFIX exporter → nfacctd collector) ───────────────────
-# Guard: || true so a failure (e.g. pcap permission denied) doesn't kill the container.
-pmacctd -f /run/pmacctd.conf >>/var/log/pmacctd.log 2>&1 &
+# Backgrounded (same reasoning as rsyslogd); logs to stdout so a failure such as
+# pcap permission denied shows up in `docker logs` instead of a buried file.
+pmacctd -f /run/pmacctd.conf &
 
 # ── 5. Start FRR (foreground via /usr/lib/frr/docker-start) ──────────────────
 # docker-start reads /etc/frr/daemons and starts all enabled daemons, then

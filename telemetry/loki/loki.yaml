@@ -30,3 +30,8 @@ schema_config:
 limits_config:
   allow_structured_metadata: true
   reject_old_samples: false
+
+# AIR-GAP: Loki 3.x defaults reporting_enabled to true and posts usage stats to
+# stats.grafana.org on its own timer.
+analytics:
+  reporting_enabled: false

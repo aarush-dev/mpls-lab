@@ -11,9 +11,16 @@ predictive signal the copilot must catch before user impact.
 
 ## Telemetry signature
 
-- **Metrics** (`/metrics`): `sdwan_tunnel_latency_ms`, `sdwan_tunnel_jitter_ms`,
-  `sdwan_tunnel_loss_pct` climbing for `{device=<CE>}`; for `tunnel_degrade`
-  also `sdwan_tunnel_rekeys_total` clustering (handshake retries).
+- **Metrics are SIMULATED, not measured.** `sdwan_tunnel_latency_ms` /
+  `_jitter_ms` / `_loss_pct` (gauges) = a measured wg0 RTT/loss term plus a
+  modelled congestion term plus the netem impairment read back from the
+  site's `eth1` qdisc config — the wg0 ping itself never crosses the
+  impaired path, so nothing here is a direct measurement of the fault.
+  `sdwan_tunnel_rekeys_total` (counter) is real cumulative WireGuard rekeys.
+  Labels: `device`, `tunnel`, `site`, `site_type`, `hub`. `tunnel_degrade`
+  additionally shows rekey clustering. `sdwan_path_changes_total` is
+  fabric-wide, unlabelled, and RNG-driven (not attributable to a device) —
+  do not use it as fault evidence.
 - **Dataset rows**: `entity_type=tunnel`, `is_fault=true` over the window;
   `lead_time_s` is the precursor window (latency/jitter creep before loss);
   `time_to_impact_s` counts down to first observable impact.
@@ -31,7 +38,10 @@ predictive signal the copilot must catch before user impact.
 3. Inspect rekeys for `tunnel_degrade`.
 4. On the CE: `tc qdisc show dev eth1` (uplink) — netem impairment shows here
    in the lab; `wg show` for handshake health.
-5. Bound the window via `/labels` (`t_start`/`t_impact`/`lead_time`).
+5. Bound the window via `/labels` (`t_start`/`t_impact`/`t_end`/
+   `lead_time`; use `lead_time_s`/`time_to_impact_s`/`is_fault` if querying
+   the joined `/datasets` output instead — those `_s`-suffixed and boolean
+   fields exist only there, not on raw `/labels` rows).
 
 ## Resolution
 

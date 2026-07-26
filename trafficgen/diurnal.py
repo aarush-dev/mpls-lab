@@ -78,11 +78,6 @@ def hour_of_cycle(t_seconds, period_seconds, start_hour=0.0):
     return (start_hour + frac * 24.0) % 24.0
 
 
-def day_of_week(t_seconds, period_seconds):
-    """Which day of the 7-day week this instant falls in (0=Mon .. 6=Sun)."""
-    return int(t_seconds // period_seconds) % WEEK_DAYS
-
-
 def week_scale(t_seconds, period_seconds):
     """Slow weekly multiplier in (0,1]: weekdays ~1.0, Sat/Sun ~WEEKEND_SCALE.
 
@@ -95,12 +90,8 @@ def week_scale(t_seconds, period_seconds):
     days = t_seconds / period_seconds
     d = days % WEEK_DAYS          # continuous day position 0..7
     # Weekday mass = days 0..5 (Mon-Fri), weekend = 5..7 (Sat-Sun).
-    if d < 5.0:
-        base = 1.0
-    elif d < 7.0:
-        base = WEEKEND_SCALE
-    else:
-        base = 1.0
+    # d is bounded to [0, 7) by the modulo, so these two cases are exhaustive.
+    base = 1.0 if d < 5.0 else WEEKEND_SCALE
     # Smooth the two transitions (Fri night 4.5->5.5, Sun night 6.5->7.5) with a
     # cosine ease so there's no hard step the model would treat as a fault edge.
     def ease(x, lo, hi, a, b):

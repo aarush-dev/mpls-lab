@@ -17,9 +17,7 @@ Data sources (live, docker net clab 172.20.20.0/24; ports also mapped to
 import json
 import glob
 import os
-import re
 import subprocess
-import time
 from datetime import datetime, timezone
 
 import httpx
@@ -36,10 +34,6 @@ CLAB_YML = os.path.join(LAB, "topology", "clab.yml")
 SPEC_YML = os.path.join(LAB, "topology-spec.yaml")
 
 _HTTP_TIMEOUT = 15.0
-
-
-def _now() -> int:
-    return int(time.time())
 
 
 def _utc_iso(epoch: float) -> str:
@@ -89,7 +83,9 @@ def loki_query_range(logql: str, start: int, end: int, limit: int = 1000):
 
 def events_rows(start: int, end: int, device: str = None, limit: int = 1000):
     """Flatten Loki streams into per-line event rows tagged with device."""
-    sel = '{job=~".+"}' if not device else '{device="%s"}' % device
+    # json.dumps escapes quotes/backslashes -> a valid LogQL string literal, so a
+    # caller-supplied device cannot break out of the selector.
+    sel = '{job=~".+"}' if not device else "{device=%s}" % json.dumps(device)
     streams = loki_query_range(sel, start, end, limit=limit)
     rows = []
     for s in streams:
@@ -109,17 +105,26 @@ def events_rows(start: int, end: int, device: str = None, limit: int = 1000):
 # --------------------------------------------------------------------------
 # FLOWS -- nfacctd JSON purge records (printed to its stdout/log)
 # --------------------------------------------------------------------------
-def flow_rows(limit: int = 500, device: str = None):
+def flow_rows(limit: int = 500, device: str = None, since: int = None, until: int = None):
     """Parse recent nfacctd JSON flow records from `docker logs`.
     ponytail: nfacctd prints one JSON object per purged flow; we tail the log.
-    `label` carries the source device (set via device_map.txt)."""
-    try:
-        out = subprocess.run(
-            ["docker", "logs", "--tail", str(limit * 4), NFACCTD_CONTAINER],
-            capture_output=True, text=True, timeout=20,
-        ).stdout
-    except Exception as e:  # noqa: BLE001
-        return [{"error": f"flow source unavailable: {e}"}]
+    `label` carries the source device (set via device_map.txt).
+
+    since/until (epoch s) scope the fetch itself, so a window is not silently
+    reduced to whatever happens to be in the newest log lines. Raises on any
+    docker failure -- a dead source must not look like "there were no flows".
+    """
+    # 4 log lines per wanted record is empirical slack for non-purge chatter.
+    cmd = ["docker", "logs", "--tail", str(limit * 4)]
+    if since is not None:
+        cmd += ["--since", _utc_iso(since)]
+    if until is not None:
+        cmd += ["--until", _utc_iso(until)]
+    p = subprocess.run(cmd + [NFACCTD_CONTAINER], capture_output=True, text=True, timeout=20)
+    if p.returncode != 0:
+        raise RuntimeError(f"flow source unavailable: docker logs rc={p.returncode}: "
+                           f"{p.stderr.strip()[:200]}")
+    out = p.stdout
     rows = []
     for line in out.splitlines():
         line = line.strip()

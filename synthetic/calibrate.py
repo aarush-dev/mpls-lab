@@ -7,9 +7,11 @@ doesn't hardcode magic numbers:
   - per fault_type perturbation signatures (peak metric vs baseline) + lead_time
   - the device/entity inventory (so synthetic naming == lab naming)
 
-The real sample is THIN (~15 min, no full diurnal cycle, flows all null). Where a
+The real sample is THIN (~15 min, no full diurnal cycle, flows sparse). Where a
 statistic can't be derived from it we fall back to a sane default and mark it
-with a ponytail comment + "_src":"default" in the JSON so it's auditable.
+"default" in the JSON so it's auditable. Provenance is PER FIELD
+("_src_rate_in"/"_src_rate_out", "_src_peaks"/"_src_lead") wherever one entry
+mixes derived and defaulted values -- one flag per entry over-claimed.
 
 Run:  python3 calibrate.py [REAL_PARQUET]   (default: newest in dataapi/datasets)
 """
@@ -18,7 +20,6 @@ import json
 import os
 import sys
 
-import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +39,10 @@ def _octet_rate(iface):
     i["rate_in"] = i.groupby(["device", "entity"])["if_in_octets"].diff()
     i["rate_out"] = i.groupby(["device", "entity"])["if_out_octets"].diff()
     out = {}
-    for st, g in i.groupby("site_type", dropna=False):
+    # dropna=True: a NaN site_type used to be keyed under the literal string
+    # "nan", which generate.py can never look up (it maps a null site_type to
+    # "branch"), so those stats were written straight into a dead key.
+    for st, g in i.groupby("site_type", dropna=True):
         ri = g["rate_in"].dropna()
         ri = ri[ri > 0]  # drop counter resets / idle
         ro = g["rate_out"].dropna()
@@ -47,10 +51,13 @@ def _octet_rate(iface):
         # back to a per-site default rate (bytes/step) rather than trust noise.
         defaults = {"branch": 1.2e6, "hub": 5e6, "dc": 3e6, "pe": 2e7, "core": 1e7}
         d = defaults.get(str(st), 1e6)
+        # Provenance is PER FIELD: rate_out can be a default while rate_in is
+        # real, so a single _src per site_type was an unreliable audit trail.
         out[str(st)] = {
             "rate_in_median": float(ri.median()) if len(ri) >= 3 else d,
             "rate_out_median": float(ro.median()) if len(ro) >= 3 else d * 0.6,
-            "_src": "real" if len(ri) >= 3 else "default",
+            "_src_rate_in": "real" if len(ri) >= 3 else "default",
+            "_src_rate_out": "real" if len(ro) >= 3 else "default",
         }
     return out
 
@@ -153,18 +160,22 @@ def _fault_signatures(f, tun_nf):
     for ft, dft in defaults.items():
         g = f[f["fault_type"] == ft]
         sig = dict(dft)
+        # Provenance is PER FIELD, set INSIDE each derivation guard. Stamping one
+        # _src per fault_type marked hardcoded defaults as "real" whenever a
+        # single non-tunnel row of that type existed.
+        sig["_src_peaks"] = "default"
+        sig["_src_lead"] = "default"
         if len(g):
             gt = g[g["entity_type"] == "tunnel"]
             if len(gt) >= 2 and not gt["tunnel_latency_ms"].isna().all():
                 sig["lat_peak"] = float(gt["tunnel_latency_ms"].max())
                 sig["loss_peak"] = float(gt["tunnel_loss_pct"].max())
                 sig["jit_peak"] = float(gt["tunnel_jitter_ms"].max())
+                sig["_src_peaks"] = "real"
             lt = g["lead_time_s"].dropna()
             if len(lt):
                 sig["lead_s"] = float(lt.median())
-            sig["_src"] = "real"
-        else:
-            sig["_src"] = "default"
+                sig["_src_lead"] = "real"
         out[ft] = sig
     return out
 
@@ -241,9 +252,10 @@ def build_profile(real_path):
         # octet counter seed: real counters start large (mid-run capture). Seed
         # synthetic counters from the observed per-site median absolute value so
         # ranges OVERLAP the real data (the check asserts this).
+        # dropna=True for the same reason as _octet_rate: a "nan" key is dead.
         "octet_seed_by_site": {
             str(st): float(g["if_in_octets"].median())
-            for st, g in iface[~iface.is_fault].groupby("site_type", dropna=False)
+            for st, g in iface[~iface.is_fault].groupby("site_type", dropna=True)
         },
     }
     return profile

@@ -9,7 +9,8 @@ so `--selftest` runs anywhere).
 ## What it does
 
 - **Model** (`topo.py`): derives hubs/spokes/tunnels/VRFs from `../topology-spec.yaml`
-  using the same index arithmetic as the generator. 6 spokes x 2 hubs = **12 tunnels**.
+  using the same index arithmetic as the generator. 28 spokes (24 branch + 4 dc)
+  x 6 hubs = **168 tunnels**.
 - **Metrics**: each tunnel's latency/jitter/loss is built from a **measured RTT
   baseline** plus additive modelled layers:
   - **Measured RTT cache** (enabled by `MEASURE_RTT=1`): a background thread runs
@@ -67,14 +68,19 @@ policy metrics carry `device,site,site_type,vrf,hub`.
 SNMP `device`, log `device`, and flow `device` labels), enabling cross-signal joins such as
 `interface_ifHCInOctets * on(device) sdwan_path_active`.
 
+All four `sdwan_tunnel_*` metrics are marked **SIMULATED** in their own Prometheus
+`# HELP` text (`controller.py` `render_prometheus()`) — the netem-readback term is a
+config value read back off the qdisc, not a dataplane measurement. Any doc/consumer
+calling them "measured telemetry" is wrong; only the wg0-ping component is a real measurement.
+
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | Measured RTT + modelled congestion (ms) |
-| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | Measured ping spread + AR(1) walk (ms) |
-| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | max(measured, modelled floor) + micro-bursts (%) |
+| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: measured wg0 RTT + modelled congestion + netem delay read back from the site uplink qdisc config (ms) |
+| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: measured wg0 ping max-min + modelled congestion walk (ms) |
+| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: measured wg0 loss + modelled floor/bursts + netem loss read back from the site uplink qdisc config (%) |
 | `sdwan_tunnel_rekeys_total` | counter | **device**, tunnel, site, site_type, hub | Cumulative WG rekeys |
 | `sdwan_path_active`       | gauge | **device**, site, site_type, vrf, hub | `1` on the active hub for that site/vrf |
-| `sdwan_path_changes_total` | counter | (none) | Cumulative path-selection changes |
+| `sdwan_path_changes_total` | counter | (none) | Cumulative path-selection changes, fabric-wide; unlabelled and RNG-driven (moves from the modelled loss micro-bursts even with no fault injected) — not usable as fault-impact evidence |
 
 Label values use the generator's node names (`ce_branch1`, `ce_hub1`, …); `vrf` ∈
 {CORP, VOICE, GUEST}; `site_type` ∈ {branch, hub, dc}; `device` = `site` (spoke node name).
@@ -93,6 +99,8 @@ Telegraf at `.52` scrapes `http://172.20.20.56:9362/metrics` on its 30s interval
 
 Netem reads now use `docker exec clab-sdwan_mpls_noc-<node> tc qdisc show dev eth1` via the
 docker.sock — no host-netns privilege needed (replaces the broken `ip netns exec` path).
+The read is hoisted per-site (once per spoke, not once per tunnel), so a tick costs
+28 docker execs instead of 168 (`controller.py:435`).
 
 The trafficgen service (`noc-trafficgen`) runs alongside at `.57`, also docker.sock-mounted,
 driving real BusyBox-nc TCP flows across the MPLS/WireGuard overlay every 30 s so SNMP

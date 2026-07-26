@@ -1,5 +1,6 @@
 # wg0.conf for {{ hostname }} ({{ wg_role }}) — WireGuard SD-WAN overlay.
-# Keys precomputed by generate.py (pure-stdlib x25519). Air-gapped: no deploy-time genkey.
+# Keys generated once by `wg genkey` inside frr-node:0.1 and cached in
+# generator/.wg-keys.json. Air-gapped: no deploy-time genkey.
 # ponytail: keys baked into config at generation time — fine for a closed lab; rotate by re-running generate.py.
 [Interface]
 Address = {{ wg_addr }}/24

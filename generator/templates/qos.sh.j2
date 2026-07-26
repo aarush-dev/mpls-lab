@@ -1,25 +1,19 @@
 #!/bin/bash
-# qos.sh for {{ hostname }} — HTB shaping + DSCP classification on CE uplinks egress.
-# Applied on all PE-facing uplinks (CORP/VOICE/GUEST). Classes per topology-spec qos.classes.
-# ponytail: apply to ALL uplink ifaces so VOICE/GUEST uplinks are shaped, not just CORP.
+# qos.sh for {{ hostname }} — HTB shaping on each CE-PE uplink egress.
+# One uplink per VRF, so the uplink's own VRF class is the HTB default; no DSCP
+# filters (nothing in this lab marks DSCP — see generate.py render()).
 set -e
 RATE={{ uplink_rate }}
 
-{% for uplink_iface in uplink_ifaces %}
-DEV={{ uplink_iface }}
+{% for u in uplinks %}
+# {{ u.iface }} — VRF {{ u.vrf }}, DSCP {{ u.dscp }} ({{ u.dscp_val }}), prio {{ u.prio }}
+DEV={{ u.iface }}
 tc qdisc del dev $DEV root 2>/dev/null || true
-tc qdisc add dev $DEV root handle 1: htb default {{ default_classid }}
+tc qdisc add dev $DEV root handle 1: htb default {{ u.classid }}
 tc class add dev $DEV parent 1: classid 1:1 htb rate $RATE ceil $RATE
-
-{% for c in classes %}
-# {{ c.vrf }} — DSCP {{ c.dscp }} ({{ c.dscp_val }}), prio {{ c.prio }}
-tc class add dev $DEV parent 1:1 classid 1:{{ c.classid }} htb \
-    rate {{ c.rate }} ceil {{ c.ceil }} prio {{ c.prio }}
+tc class add dev $DEV parent 1:1 classid 1:{{ u.classid }} htb \
+    rate {{ u.rate }} ceil {{ u.ceil }} prio {{ u.prio }}
 # fq_codel: sch_sfq not always loaded in WSL2/clab containers; fq_codel is built-in and a better AQM.
-tc qdisc add dev $DEV parent 1:{{ c.classid }} handle {{ c.classid }}: fq_codel
-# Match on DSCP. tos = dscp << 2.
-tc filter add dev $DEV parent 1: protocol ip prio {{ c.prio }} u32 \
-    match ip tos {{ c.tos }} 0xfc flowid 1:{{ c.classid }}
-{% endfor %}
-echo "qos applied on $DEV"
+tc qdisc add dev $DEV parent 1:{{ u.classid }} handle {{ u.classid }}: fq_codel
+echo "qos applied on $DEV ({{ u.vrf }})"
 {% endfor %}

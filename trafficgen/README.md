@@ -39,7 +39,7 @@ Per-VRF profiles modulate the base curve:
 
 ## Compose wiring (Phase 2.2)
 
-Build from repo root: `docker build -t noc-trafficgen -f trafficgen/Dockerfile .`
+Build from repo root: `docker build -t noc-trafficgen:0.1 -f trafficgen/Dockerfile .`
 
 Service `trafficgen` in `telemetry/docker-compose.yml` runs at static IP `172.20.20.57`
 on the `clab` network with `/var/run/docker.sock:ro`. Environment variables:
@@ -80,7 +80,7 @@ python3 trafficgen.py --selftest
 | `proto` | `tcp` / `udp` |
 | `dscp` | EF / AF31 / BE (matches `qos.sh`) |
 | `bytes_per_flow`, `offered_bps` | nominal payload, offered load |
-| `src` | source host container (`h_<suffix>`) |
+| `src` | full clab container name, VRF-qualified (`clab-<lab>-h_<site>_<vrf>`, e.g. `clab-sdwan_mpls_noc-h_branch1_corp`) |
 
 ## Fault hook
 

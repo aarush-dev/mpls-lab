@@ -2,9 +2,11 @@
 """
 generate.py — topology generator for the air-gapped SD-WAN-over-MPLS NOC lab.
 
-Reads topology-spec.yaml, derives EVERY address from node indices per
-DOCS/SPEC-NOTES.md (nothing hardcoded per-node), renders Jinja2 templates, and
-writes clab.yml + per-node config dirs to /root/LAB/topology/.
+Reads topology-spec.yaml and derives every address from node indices. The base
+prefixes themselves are literals in this file (topology-spec.yaml's `addressing`
+block documents them but is NOT read, except ce_asn_base / wg_overlay_subnet /
+wg_port). Renders Jinja2 templates and writes clab.yml + per-node config dirs to
+/root/LAB/topology/.
 
 Run:   python3 generate.py
 Check: python3 generate.py --check   (asserts no address collisions / missing files)
@@ -26,6 +28,8 @@ OUT = os.path.join(HERE, "..", "topology")
 # ponytail: persist WG keypairs so re-runs are idempotent (keys stable across
 # regeneration for an unchanged spec — avoids re-keying live tunnels on re-run).
 WG_KEYS_FILE = os.path.join(HERE, ".wg-keys.json")
+# The one node image tag: used for the clab render AND for `wg genkey`.
+FRR_IMAGE = "frr-node:0.1"
 
 VRF_IDX = {"CORP": 0, "VOICE": 1, "GUEST": 2}
 # ponytail: VRF table numbers match VRF routing table IDs.
@@ -56,34 +60,33 @@ NETEM_SPREAD_MS = {"dc": 12.0, "hub": 14.0, "branch": 38.0}
 def site_netem(site_type, idx):
     """Return (delay_ms, jitter_ms, loss_pct) for a CE's eth0 root netem.
 
-    Bounded: delay ≤ 60ms, jitter ≤ 0.3*delay, loss ≤ 1.0% (so telemetry on the
-    same transport keeps flowing). Deterministic from (site_type, idx).
+    Deterministic from (site_type, idx). Actual ranges with the floors/spreads
+    above: delay 5.0–56.0 ms, jitter 0.9–7.0 ms, loss 0.02–0.42 % — small enough
+    that telemetry on the same transport keeps flowing.
     """
-    floor = NETEM_FLOOR_MS.get(site_type, 12.0)
-    spread = NETEM_SPREAD_MS.get(site_type, 20.0)
+    floor = NETEM_FLOOR_MS[site_type]
+    spread = NETEM_SPREAD_MS[site_type]
     frac = (idx * 0.6180339887) % 1.0          # golden-ratio low-discrepancy spread
-    delay = min(60.0, floor + frac * spread)
-    jitter = min(0.3 * delay, 0.12 * delay + 0.3)  # ~12% of delay, capped at 0.3*d
-    loss = min(1.0, 0.02 + frac * 0.4)          # tiny, site-varying, ≤1.0%
+    delay = floor + frac * spread
+    jitter = 0.12 * delay + 0.3
+    loss = 0.02 + frac * 0.4
     return delay, jitter, loss
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # WireGuard key generation — shell out to `wg` binary (correctness-critical).
 # ponytail: pure-python x25519 produced wrong pubkeys (RFC 7748 vector 2 fail).
-# `wg` is not on the host; run it inside frr-node:latest (already pulled).
-# Keys persisted to .wg-keys.json so re-runs are idempotent.
+# `wg` is not on the host; run it inside FRR_IMAGE (the only image the air-gapped
+# host loads). Keys persisted to .wg-keys.json so re-runs are idempotent.
 # ──────────────────────────────────────────────────────────────────────────────
 def _wg_genkey_via_docker():
-    """Generate a WG keypair using frr-node:latest container."""
+    """Generate a WG keypair using an FRR_IMAGE container."""
     priv = subprocess.check_output(
-        ["docker", "run", "--rm", "frr-node:latest", "wg", "genkey"],
-        stderr=subprocess.DEVNULL,
+        ["docker", "run", "--rm", FRR_IMAGE, "wg", "genkey"],
     ).decode().strip()
     pub = subprocess.check_output(
-        ["docker", "run", "--rm", "frr-node:latest", "sh", "-c",
+        ["docker", "run", "--rm", FRR_IMAGE, "sh", "-c",
          f"echo '{priv}' | wg pubkey"],
-        stderr=subprocess.DEVNULL,
     ).decode().strip()
     return priv, pub
 
@@ -394,8 +397,11 @@ def build(spec):
             neighbors = pe_vrf_map.get((pe_name, vname), [])
             if not neighbors:
                 continue  # PE only configures VRFs it actually serves
-            rd = vrf_meta[vname]["rd_community"]
-            vlist.append(dict(name=vname, rd=rd, rt=rd, ce_neighbors=neighbors))
+            rt = vrf_meta[vname]["rd_community"]
+            # RD must be unique per (PE, VRF) so identical customer prefixes from
+            # two sites stay distinct VPNv4 NLRIs; RT stays the shared community.
+            rd = f"{nodes[pe_name]['loopback']}:{rt.split(':')[1]}"
+            vlist.append(dict(name=vname, rd=rd, rt=rt, ce_neighbors=neighbors))
         nodes[pe_name]["vrfs"] = vlist
 
     # --- Static mgmt IPs (172.20.20.0/24) ---
@@ -540,7 +546,10 @@ def build(spec):
                 created_vrfs.add(vname)
             ex.append(f"ip link set {vi['uplink_if']} vrf vrf_{vname}")
             ex.append(f"ip link set {vi['lan_if']} vrf vrf_{vname}")
-        ex += ["chmod +x /qos.sh", "/qos.sh || true"]
+        # ponytail: clab runs exec strings via shlex+docker exec, NOT a shell —
+        # so no `|| true` guard is possible here. qos.sh has `set -e`; a real tc
+        # failure surfaces as an exec error, which is what we want.
+        ex += ["chmod +x /qos.sh", "/qos.sh"]
         # ponytail: ONE per-site root netem on eth0 (mgmt/transport veth, plain
         # qdisc → root netem is valid). Delays BOTH the WG tunnels AND telemetry
         # transport — the controller MEASURES this via ping over wg0 instead of
@@ -551,20 +560,13 @@ def build(spec):
             f"delay {d:.1f}ms {j:.1f}ms loss {l:.2f}%"
         )
         if ce_name in wg:
-            # ponytail: WG endpoints are CE loopbacks reachable only AFTER
-            # BGP/MPLS converges (~30-90s). Background-retry loop so deploy
-            # doesn't block. CONTRACT: frr-node image provides wireguard-go
-            # (userspace impl); WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
-            # so `wg-quick up` works regardless of host kernel WG module.
-            # Loop exits on first success; fails loudly after 30 attempts.
-            wg_retry = (
-                "bash -c 'for i in $(seq 1 30); do "
-                "WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go wg-quick up wg0 "
-                "&& exit 0; "
-                "sleep 5; done; "
-                "echo wg0 bring-up failed after 30 attempts >&2; exit 1' &"
-            )
-            ex.append(wg_retry)
+            # ponytail: no retry loop — WG endpoints are the CE mgmt IPs, which
+            # are up before clab's exec phase runs, and `wg-quick up` configures
+            # the peer without needing it reachable. CONTRACT: frr-node image
+            # provides wireguard-go (userspace impl); the env var makes
+            # `wg-quick up` work regardless of host kernel WG module.
+            ex.append("env WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go "
+                      "wg-quick up wg0")
         node_exec[ce_name] = ex
 
     return dict(
@@ -595,24 +597,23 @@ def render(model):
     snmp_community = spec["telemetry"]["snmp"]["community"]
     provider_as = model["provider_as"]
 
-    # qos class table (shared across CEs)
+    # qos class table, keyed by VRF (shared across CEs).
+    # ponytail: each CE-PE uplink carries exactly ONE VRF, so the uplink is shaped
+    # with that VRF's class as the HTB default. No DSCP u32 filters: nothing in
+    # the lab marks DSCP, so a tos-match tree would put 100% of traffic in the
+    # default class anyway — the VRF the interface belongs to IS the classifier.
     qcfg = spec["qos"]
     root_rate = qcfg["default_uplink_rate"]
     classid_for = {"VOICE": 10, "CORP": 20, "GUEST": 30}
-    qos_classes = []
+    qos_class = {}
     for c in qcfg["classes"]:
-        dscp = c["dscp"]
-        dval = DSCP_VAL[dscp]
-        tos = dval << 2
-        qos_classes.append(dict(
-            vrf=c["vrf"], dscp=dscp, dscp_val=dval, tos=hex(tos),
+        qos_class[c["vrf"]] = dict(
+            vrf=c["vrf"], dscp=c["dscp"], dscp_val=DSCP_VAL[c["dscp"]],
             classid=classid_for[c["vrf"]],
             prio=spec["vrfs"][c["vrf"]]["qos_priority"],
             rate=_pct_rate(root_rate, c["bandwidth_pct"]),
             ceil=_pct_rate(root_rate, c["bandwidth_pct"] + c["burst_pct"]),
-        ))
-    # default class = best-effort (GUEST) if present else CORP
-    default_classid = classid_for.get("GUEST", classid_for["CORP"])
+        )
 
     # ponytail: exist_ok preserves inodes so Docker bind mounts inside running
     # containers see regenerated content without a container restart.
@@ -654,12 +655,11 @@ def render(model):
                t_mpls.render(core_ifaces=core_ifaces))
 
         if role == "CE":
-            # ponytail: pass ALL CE uplink ifaces to qos.sh for HTB shaping on
-            # each VRF uplink (not just ce_links[0] / CORP only).
-            uplinks = [lk["iface"] for lk in n["ce_links"]]
+            # one shaped uplink per VRF this site actually serves
+            uplinks = [dict(iface=vi["uplink_if"], **qos_class[vi["vrf"]])
+                       for vi in n["vrf_ifaces"]]
             _w(os.path.join(ndir, "qos.sh"), t_qos.render(
-                hostname=name, uplink_ifaces=uplinks, uplink_rate=root_rate,
-                classes=qos_classes, default_classid=default_classid))
+                hostname=name, uplinks=uplinks, uplink_rate=root_rate))
             if name in model["wg"]:
                 w = model["wg"][name]
                 _w(os.path.join(ndir, "wg0.conf"), t_wg.render(
@@ -672,10 +672,10 @@ def render(model):
                               mgmt_ip=model["mgmt_ip"].get(name, ""),
                               exec=model["node_exec"].get(name, [])))
 
-    # ponytail: pass frr_image="frr-node:0.1" directly into the template
-    # render instead of the fragile post-render string replace.
+    # ponytail: pass FRR_IMAGE directly into the template render instead of the
+    # fragile post-render string replace.
     clab_txt = t_clab.render(
-        lab_name="sdwan_mpls_noc", frr_image="frr-node:0.1",
+        lab_name="sdwan_mpls_noc", frr_image=FRR_IMAGE,
         host_image=k["host_image"], frr_nodes=frr_nodes,
         host_nodes=model["host_nodes"], links=model["links"])
     _w(os.path.join(OUT, "clab.yml"), clab_txt)
@@ -703,11 +703,12 @@ def _w(path, text):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Telemetry node-mappings (anti-drift): emit the telegraf SNMP agent list and the
-# nfacctd pre_tag_map straight from the SAME node/mgmt-IP model the lab is built
-# from, so they can never drift from the deployed node set. A later step points
-# telemetry/ at these files (telegraf include + nfacctd pre_tag_map).
+# nfacctd device_map: emitted straight from the same node/mgmt-IP model the lab
+# is built from, and bind-mounted into the nfacctd container (docker-compose.yml)
+# as its pre_tag_map — so it cannot drift from the deployed node set.
 # Only FRR nodes (P/PE/CE) are emitted — host containers run no SNMP/IPFIX.
+# (Telegraf's SNMP `agents` array is hand-maintained in telemetry/telegraf/
+# telegraf.conf; generating it here was dead output nothing ever read.)
 # ──────────────────────────────────────────────────────────────────────────────
 def emit_telemetry(model):
     out_dir = os.path.join(OUT, "telemetry")
@@ -718,29 +719,14 @@ def emit_telemetry(model):
            if n["role"] in ("P", "PE", "CE")]
     width = max(len(name) for name, _ in frr)
 
-    # 1) Telegraf SNMP agent list — a snippet the telegraf [[inputs.snmp]] block
-    #    references for its `agents = [...]` array. Format: one TOML "udp://IP:161"
-    #    list element per FRR node (community/version live in telegraf.conf).
-    snmp_lines = ["# GENERATED by generator/generate.py — do not edit by hand.",
-                  "# Telegraf SNMP agents = all FRR mgmt IPs (community v2c on :161).",
-                  "# A later step wires telegraf.conf's `agents` array to this list.",
-                  "agents = ["]
-    for name, ip in frr:
-        snmp_lines.append(f'    "udp://{ip}:161",'.ljust(34) + f"# {name}")
-    snmp_lines.append("]")
-    _w(os.path.join(out_dir, "snmp_agents.toml"), "\n".join(snmp_lines) + "\n")
-
-    # 2) nfacctd device_map (pmacct pre_tag_map format): mgmt-IP -> device label,
-    #    one line per FRR node. Format: `set_label=<device> ip=<mgmtip>`.
-    #    nfacctd matches the IPFIX exporter source IP and tags the flow `device`.
+    # pmacct pre_tag_map format: mgmt-IP -> device label, one line per FRR node.
+    # nfacctd matches the IPFIX exporter source IP and tags the flow `device`.
     dm_lines = ["! GENERATED by generator/generate.py — do not edit by hand.",
                 "! pre_tag_map: IPFIX exporter mgmt IP -> device label.",
                 "! Format: set_label=<value> ip=<exporter_ip>", ""]
     for name, ip in frr:
         dm_lines.append(f"set_label={name.ljust(width)}  ip={ip}")
     _w(os.path.join(out_dir, "device_map.txt"), "\n".join(dm_lines) + "\n")
-
-    return [t[0] for t in frr]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -812,7 +798,8 @@ def check(model, post_render=False):
             )
 
     # 4. required per-node files exist on disk (post-render only)
-    if post_render and os.path.isdir(OUT):
+    if post_render:
+        assert os.path.isdir(OUT), f"missing output tree {OUT}"
         for name, n in model["nodes"].items():
             ndir = os.path.join(OUT, "configs", name)
             required = ["frr.conf", "daemons", "snmpd.conf", "vtysh.conf"]
@@ -827,24 +814,18 @@ def check(model, post_render=False):
                 assert os.path.isfile(p), f"missing {p}"
         assert os.path.isfile(os.path.join(OUT, "clab.yml")), "missing clab.yml"
 
-        # 5. telemetry node-mappings emitted, one entry per FRR node (anti-drift)
+        # 5. device_map emitted, one entry per FRR node (anti-drift)
         n_frr = sum(1 for n in model["nodes"].values()
                     if n["role"] in ("P", "PE", "CE"))
-        tdir = os.path.join(OUT, "telemetry")
-        snmp_f = os.path.join(tdir, "snmp_agents.toml")
-        dm_f = os.path.join(tdir, "device_map.txt")
-        assert os.path.isfile(snmp_f), f"missing {snmp_f}"
+        dm_f = os.path.join(OUT, "telemetry", "device_map.txt")
         assert os.path.isfile(dm_f), f"missing {dm_f}"
-        with open(snmp_f) as f:
-            n_agents = sum(1 for ln in f if ln.lstrip().startswith('"udp://'))
         with open(dm_f) as f:
             n_labels = sum(1 for ln in f if ln.startswith("set_label="))
-        assert n_agents == n_frr, \
-            f"telegraf agents {n_agents} != FRR nodes {n_frr}"
         assert n_labels == n_frr, \
             f"device_map labels {n_labels} != FRR nodes {n_frr}"
-    print("check: OK — no IP collisions, iBGP mesh + wg peers correct, "
-          "telemetry mappings emitted, files present")
+    print("check: OK — no IP collisions, iBGP mesh + wg peers correct"
+          + (", files present, device_map emitted" if post_render
+             else " (model only; files not checked)"))
 
 
 def main():
