@@ -1,186 +1,191 @@
 {
-  "source_parquet": "dataset_1782715445_1782719045_30s.parquet",
-  "source_rows": 87048,
+  "source_parquet": "dataset_1785032386_1785033870_30s.parquet",
+  "source_rows": 49844,
   "step_s": 30,
   "octet_rate_by_site": {
     "branch": {
-      "rate_in_median": 15677.0,
-      "rate_out_median": 2448.0,
+      "rate_in_median": 311.0,
+      "rate_out_median": 42.0,
       "_src": "real"
     },
     "core": {
-      "rate_in_median": 13769.0,
-      "rate_out_median": 10054.0,
+      "rate_in_median": 8424.0,
+      "rate_out_median": 8382.0,
       "_src": "real"
     },
     "dc": {
-      "rate_in_median": 16411.0,
-      "rate_out_median": 3785.0,
+      "rate_in_median": 296.0,
+      "rate_out_median": 42.0,
       "_src": "real"
     },
     "hub": {
-      "rate_in_median": 12452.0,
-      "rate_out_median": 7380.0,
+      "rate_in_median": 127.0,
+      "rate_out_median": 235.0,
       "_src": "real"
     },
     "pe": {
-      "rate_in_median": 66312.0,
-      "rate_out_median": 1806.0,
+      "rate_in_median": 235.0,
+      "rate_out_median": 239.0,
       "_src": "real"
+    },
+    "nan": {
+      "rate_in_median": 1000000.0,
+      "rate_out_median": 600000.0,
+      "_src": "default"
     }
   },
   "tunnel_baseline": {
     "tunnel_latency_ms": {
-      "mean": 62.913154909442405,
-      "std": 25.778422014297814,
-      "p50": 62.22325,
-      "min": 6.8462,
-      "max": 595.1424,
+      "mean": 29.05121838376561,
+      "std": 4.689535636947437,
+      "p50": 28.748350000000002,
+      "min": 16.3218,
+      "max": 58.3231,
       "_src": "real"
     },
     "tunnel_jitter_ms": {
-      "mean": 20.222369027269025,
-      "std": 35.171450266382706,
-      "p50": 8.354500000000002,
-      "min": 0.6463,
-      "max": 895.874,
+      "mean": 2.948600012007685,
+      "std": 0.4004700290003445,
+      "p50": 2.9245,
+      "min": 2.1014,
+      "max": 6.9712,
       "_src": "real"
     },
     "tunnel_loss_pct": {
-      "mean": 0.6556619098494099,
-      "std": 4.067284524175923,
-      "p50": 0.1234,
-      "min": 0.0,
-      "max": 51.6661,
+      "mean": 0.43645389048991357,
+      "std": 0.5412393291511186,
+      "p50": 0.0777,
+      "min": 0.0003,
+      "max": 5.6996,
       "_src": "real"
     },
     "tunnel_rekeys": {
-      "mean": 9.343813593813595,
-      "std": 7.655660189016196,
+      "mean": 8.29695004803074,
+      "std": 4.2903597244912,
       "p50": 8.0,
-      "min": 0.0,
-      "max": 55.0,
+      "min": 1.0,
+      "max": 17.0,
       "_src": "real"
     }
   },
   "tunnel_baseline_by_site": {
     "branch": {
       "tunnel_latency_ms": {
-        "mean": 67.67259584520419,
-        "std": 23.86664295852944,
-        "p50": 65.6254,
-        "min": 12.9631,
-        "max": 595.1424,
+        "mean": 28.994105864197532,
+        "std": 4.742752293499051,
+        "p50": 28.6512,
+        "min": 16.3218,
+        "max": 58.3231,
         "_src": "real"
       },
       "tunnel_jitter_ms": {
-        "mean": 21.678009680674265,
-        "std": 35.85932430551991,
-        "p50": 9.182,
-        "min": 0.6463,
-        "max": 895.874,
+        "mean": 2.940884147025814,
+        "std": 0.4117692589675023,
+        "p50": 2.92075,
+        "min": 2.1014,
+        "max": 6.9712,
         "_src": "real"
       },
       "tunnel_loss_pct": {
-        "mean": 0.6334808226495727,
-        "std": 3.955293642668782,
-        "p50": 0.1232,
-        "min": 0.0,
-        "max": 51.6661,
+        "mean": 0.4398162878787879,
+        "std": 0.547339660208111,
+        "p50": 0.08135,
+        "min": 0.0003,
+        "max": 5.6996,
         "_src": "real"
       },
       "tunnel_rekeys": {
-        "mean": 9.312618708452042,
-        "std": 7.5178205304161745,
+        "mean": 8.322811447811448,
+        "std": 4.3032289027611395,
         "p50": 8.0,
-        "min": 0.0,
-        "max": 55.0,
+        "min": 1.0,
+        "max": 17.0,
         "_src": "real"
       }
     },
     "dc": {
       "tunnel_latency_ms": {
-        "mean": 34.35650929487179,
-        "std": 16.812513193967273,
-        "p50": 32.577200000000005,
-        "min": 6.8462,
-        "max": 478.9138,
+        "mean": 29.39046675,
+        "std": 4.346473227813886,
+        "p50": 29.107,
+        "min": 17.853,
+        "max": 37.9685,
         "_src": "real"
       },
       "tunnel_jitter_ms": {
-        "mean": 11.488525106837606,
-        "std": 29.24377111808508,
-        "p50": 4.18935,
-        "min": 0.6582,
-        "max": 830.4724,
+        "mean": 2.99443225,
+        "std": 0.32171494044265986,
+        "p50": 2.9419500000000003,
+        "min": 2.3156,
+        "max": 3.7178,
         "_src": "real"
       },
       "tunnel_loss_pct": {
-        "mean": 0.7887484330484331,
-        "std": 4.681918347465932,
-        "p50": 0.12495,
-        "min": 0.0,
-        "max": 50.3094,
+        "mean": 0.41648125,
+        "std": 0.5032343475763434,
+        "p50": 0.07089999999999999,
+        "min": 0.0005,
+        "max": 1.5108,
         "_src": "real"
       },
       "tunnel_rekeys": {
-        "mean": 9.530982905982906,
-        "std": 8.434565599982792,
+        "mean": 8.143333333333333,
+        "std": 4.211599482071712,
         "p50": 8.0,
-        "min": 0.0,
-        "max": 44.0,
+        "min": 1.0,
+        "max": 15.0,
         "_src": "real"
       }
     }
   },
   "fault_signatures": {
     "congestion": {
-      "lat_peak": 60.0,
-      "loss_peak": 3.0,
-      "jit_peak": 8.0,
-      "lead_s": 50.0,
+      "lat_peak": 102.0591,
+      "loss_peak": 5.7125,
+      "jit_peak": 13.5726,
+      "lead_s": 62.2,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     },
     "bgp_flap": {
-      "lat_peak": 62.22325,
+      "lat_peak": 28.748350000000002,
       "loss_peak": 0.3,
-      "jit_peak": 8.354500000000002,
+      "jit_peak": 2.9245,
       "lead_s": 2.0,
       "kind": "iface_churn",
       "_src": "default"
     },
     "tunnel_degrade": {
-      "lat_peak": 35.0,
-      "loss_peak": 5.0,
-      "jit_peak": 12.0,
-      "lead_s": 40.0,
+      "lat_peak": 37.8145,
+      "loss_peak": 3.441,
+      "jit_peak": 4.0917,
+      "lead_s": 65.2,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     },
     "policy_drift": {
-      "lat_peak": 28.0,
-      "loss_peak": 0.35,
-      "jit_peak": 3.0,
+      "lat_peak": 30.1559,
+      "loss_peak": 0.0933,
+      "jit_peak": 2.9743,
       "lead_s": 3.0,
       "kind": "iface_churn",
-      "_src": "default"
+      "_src": "real"
     },
     "node_failure": {
-      "lat_peak": 62.22325,
+      "lat_peak": 28.748350000000002,
       "loss_peak": 1.0,
-      "jit_peak": 8.354500000000002,
+      "jit_peak": 2.9245,
       "lead_s": 1.0,
       "kind": "iface_down",
       "_src": "default"
     },
     "asymmetric_loss": {
-      "lat_peak": 68.445575,
-      "loss_peak": 4.0,
-      "jit_peak": 12.531750000000002,
-      "lead_s": 30.0,
+      "lat_peak": 33.5288,
+      "loss_peak": 9.1383,
+      "jit_peak": 3.2577,
+      "lead_s": 42.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     },
     "brownout": {
       "lat_peak": 45.0,
@@ -191,33 +196,33 @@
       "_src": "default"
     },
     "p_node_failure": {
-      "lat_peak": 80.890225,
+      "lat_peak": 37.372855,
       "loss_peak": 2.0,
-      "jit_peak": 16.709000000000003,
-      "lead_s": 5.0,
+      "jit_peak": 5.849,
+      "lead_s": 2.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src": "real"
     },
     "pop_isolation": {
-      "lat_peak": 99.55720000000001,
+      "lat_peak": 45.99736000000001,
       "loss_peak": 6.0,
-      "jit_peak": 20.886250000000004,
+      "jit_peak": 7.31125,
       "lead_s": 3.0,
       "kind": "iface_down",
       "_src": "default"
     },
     "core_partition": {
-      "lat_peak": 112.00185,
+      "lat_peak": 51.74703,
       "loss_peak": 8.0,
-      "jit_peak": 25.063500000000005,
+      "jit_peak": 8.7735,
       "lead_s": 3.0,
       "kind": "iface_down",
       "_src": "default"
     },
     "srlg_cut": {
-      "lat_peak": 87.11255,
+      "lat_peak": 40.24769,
       "loss_peak": 4.0,
-      "jit_peak": 18.379900000000006,
+      "jit_peak": 6.4339,
       "lead_s": 2.0,
       "kind": "iface_down",
       "_src": "default"
@@ -231,12 +236,12 @@
       "_src": "default"
     },
     "ospf_area_flap": {
-      "lat_peak": 74.6679,
+      "lat_peak": 34.498020000000004,
       "loss_peak": 1.0,
-      "jit_peak": 16.709000000000003,
-      "lead_s": 4.0,
+      "jit_peak": 5.849,
+      "lead_s": 2.0,
       "kind": "iface_churn",
-      "_src": "default"
+      "_src": "real"
     },
     "path_asymmetry": {
       "lat_peak": 30.0,
@@ -247,33 +252,33 @@
       "_src": "default"
     },
     "rr_failure": {
-      "lat_peak": 62.22325,
+      "lat_peak": 28.748350000000002,
       "loss_peak": 1.2,
-      "jit_peak": 8.354500000000002,
+      "jit_peak": 2.9245,
       "lead_s": 3.0,
       "kind": "iface_churn",
-      "_src": "default"
+      "_src": "real"
     },
     "gray_failure": {
-      "lat_peak": 71.5567375,
+      "lat_peak": 33.0606025,
       "loss_peak": 1.8,
-      "jit_peak": 10.860850000000003,
-      "lead_s": 90.0,
+      "jit_peak": 3.8018500000000004,
+      "lead_s": 5.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src": "real"
     },
     "mpls_underlay_failure": {
-      "lat_peak": 80.890225,
+      "lat_peak": 37.372855,
       "loss_peak": 2.0,
-      "jit_peak": 15.038100000000004,
-      "lead_s": 4.0,
+      "jit_peak": 5.2641,
+      "lead_s": 2.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src": "real"
     },
     "ldp_session_flap": {
-      "lat_peak": 68.445575,
+      "lat_peak": 31.623185000000007,
       "loss_peak": 0.8,
-      "jit_peak": 13.367200000000004,
+      "jit_peak": 4.679200000000001,
       "lead_s": 3.0,
       "kind": "iface_churn",
       "_src": "default"
@@ -287,9 +292,9 @@
       "_src": "default"
     },
     "bgp_cascade": {
-      "lat_peak": 74.6679,
+      "lat_peak": 34.498020000000004,
       "loss_peak": 1.5,
-      "jit_peak": 16.709000000000003,
+      "jit_peak": 5.849,
       "lead_s": 3.0,
       "kind": "iface_churn",
       "_src": "default"
@@ -325,14 +330,14 @@
       "_src": "default"
     },
     "cpu_pct": {
-      "mean": 4.0,
-      "std": 1.4,
-      "_src": "default"
+      "mean": 0.8726883266244968,
+      "std": 0.8901490673678014,
+      "_src": "real"
     },
     "mem_pct": {
-      "mean": 2.5,
-      "std": 0.875,
-      "_src": "default"
+      "mean": 0.039798734905117886,
+      "std": 0.006503447337723433,
+      "_src": "real"
     },
     "bgp_msg_per_step": {
       "mean": 6.0,
@@ -340,17 +345,17 @@
       "_src": "default"
     },
     "rib_routes": {
-      "mean": 120.0,
-      "std": 42.0,
-      "_src": "default"
+      "mean": 127.41117318435754,
+      "std": 4.529104473474306,
+      "_src": "real"
     },
     "ospf_lsa_count": {
-      "mean": 90.0,
-      "std": 31.499999999999996,
-      "_src": "default"
+      "mean": 267.83240223463685,
+      "std": 90.3853180171613,
+      "_src": "real"
     }
   },
-  "real_fault_fraction": 0.0,
+  "real_fault_fraction": 0.006560468662226145,
   "inventory": {
     "ce_branch1": {
       "site_type": "branch",
@@ -362,8 +367,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch1-ce_hub1",
@@ -428,8 +432,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch12-ce_hub1",
@@ -450,8 +453,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch13-ce_hub1",
@@ -472,8 +474,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch14-ce_hub1",
@@ -494,8 +495,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch15-ce_hub1",
@@ -538,8 +538,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch17-ce_hub1",
@@ -582,8 +581,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch19-ce_hub1",
@@ -604,8 +602,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch2-ce_hub1",
@@ -648,8 +645,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch21-ce_hub1",
@@ -670,8 +666,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch22-ce_hub1",
@@ -714,8 +709,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch24-ce_hub1",
@@ -780,8 +774,7 @@
         "eth4",
         "lo",
         "vrf_CORP",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_branch5-ce_hub1",
@@ -918,8 +911,7 @@
         "lo",
         "vrf_CORP",
         "vrf_GUEST",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": [
         "ce_dc2-ce_hub1",
@@ -993,8 +985,7 @@
         "lo",
         "vrf_CORP",
         "vrf_GUEST",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": []
     },
@@ -1011,8 +1002,7 @@
         "lo",
         "vrf_CORP",
         "vrf_GUEST",
-        "vrf_VOICE",
-        "wg0"
+        "vrf_VOICE"
       ],
       "tunnels": []
     },
@@ -1093,15 +1083,146 @@
       "interfaces": [
         "eth0",
         "eth1",
-        "eth10",
         "eth2",
         "eth3",
         "eth4",
         "eth5",
         "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p10": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p11": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p12": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p13": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p14": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p15": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p16": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p17": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p18": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p19": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
         "lo"
       ],
       "tunnels": []
@@ -1111,16 +1232,78 @@
       "interfaces": [
         "eth0",
         "eth1",
-        "eth10",
-        "eth11",
         "eth2",
         "eth3",
         "eth4",
         "eth5",
         "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p20": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p21": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p22": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p23": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p24": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
         "lo"
       ],
       "tunnels": []
@@ -1130,15 +1313,10 @@
       "interfaces": [
         "eth0",
         "eth1",
-        "eth10",
         "eth2",
         "eth3",
         "eth4",
         "eth5",
-        "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -1152,10 +1330,6 @@
         "eth3",
         "eth4",
         "eth5",
-        "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -1170,9 +1344,6 @@
         "eth4",
         "eth5",
         "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -1187,9 +1358,6 @@
         "eth4",
         "eth5",
         "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -1203,10 +1371,6 @@
         "eth3",
         "eth4",
         "eth5",
-        "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -1220,10 +1384,20 @@
         "eth3",
         "eth4",
         "eth5",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "p9": {
+      "site_type": "core",
+      "interfaces": [
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
         "eth6",
-        "eth7",
-        "eth8",
-        "eth9",
         "lo"
       ],
       "tunnels": []
@@ -1236,8 +1410,6 @@
         "VOICE",
         "eth0",
         "eth1",
-        "eth10",
-        "eth11",
         "eth2",
         "eth3",
         "eth4",
@@ -1270,6 +1442,38 @@
       ],
       "tunnels": []
     },
+    "pe11": {
+      "site_type": "pe",
+      "interfaces": [
+        "CORP",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
+    "pe12": {
+      "site_type": "pe",
+      "interfaces": [
+        "CORP",
+        "VOICE",
+        "eth0",
+        "eth1",
+        "eth2",
+        "eth3",
+        "eth4",
+        "eth5",
+        "eth6",
+        "lo"
+      ],
+      "tunnels": []
+    },
     "pe2": {
       "site_type": "pe",
       "interfaces": [
@@ -1278,8 +1482,6 @@
         "VOICE",
         "eth0",
         "eth1",
-        "eth10",
-        "eth11",
         "eth2",
         "eth3",
         "eth4",
@@ -1300,8 +1502,6 @@
         "VOICE",
         "eth0",
         "eth1",
-        "eth10",
-        "eth11",
         "eth2",
         "eth3",
         "eth4",
@@ -1322,8 +1522,6 @@
         "VOICE",
         "eth0",
         "eth1",
-        "eth10",
-        "eth11",
         "eth2",
         "eth3",
         "eth4",
@@ -1438,10 +1636,11 @@
     }
   },
   "octet_seed_by_site": {
-    "branch": 598983.5,
-    "core": 1073188.0,
-    "dc": 853437.0,
-    "hub": 188503.5,
-    "pe": 3412568.5
+    "branch": 12304.0,
+    "core": 478607.0,
+    "dc": 11191.0,
+    "hub": 7981.0,
+    "pe": 13324.0,
+    "nan": NaN
   }
 }
