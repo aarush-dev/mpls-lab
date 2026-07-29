@@ -419,10 +419,11 @@ curl 'http://127.0.0.1:8000/topology' | jq '.nodes[] | select(.role == "PE") | .
 ```bash
 curl -o dataset.parquet 'http://127.0.0.1:8000/datasets'
 # Downloads the most recent labeled Parquet to ./dataset.parquet
-# EXECUTED: real shipped datasets (dataapi/datasets/*.parquet) range 52 KB - 1.2 MB.
-# Only the most recently regenerated one matches the current 40-col schema
-# (check_dataset.py passes: rows=49,844 cols=40); older cached files are stale
-# 21-column pre-device-health datasets and FAIL schema validation.
+# EXECUTED: the one committed real dataset is
+#   dataapi/datasets/dataset_1785032386_1785033870_30s.parquet  (586 KB, 49,844 rows, 40 cols)
+# It is the only local capture on the current 40-col schema; other cached files in
+# that dir are stale 21-column pre-device-health datasets and FAIL validation.
+# Committed reference datasets are catalogued in DATASETS.md.
 ```
 
 **Build a fresh dataset for a specific time window:**

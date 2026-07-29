@@ -40,8 +40,8 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 
 ## What is verified vs. not
 - Verified this pass (by reading/re-deriving from code): the counts above, the fault `impact_method` changes, the dataset schema column count, the airgap compose `pull_policy: never` keys, Grafana panel-to-metric mapping.
-- **NOT verified against a running lab.** The lab containers are currently down (`docker ps -a` returns none) and `dataapi/datasets/` does not exist on disk. Nothing in the repair pass — the fixes above or the counts confirming them — has been checked end-to-end against a live deploy. Next agent must deploy (`containerlab deploy`, `docker compose up -d`) and run the verification steps in `PLAN.md` before trusting any of this in production.
-- The four previously shipped `datasets/*.parquet` (referenced in older docs) predate the 40-column schema and now fail `check_dataset.py`; they are not present in the current tree and need a full rebuild against a live stack.
+- **Verified against a live deploy on 2026-07-26.** Full 148-container lab + telemetry stack deployed; `env-metrics` sidecar exercised (three bugs found and fixed: OSPF LSA nesting under `areas`, queue iface hardcoded to `eth1`, `tc` `(dropped` token never parsed). Real 40-column dataset exported and `profile.json` recalibrated from that capture. Lab destroyed afterwards — `docker ps -a` returns none now.
+- Two reference datasets are committed and documented in **`DATASETS.md`** (real 49,844 rows; synthetic 2,589,120 rows, all 21 fault types). Everything else under `dataapi/datasets/` and `synthetic/output/` remains gitignored and stale — older files are 21-column pre-device-health and fail `check.py`.
 
 ## How to run / verify
 - Regenerate: `cd generator && python3 generate.py` (then `--check`). Deploy: `cd topology && sudo containerlab deploy -t clab.yml`. Bring up stack: `cd telemetry && docker compose up -d`.
@@ -63,8 +63,8 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 6. The airgap image list is triplicated across `airgap/pull-and-save.sh`, `airgap/load-offline.sh`, `airgap/verify-airgap.sh` — cannot be derived from one place.
 7. Synthetic `flow_bytes`/`flow_packets` are null — needs new profile keys and a `calibrate.py` re-run against a live capture.
 8. New dependency `jsonschema` (`dataapi/requirements.txt:10`) must be added to the offline bundle.
-9. The four previously shipped `datasets/*.parquet` are stale (21 columns vs. the current 40) and fail `check_dataset.py`; need a rebuild against a live stack.
-10. **The lab containers are currently down** — nothing in this repair pass was verified against a running lab.
+9. **MPLS forwarding is impossible on this kernel.** `ip route add ... encap mpls` fails with `Error: CONFIG_LWTUNNEL is not enabled in this kernel.` Consequence on the live run: `Status: Label Changed Failed`, 114 OSPF routes but only 9 in pe1's FIB, iBGP VPNv4 stuck in `Connect`, `bgp_peer_established` = 0. Phase 0's check gives a **false pass** because `CONFIG_MPLS_ROUTING=y` and `modprobe mpls_router` succeeds. A `vrflite` fallback underlay is described in `topology-spec.yaml:52-53,239` but the generator never reads it — switching is real work, not a config flip.
+10. **Interface error counters are structurally dead in containers.** `if_in_errors`, `if_in_discards`, `if_out_errors` are constant 0 in the real capture: veth pairs produce no CRC/input errors. OIDs are wired correctly and will populate on real hardware. The literature's top-ranked failure signal is therefore unavailable in this lab.
 
 ## Git
-- Remote: `github.com/aarush-dev/mpls-lab`. Current branch `sidd` @ `ed06dd8a` (tracks `origin/sidd`); `main` is behind at `0460ec5c`. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators.
+- Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the two reference Parquets in `DATASETS.md` are force-added and tracked.

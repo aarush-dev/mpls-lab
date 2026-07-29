@@ -58,6 +58,31 @@ Verified on this host (19 cores / 108 GB RAM / 1007 GB disk, kernel 6.18.33.1-mi
 on 2026-07-26: all 5 checks PASS, including the corrected modprobe check and `netem` after
 loading `dummy`.
 
+### Step 1 is a FALSE PASS on this kernel — add step 1b
+
+`CONFIG_MPLS_ROUTING=y` and `modprobe mpls_router` succeed, and `net.mpls.platform_labels`
+sets fine — but label **imposition** needs `CONFIG_LWTUNNEL`, which this kernel lacks. Test it
+directly:
+
+```bash
+# 1b. MPLS label imposition (the check step 1 does NOT cover)
+sudo ip route add 10.99.99.99/32 encap mpls 100 via 127.0.0.1 dev lo && \
+  sudo ip route del 10.99.99.99/32 && echo "MPLS encap OK"
+```
+
+On kernel 6.18.33.1-microsoft-standard-WSL2 (2026-07-26) this returns:
+
+```
+Error: CONFIG_LWTUNNEL is not enabled in this kernel.
+```
+
+Observed consequences on a full deploy: FRR reports `Status: Label Changed Failed`, pe1 learns
+114 OSPF routes but installs only 9 in the FIB, iBGP VPNv4 sessions sit in `Connect`, and
+`bgp_peer_established` stays 0. OSPF/LDP control-plane telemetry is still real and usable;
+VRF-scoped forwarding metrics are not. Fix = a kernel with `CONFIG_LWTUNNEL` +
+`CONFIG_MPLS_IPTUNNEL`, or a full Linux VM. The `vrflite` fallback named in
+`topology-spec.yaml:52-53,239` is **not implemented** in the generator.
+
 ### WSL2 notes
 - Default WSL2 kernels often lack `CONFIG_MPLS_ROUTING`/`CONFIG_NET_VRF`. If steps 1–2 fail,
   build a custom WSL2 kernel with those options, or run the lab in a full Linux VM. There is
