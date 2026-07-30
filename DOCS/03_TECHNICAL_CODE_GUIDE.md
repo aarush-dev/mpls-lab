@@ -656,6 +656,10 @@ python3 generate.py --days 7 --step 30 --scale 1.0
 # Generate more fault episodes (scale=4 = 4x more fault events per hour)
 python3 generate.py --days 7 --step 30 --scale 4.0
 
+# Independent holdout: reseeds the one RNG, so no scenario_id is shared with
+# the default seed-42 run. Filename gains a _seed7 suffix.
+python3 generate.py --days 0.5 --step 30 --scale 3.0 --seed 7
+
 # Output lands in synthetic/output/
 ls synthetic/output/*.parquet
 ```

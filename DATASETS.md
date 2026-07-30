@@ -1,27 +1,45 @@
 # Committed sample datasets
 
-Two Parquet files are tracked in git as reference samples. Everything else under
+Three Parquet files are tracked in git as reference samples. Everything else under
 `dataapi/datasets/` and `synthetic/output/` stays gitignored — regenerate it.
 
-Both files use the canonical 40-column schema (`dataapi/export.py:32-56`). They are
+All three use the canonical 40-column schema (`dataapi/export.py:32-56`). They are
 concat-compatible: `pd.concat([real, synth])` needs no reindex.
 
 | file | rows | source | window |
 |---|---|---|---|
 | `dataapi/datasets/dataset_1785032386_1785033870_30s.parquet` | 49,844 | live 148-container lab | 2026-07-26 02:19:30Z → 02:44:00Z (24.5 min) |
-| `synthetic/output/synthetic_1781481600_d1.0_s30_x3.0.parquet` | 2,589,120 | `synthetic/generate.py`, seeded from `profile.json` | 2026-06-15 00:00:00Z → 23:59:30Z (1 day) |
+| `synthetic/output/synthetic_1781481600_d1.0_s30_x3.0.parquet` | 2,589,120 | `synthetic/generate.py` seed 42, from `profile.json` | 2026-06-15 00:00:00Z → 23:59:30Z (1 day) |
+| `synthetic/output/synthetic_1781481600_d0.5_s30_x3.0_seed7.parquet` | 1,294,560 | same generator, **seed 7** — independent holdout | 2026-06-15 00:00:00Z → 11:59:30Z (12 h) |
 
 ## Contents
 
-| | real | synthetic |
-|---|---|---|
-| devices | 70 | 70 |
-| `entity_type=interface` rows | 37,944 | 1,903,680 |
-| `entity_type=tunnel` rows | 8,400 | 483,840 |
-| `entity_type=device` rows | 3,500 | 201,600 |
-| `is_fault=1` rows | 327 | 60,440 |
-| precursor rows (`is_fault=1 & time_to_impact_s>0`) | 149 | 12,421 |
-| distinct `fault_type` | 9 | 21 (all of them) |
+| | real | synthetic (seed 42) | holdout (seed 7) |
+|---|---|---|---|
+| devices | 70 | 70 | 70 |
+| `entity_type=interface` rows | 37,944 | 1,903,680 | 951,840 |
+| `entity_type=tunnel` rows | 8,400 | 483,840 | 241,920 |
+| `entity_type=device` rows | 3,500 | 201,600 | 100,800 |
+| `is_fault=1` rows | 327 | 72,295 | 36,965 |
+| precursor rows (`is_fault=1 & time_to_impact_s>0`) | 149 | 31,017 | 15,532 |
+| distinct `fault_type` | 9 | 21 (all of them) | 21 (all of them) |
+| distinct `scenario_id` | 63 | 668 | 328 |
+
+## The holdout file
+
+`--seed 7` reseeds the single generator RNG (`synthetic/generate.py:607`), so
+fault draws, targets and noise are independent of the seed-42 file. Verified: the
+two synthetic files share **0** `scenario_id` values (668 vs 328, intersection
+empty), which is the split key the labels are keyed on. Train on seed 42, evaluate
+on seed 7 with no episode leakage.
+
+The seed is recorded in the Parquet file metadata (`seed=7`) alongside
+`synthetic=true`, so a renamed copy is still identifiable. Seed 42 keeps its old
+filename — the `_seed<N>` suffix only appears when the seed is not 42.
+
+Both synthetic files come from the same `profile.json`, so the *distributions*
+are shared by construction. Seed 7 is a holdout over fault episodes, not over
+calibration; it does not test generalisation to a different network.
 
 Real capture fault types: `asymmetric_loss`, `congestion`, `gray_failure`,
 `mpls_underlay_failure`, `ospf_area_flap`, `p_node_failure`, `policy_drift`,
@@ -46,8 +64,10 @@ Real capture fault types: `asymmetric_loss`, `congestion`, `gray_failure`,
 ## Regenerate
 
 ```bash
-# synthetic (deterministic: same profile.json + seed -> same file)
+# synthetic (deterministic: same profile.json + seed -> byte-identical file)
 cd synthetic && python3 generate.py --days 1 --step 30 --scale 3.0
+# holdout (EXECUTED: 1,294,560 rows, 2.86% fault, 23.7MB, 41s)
+cd synthetic && python3 generate.py --days 0.5 --step 30 --scale 3.0 --seed 7
 
 # real (needs a deployed lab + telemetry stack)
 cd dataapi && python3 export.py --minutes 25 --step 30

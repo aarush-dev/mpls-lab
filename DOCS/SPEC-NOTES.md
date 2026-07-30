@@ -692,3 +692,24 @@ every real incident as resolved. Recency is the honest proxy. A genuinely live
 incident view needs the orchestrator to publish its existing `campaign_inject`
 event — it already prints that JSON at inject time, it just never reaches a topic.
 That is a known gap, not a design choice.
+
+## Synthetic `--seed` and reproducibility
+
+**`scenario_id` is drawn from the seeded RNG, not `uuid.uuid4()`
+(`synthetic/generate.py:_sid_hex`).** The old uuid4 ids made the generator
+non-reproducible: two runs at identical `--days/--step/--scale` produced different
+Parquet bytes, so `DATASETS.md`'s determinism claim was false and a `--seed`-based
+train/holdout split could not be reproduced from the CLI. Verified after the change:
+two runs of `--days 0.05 --seed 99` are byte-identical (`md5sum`
+`f49cfe79c9ba7c7cef49a2cc2adea0e7` both times), and ids stay unique (32-bit draw
+behind a `{type}-{target}-` prefix).
+
+Consequence: both committed synthetic Parquets were regenerated, because
+`_sid_hex` consumes RNG draws and therefore shifts the whole downstream stream.
+Fault counts moved (seed 42: 60,440 → 72,295 fault rows) — a different valid draw,
+not a behaviour change. Row counts, schema and distributions are unchanged.
+
+**`--seed` splits on episodes, not on calibration.** Both synthetic files come from
+the same `profile.json`, so their distributions are shared by construction. Seed 7
+shares zero `scenario_id` values with seed 42, which makes it a clean episode-level
+holdout — it does not test generalisation to a different network.

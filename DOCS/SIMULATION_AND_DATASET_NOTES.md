@@ -285,8 +285,10 @@ ambient spread, fault counters rising, and gray_failure optical divergence.
 ### 2.4 Shipped samples
 
 `DATASETS.md` — real capture 49,844 rows (70 devices, 24.5 min, 327 fault rows, 9
-fault types); synthetic 2,589,120 rows (1 day, 60,440 fault rows, 12,421
-precursors, all 21 fault types). Concat-compatible.
+fault types); synthetic 2,589,120 rows (1 day, seed 42, 72,295 fault rows, 31,017
+precursors, all 21 fault types); synthetic holdout 1,294,560 rows (12 h, `--seed 7`,
+36,965 fault rows, 15,532 precursors, all 21 fault types, 0 `scenario_id` overlap
+with seed 42). Concat-compatible.
 
 ---
 

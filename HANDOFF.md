@@ -21,7 +21,7 @@ A reproducible, air-gapped **Containerlab SD-WAN-over-MPLS** lab that produces r
 - **`trafficgen/`** — diurnal per-VRF traffic (nc backend) so counters/flows move.
 - **`faults/`** — `injectors.py` (netem/flap/BGP/kill/rekey/drift, each reversible) + `orchestrator.py` (single scenarios + `--campaign` mode) writing the ground-truth **labels timeline** (joinable on device+time). 21 scenarios.
 - **`dataapi/`** — FastAPI (localhost): `/metrics /events /flows /labels /topology /datasets`; `export.py` joins everything → canonical 40-column Parquet (schema in `dataapi/schema/`). `ragcorpus/` seeds the RAG team.
-- **`synthetic/`** — `calibrate.py` (profile from real captures) + `generate.py` (ML-scale labeled time-series in the same canonical schema; `--scale`/`--days`).
+- **`synthetic/`** — `calibrate.py` (profile from real captures) + `generate.py` (ML-scale labeled time-series in the same canonical schema; `--scale`/`--days`/`--seed`).
 - **`airgap/`** — `pull-and-save.sh` / `load-offline.sh` / `verify-airgap.sh` (zero runtime egress).
 - **`streaming/`** — `bridge.py` (Kafka producer → `noc.metrics` / `noc.events` / `noc.faults` / `noc.topology`, keyed by `device`) + `consume.py` (two consumer groups: `noc-predictive` from earliest, `noc-copilot` from latest).
 
@@ -43,7 +43,7 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 - Verified this pass (by reading/re-deriving from code): the counts above, the fault `impact_method` changes, the dataset schema column count, the airgap compose `pull_policy: never` keys, Grafana panel-to-metric mapping.
 - **Verified against a live deploy on 2026-07-26.** Full 148-container lab + telemetry stack deployed; `env-metrics` sidecar exercised (three bugs found and fixed: OSPF LSA nesting under `areas`, queue iface hardcoded to `eth1`, `tc` `(dropped` token never parsed). Real 40-column dataset exported and `profile.json` recalibrated from that capture. Lab destroyed afterwards — `docker ps -a` returns none now.
 - **Streaming layer added (`streaming/`).** Kafka broker in the telemetry compose (KRaft, `noc-kafka`, 172.20.20.60:9092 in-lab / 127.0.0.1:29092 host); host-side producer `bridge.py` → 4 topics; two consumer groups in `consume.py`. Verified against the broker + the committed 49,844-row capture in replay mode (lab down): 4 topics with intended partitions/retention, 49,844 metric + 14 fault records in 7.5 s, 4,000 predictive windows of which 363 label-joined across 4 fault types, 49,858 records consumed by the copilot group with a rendered brief. Live paths (`noc.events` from Loki, `noc.topology` from topology-meta) are NOT verified — they need a deployed lab. See `streaming/README.md`.
-- Two reference datasets are committed and documented in **`DATASETS.md`** (real 49,844 rows; synthetic 2,589,120 rows, all 21 fault types). Everything else under `dataapi/datasets/` and `synthetic/output/` remains gitignored and stale — older files are 21-column pre-device-health and fail `check.py`.
+- Three reference datasets are committed and documented in **`DATASETS.md`** (real 49,844 rows; synthetic 2,589,120 rows seed 42; synthetic holdout 1,294,560 rows `--seed 7`, 0 `scenario_id` overlap with seed 42 — both synthetic files carry all 21 fault types). Everything else under `dataapi/datasets/` and `synthetic/output/` remains gitignored and stale — older files are 21-column pre-device-health and fail `check.py`.
 
 ## How to run / verify
 - Regenerate: `cd generator && python3 generate.py` (then `--check`). Deploy: `cd topology && sudo containerlab deploy -t clab.yml`. Bring up stack: `cd telemetry && docker compose up -d`.
@@ -70,4 +70,4 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 11. **Interface error counters are structurally dead in containers.** `if_in_errors`, `if_in_discards`, `if_out_errors` are constant 0 in the real capture: veth pairs produce no CRC/input errors. OIDs are wired correctly and will populate on real hardware. The literature's top-ranked failure signal is therefore unavailable in this lab.
 
 ## Git
-- Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the two reference Parquets in `DATASETS.md` are force-added and tracked.
+- Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.

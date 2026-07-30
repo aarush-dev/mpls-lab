@@ -583,6 +583,18 @@ python3 generate.py --days 1 --step 60  # 1-minute buckets
 # Edit synthetic/generate.py: FAULT_RATE_PER_DEVICE_PER_DAY parameter
 ```
 
+### Independent holdout (`--seed`, default 42)
+```bash
+cd /root/LAB/synthetic
+python3 generate.py --days 0.5 --step 30 --scale 3.0 --seed 7
+# EXECUTED: rows=1,294,560, fault_rows=36,965 (2.86%), precursor_rows=15,532,
+# 23.7MB, wall time 41s, all 21 fault types, check.py OK
+# Located: output/synthetic_1781481600_d0.5_s30_x3.0_seed7.parquet
+# 0 scenario_id overlap with the seed-42 file -> split on scenario_id, not time.
+# Same --days/--step/--scale/--seed reruns byte-identical; the _seed<N> filename
+# suffix and the Parquet `seed` metadata key appear for any seed but 42.
+```
+
 ### Load synthetic + real Parquet together
 ```python
 import pandas as pd

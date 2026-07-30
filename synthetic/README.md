@@ -78,6 +78,7 @@ ML team can train on either or both.
 | `--days`  | days of telemetry to emit | `2.0` (demo) |
 | `--step`  | bucket seconds (match export) | `30` |
 | `--scale` | fault-episode **density** multiplier | `1.0` |
+| `--seed`  | RNG seed — change for an independent holdout | `42` |
 
 Row count = `entities_per_tick × (days·86400/step)`, where `entities_per_tick`
 is the current `profile.json` inventory size (661 interfaces + 168 tunnels +
@@ -88,7 +89,14 @@ fault-episode density, not row count. At `entities_per_tick=899`:
 python3 generate.py --days 2                     # default: 5,178,240 rows
 python3 generate.py --days 7 --scale 3           # ~18.1M rows, denser faults
 python3 generate.py --days 30 --scale 6 --step 30   # ~77.7M rows, month, ML-scale
+python3 generate.py --days 0.5 --scale 3 --seed 7 # holdout: 0 scenario_id overlap with seed 42
 ```
+
+One seed = one RNG (`generate.py:607`), so a different `--seed` gives independent
+fault draws, targets and noise while keeping the same `profile.json`
+distributions. Output filename gains a `_seed<N>` suffix for any seed but 42, and
+the seed is written into the Parquet metadata. Split on `scenario_id`, not on
+time — see `../DATASETS.md`.
 
 `entities_per_tick` moves with the lab (it was ~149 before the 70-device
 recalibration in `../DOCS/`'s "recalibrate profile.json" commit) — recompute

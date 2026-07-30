@@ -27,7 +27,6 @@ import argparse
 import json
 import os
 import sys
-import uuid
 from datetime import datetime, timezone
 
 import numpy as np
@@ -83,6 +82,12 @@ def _pop_of(dev):
 def _has_optic(ent):
     """Only physical uplinks carry a transceiver -- not lo, VRF devices or wg0."""
     return ent.startswith("eth")
+
+
+def _sid_hex(rng):
+    """8 hex chars from the seeded RNG, not uuid4 -- scenario_id has to be
+    reproducible or --seed cannot define a stable train/holdout split."""
+    return f"{int(rng.integers(0, 1 << 32)):08x}"
 
 
 def _gen_interfaces(rng, inv, prof, times):
@@ -472,7 +477,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
         t_impact = t_start + lead
         t_end = t_impact + dur_impact
-        sid = f"{ft}-{target}-{uuid.uuid4().hex[:8]}"
+        sid = f"{ft}-{target}-{_sid_hex(rng)}"
         sev = rng.choice(["low", "medium", "high"], p=[0.3, 0.4, 0.3])
         sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(sev)]
 
@@ -536,7 +541,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
             cascade_dur = float(rng.uniform(60, 240))
             cascade_t_impact = cascade_t_start + cascade_lead
             cascade_t_end = cascade_t_impact + cascade_dur
-            cascade_sid = f"{cascade_sig_key}-{target2}-{uuid.uuid4().hex[:8]}-casc"
+            cascade_sid = f"{cascade_sig_key}-{target2}-{_sid_hex(rng)}-casc"
             cascade_sev = rng.choice(["low", "medium", "high"], p=[0.3, 0.4, 0.3])
             cascade_sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(cascade_sev)]
             cascade_kind = cascade_sig["kind"]
@@ -600,11 +605,11 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     return df
 
 
-def generate(days, step, scale, profile_path):
+def generate(days, step, scale, profile_path, seed=42):
     with open(profile_path) as fh:
         prof = json.load(fh)
     inv = prof["inventory"]
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed)
 
     start = datetime(2026, 6, 15, tzinfo=timezone.utc).timestamp()  # a Monday
     n = int(days * 86400 / step)
@@ -647,7 +652,9 @@ def generate(days, step, scale, profile_path):
     for c in ["scenario_id", "fault_type", "severity"]:
         df[c] = df[c].astype("object")
 
-    fname = f"synthetic_{int(start)}_d{days}_s{step}_x{scale}.parquet"
+    # ponytail: seed omitted from the name at 42 so existing filenames stay valid
+    sfx = "" if seed == 42 else f"_seed{seed}"
+    fname = f"synthetic_{int(start)}_d{days}_s{step}_x{scale}{sfx}.parquet"
     path = os.path.join(OUTDIR, fname)
     # Mark it synthetic IN THE FILE, not just in the filename: a renamed or
     # re-exported copy must still be distinguishable from a real capture.
@@ -656,6 +663,7 @@ def generate(days, step, scale, profile_path):
         **(tbl.schema.metadata or {}),
         b"synthetic": b"true",
         b"generator": b"synthetic/generate.py",
+        b"seed": str(seed).encode(),
         b"calibrated_from": str(prof.get("source_parquet", "")).encode(),
     })
     pq.write_table(tbl, path)
@@ -669,10 +677,12 @@ def main():
     ap.add_argument("--scale", type=float, default=1.0,
                     help="fault-episode density multiplier (ML-scale: raise days+scale)")
     ap.add_argument("--profile", default=os.path.join(HERE, "profile.json"))
+    ap.add_argument("--seed", type=int, default=42,
+                    help="RNG seed; change it for an independent holdout sample")
     args = ap.parse_args()
     assert os.path.exists(args.profile), "profile.json missing -- run calibrate.py first"
 
-    path, df = generate(args.days, args.step, args.scale, args.profile)
+    path, df = generate(args.days, args.step, args.scale, args.profile, args.seed)
     print(f"wrote {path}")
     print(f"rows={len(df)} cols={len(df.columns)} "
           f"fault_rows={int(df.is_fault.sum())} ({df.is_fault.mean()*100:.2f}%) "
