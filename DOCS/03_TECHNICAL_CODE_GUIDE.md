@@ -811,7 +811,7 @@ knobs:
 
 (`topology-spec.yaml:25-27`. 28 spokes (branch+dc) × 6 hubs = 168 spoke-hub WireGuard tunnels, plus 3 hub-hub pairs (adjacent hubs 0+1, 2+3, 4+5) = 171 tunnels total — `generator/generate.py:471-491`.)
 
-Total lab containers: 70 FRR nodes (24 P + 12 PE + 34 CE) + 78 host containers = **148**. Plus 9 telemetry/infra containers (~157 total).
+Total lab containers: 70 FRR nodes (24 P + 12 PE + 34 CE) + 78 host containers = **148**. Plus 11 telemetry/infra containers (~159 total).
 
 **What the numbers mean for your ML dataset:**
 

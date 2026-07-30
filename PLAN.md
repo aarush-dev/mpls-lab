@@ -150,14 +150,16 @@ integrated into the canonical lab:
   New generator knobs: `pop_count: 6`, `p_per_pop: 4`, `multi_area: true`,
   `igp_cost_intra: 10`, `igp_cost_inter: 100`, `inter_pop_redundancy: 2`,
   `inter_pop_chords: [[1,4],[2,5],[3,6]]`. Total lab containers: **148** (70 FRR +
-  78 hosts) + 9 telemetry/infra = ~157. The generator now also emits
+  78 hosts) + 11 telemetry/infra = ~159. The generator now also emits
   `topology/topology-meta.json` consumed by faults and dataapi.
 
 - **9 new core/catastrophic/correlated fault scenarios (Phase 6 extension):** added
   `p_node_failure`, `pop_isolation`, `core_partition`, `srlg_cut`, `core_congestion`,
   `ospf_area_flap`, `path_asymmetry`, `rr_failure`, and `gray_failure`, bringing the
-  scenario total from 12 to **21**. Two new injectors: `MultiLinkFault` (atomic
-  multi-link down) and `OspfCostShift` (one-directional cost raise). Scenarios resolve
+  scenario total from 12 to **21**. Two new injectors: `MultiLinkFault` (downs a
+  computed link-set; issued in sequence, NOT atomically, so OSPF sees the set drop
+  staggered the way a real duct cut presents -- `faults/injectors.py:456-468`) and
+  `OspfCostShift` (one-directional cost raise). Scenarios resolve
   targets from `topology-meta.json`.
 
 - **MPLS-core observability (Phase 2 extension):** the telemetry sidecar now collects
@@ -165,6 +167,18 @@ integrated into the canonical lab:
   `ospf_spf_last_executed_ms`, `mpls_lsp_count`, and `bgp_peer_established`. SNMP
   coverage grew from 52 to **70 agents** (all FRR nodes). Grafana NOC Overview grew
   from 7 to **11 panels**.
+
+- **Kafka streaming fan-out (Phase 2 extension):** `streaming/bridge.py` publishes the
+  existing four telemetry sources to four topics (`noc.metrics`, `noc.events`,
+  `noc.faults`, `noc.topology`), every record keyed by `device`. Two consumer groups in
+  `streaming/consume.py` consume independently: `noc-predictive` from the earliest
+  offset (replays history into fixed-length feature windows) and `noc-copilot` from the
+  latest (rolling natural-language incident brief). Broker is a single KRaft-mode
+  `apache/kafka:3.9.1` service in the telemetry compose; the producer runs on the host
+  beside `dataapi` because it imports `dataapi/export.py` for the canonical column
+  list. `noc.events` carries discrete routing events at exact timestamps -- 30 s metric
+  buckets cannot resolve a BGP reset and its reconvergence when both land inside one
+  bucket. Telemetry compose grew from 10 to **11 services**.
 
 ## Reuse-before-build (don't reinvent)
 Adapt: `martimy/clab_mpls_frr`, `frr01`, `upa/nante-wan`, `ntaka329` pmacct lab, `sflow/frr`;

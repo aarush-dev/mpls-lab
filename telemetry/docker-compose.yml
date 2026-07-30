@@ -17,6 +17,7 @@ volumes:
   vm-data:
   grafana-data:
   loki-data:
+  kafka-data:
 
 services:
   victoriametrics:
@@ -198,6 +199,47 @@ services:
         ipv4_address: 172.20.20.59
     depends_on:
       - victoriametrics
+    restart: unless-stopped
+
+  # --- Kafka broker (streaming fan-out) --------------------------------------
+  # Single-broker KRaft mode: no Zookeeper container, no second config file.
+  # Feeds two INDEPENDENT consumer groups (predictive + copilot) -- see
+  # streaming/README.md. The bridge PRODUCER runs on the host next to dataapi
+  # (it imports dataapi/export.py), so there is no extra image to build here.
+  #
+  # Two listeners on purpose: lab containers reach the broker at
+  # 172.20.20.60:9092, host processes at 127.0.0.1:29092. A single listener
+  # cannot serve both -- Kafka hands clients the ADVERTISED address after the
+  # bootstrap connect, so a host client bootstrapped on 127.0.0.1 would be
+  # redirected to an in-network address it cannot route to.
+  kafka:
+    image: apache/kafka:3.9.1
+    pull_policy: never
+    container_name: noc-kafka
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@172.20.20.60:9093"
+      KAFKA_LISTENERS: "INTERNAL://:9092,HOST://:29092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://172.20.20.60:9092,HOST://127.0.0.1:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      # bridge.py creates the four topics with explicit partitions + retention;
+      # auto-create would silently give 1 partition and default retention, which
+      # discards the per-device ordering design.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      CLUSTER_ID: "noc-lab-kraft-cluster"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "127.0.0.1:29092:29092"
+    networks:
+      clab:
+        ipv4_address: 172.20.20.60
     restart: unless-stopped
 
   # --- Traffic generator (Phase 2.2) -----------------------------------------

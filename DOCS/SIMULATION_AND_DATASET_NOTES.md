@@ -108,8 +108,8 @@ is a crossing of a partly modelled series.
 
 ### 1.5 Telemetry pipeline
 
-`telemetry/docker-compose.yml` — 10 services: victoriametrics, grafana, telegraf,
-nfacctd, loki, promtail, controller, ldp-metrics, env-metrics, trafficgen.
+`telemetry/docker-compose.yml` — 11 services: victoriametrics, grafana, telegraf,
+nfacctd, loki, promtail, controller, ldp-metrics, env-metrics, kafka, trafficgen.
 
 | pillar | path | cadence |
 |---|---|---|
@@ -118,6 +118,28 @@ nfacctd, loki, promtail, controller, ldp-metrics, env-metrics, trafficgen.
 | flows | pmacct `pmacctd` on every FRR node → nfacctd (IPFIX :4739) | purge-interval |
 | device health | `env-metrics.py` → POST `/api/v1/import/prometheus` | 30 s |
 | LDP | `telegraf/ldp-metrics.sh` → same import endpoint | 30 s |
+
+### 1.7 Streaming fan-out
+
+`streaming/bridge.py` reads the four sources above and publishes to Kafka; two
+consumer **groups** in `streaming/consume.py` then read independently — the
+predictive pipeline from the earliest offset (it replays history to fill feature
+windows), the copilot from the latest (it only wants current state). Separate
+`group.id` values mean separate committed offsets, so each gets a full copy and
+neither blocks the other.
+
+| topic | parts | retention | payload |
+|---|---|---|---|
+| `noc.metrics` | 6 | 1 day | the same canonical 40-column rows |
+| `noc.events` | 6 | 7 days | discrete routing events at **exact** timestamps, templated |
+| `noc.faults` | 3 | 30 days | orchestrator label rows |
+| `noc.topology` | 1 | 30 days | static graph + the controller's live path choices |
+
+Every record is keyed by `device`, which turns Kafka's per-partition ordering into
+a per-device ordering guarantee. `noc.events` exists because 30 s buckets cannot
+resolve a BGP reset and its reconvergence when both land in one bucket. Full detail,
+including two non-obvious failure modes (no cross-topic ordering; mixed timestamp
+formats) in `streaming/README.md`.
 
 ### 1.6 Modelled: chassis and optics
 

@@ -49,6 +49,7 @@ EXPECTED=(
   "grafana/promtail:3.1.0"
   "wbitt/network-multitool:alpine-minimal"
   "quay.io/frrouting/frr:10.5.1"
+  "apache/kafka:3.9.1"
 )
 MISSING=0
 for img in "${EXPECTED[@]}"; do

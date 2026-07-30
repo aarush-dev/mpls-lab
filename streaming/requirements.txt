@@ -1,0 +1,9 @@
+# Streaming bridge deps. Everything else it needs (pandas, pyarrow, httpx, PyYAML)
+# is already in dataapi/requirements.txt — bridge.py imports dataapi/export.py.
+#
+# AIR-GAP: pre-stage like the dataapi deps —
+#   pip download -r requirements.txt -d wheels/   (on a connected host)
+#   pip install --no-index --find-links wheels/
+# kafka-python is pure Python (no librdkafka build), which is why it is preferred
+# over confluent-kafka for an offline install.
+kafka-python>=2.0

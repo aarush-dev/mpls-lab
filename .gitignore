@@ -28,3 +28,6 @@ node_modules/
 
 # Windows WSL artifacts
 *:Zone.Identifier
+
+# streaming: python bytecode only; bridge.py/consume.py are source
+streaming/__pycache__/

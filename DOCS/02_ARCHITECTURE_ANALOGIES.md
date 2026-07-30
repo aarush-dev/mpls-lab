@@ -108,7 +108,7 @@ knobs:
   branch_count: 24   # small branch offices
   hub_count:    6    # regional hubs
   dc_count:     4    # datacenters
-# Total lab containers: 24 + 12 + 34 + 78 = 148  (~157 with telemetry/infra)
+# Total lab containers: 24 + 12 + 34 + 78 = 148  (~159 with telemetry/infra)
 ```
 
 A Jinja2 generator reads those numbers and automatically derives every IP address, BGP AS number, and config file for all 148 nodes. Change one number, regenerate, redeploy — the whole city resizes.

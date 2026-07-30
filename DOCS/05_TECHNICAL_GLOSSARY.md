@@ -211,7 +211,7 @@ The common identifier used to link data from different sources. In this lab, the
 ## Group 7: Containerlab & Lab Infrastructure
 
 **Containerlab**  
-A tool that orchestrates Docker containers as network nodes and wires them together with virtual Ethernet cables (veths). Rather than running routers on physical hardware, Containerlab runs them as lightweight containers, making it easy to create large topologies on a single machine. Containerlab reads a YAML file (`clab.yml`) that describes the nodes, links, and images, then uses Docker to spin them up and `ip link` to connect them. In this lab, all 148 lab containers (24 P + 12 PE + 34 CE + 78 hosts) are Containerlab containers; a further ~9 telemetry/infra containers bring the total to ~157.
+A tool that orchestrates Docker containers as network nodes and wires them together with virtual Ethernet cables (veths). Rather than running routers on physical hardware, Containerlab runs them as lightweight containers, making it easy to create large topologies on a single machine. Containerlab reads a YAML file (`clab.yml`) that describes the nodes, links, and images, then uses Docker to spin them up and `ip link` to connect them. In this lab, all 148 lab containers (24 P + 12 PE + 34 CE + 78 hosts) are Containerlab containers; a further ~11 telemetry/infra containers bring the total to ~159.
 
 **Docker**  
 A container runtime — a lightweight virtualization technology. Each container is an isolated Linux user space with its own filesystem, processes, and network namespace. A Docker image is a template (like a frozen VM disk image) that can be instantiated into many containers. In this lab, the FRR image (`frr-node:0.1`, based on FRR 10.x) is used for 70 router containers (24 P + 12 PE + 34 CE); the multitool image is used for 78 host containers. Containers are much lighter than VMs (seconds to boot, MB of RAM per container).
@@ -304,7 +304,7 @@ The entire system forms a data pipeline: **network simulation → fault injectio
 
 **Traffic simulation** starts: the trafficgen service (Python + Docker) drives realistic, diurnal flows across the network using `nc` or iperf3, causing interface counters to climb and nfacctd to see flows. Latency and jitter naturally increase as load increases, simulating realistic congestion curves.
 
-**Fault injection** adds the ground truth: the orchestrator (Python, in `faults/`) applies one of 21 fault scenarios — 12 edge/transient faults (congestion, BGP flap, tunnel degrade, policy drift, node failure, asymmetric loss, brownout, and others) plus 9 MPLS-core/catastrophic/correlated faults (p_node_failure, srlg_cut, core_congestion, ospf_area_flap, path_asymmetry, rr_failure, gray_failure, pop_isolation, core_partition). Injectors use native tools (`tc`/`netem` for delay/loss, `vtysh` for OSPF cost changes, `vtysh clear bgp` for flaps, `kill -9` for process crashes, `MultiLinkFault` for atomic multi-link teardown). Core link-sets are resolved from `topology-meta.json` at runtime. The orchestrator polls VictoriaMetrics to detect when the fault became observable in telemetry, records `t_start`, `t_impact`, `t_end`, and `lead_time`, and writes a label row to `labels.jsonl`.
+**Fault injection** adds the ground truth: the orchestrator (Python, in `faults/`) applies one of 21 fault scenarios — 12 edge/transient faults (congestion, BGP flap, tunnel degrade, policy drift, node failure, asymmetric loss, brownout, and others) plus 9 MPLS-core/catastrophic/correlated faults (p_node_failure, srlg_cut, core_congestion, ospf_area_flap, path_asymmetry, rr_failure, gray_failure, pop_isolation, core_partition). Injectors use native tools (`tc`/`netem` for delay/loss, `vtysh` for OSPF cost changes, `vtysh clear bgp` for flaps, `kill -9` for process crashes, `MultiLinkFault` for multi-link teardown, issued in sequence rather than atomically so OSPF sees the set drop staggered). Core link-sets are resolved from `topology-meta.json` at runtime. The orchestrator polls VictoriaMetrics to detect when the fault became observable in telemetry, records `t_start`, `t_impact`, `t_end`, and `lead_time`, and writes a label row to `labels.jsonl`.
 
 **Telemetry collection** runs continuously:
 - **Telegraf** polls SNMP on all 70 nodes every 30 seconds (interface counters, ARP table, BGP neighbor count) → VictoriaMetrics.
@@ -449,6 +449,51 @@ metric provides.
 (`q_backlog_bytes`, read from `tc -s qdisc`). The queue fills *before* latency
 rises and long before loss starts, so it leads `tunnel_latency_ms`. **Real**, not
 modelled.
+
+## Streaming terms
+
+**Consumer group** — a set of Kafka consumers sharing one `group.id` and one set
+of committed offsets. Two *different* groups reading one topic each receive a full,
+independent copy: this is the whole mechanism behind the predictive and copilot
+pipelines being decoupled (`streaming/consume.py`). Two consumers in the *same*
+group would split the partitions between them instead — a common mistake that
+silently halves each one's view.
+
+**Committed offset** — the per-(group, partition) position Kafka remembers as "this
+group has processed up to here." Restarting a consumer resumes there, which is why
+the predictive pipeline commits only *after* a feature window is built
+(`enable_auto_commit=False`): committing on receipt would lose training data on a
+restart mid-window.
+
+**Auto-offset-reset (earliest vs latest)** — where a group with no committed offset
+starts. `earliest` replays all retained history (predictive: it needs history to
+build windows); `latest` starts at the live tip (copilot: history is not its job).
+These two are incompatible in a single group, which is the reason there are two.
+
+**Partition key** — the record field Kafka hashes to choose a partition. Ordering
+is guaranteed *within* a partition only, so keying every record by `device` turns
+that into a per-device ordering guarantee. Round-robin (no key) would interleave a
+device's buckets across partitions and destroy window ordering.
+
+**Cross-topic ordering (the absence of it)** — Kafka provides no ordering between
+different topics. A consumer reading metrics and fault labels from two topics can
+see a label *after* the window it should have tagged; measured here as 4,000
+windows built with 0 labelled. Fixed by draining labels to their end offsets before
+windowing (`streaming/consume.py:drain_faults`).
+
+**KRaft** — Kafka's built-in Raft consensus mode, replacing the external ZooKeeper
+ensemble. One container instead of two, and one fewer config file to keep in the
+air-gap bundle.
+
+**Advertised listener** — the address Kafka hands a client *after* bootstrap, which
+the client then connects to directly. The broker runs two of them (in-lab
+`172.20.20.60:9092`, host `127.0.0.1:29092`) because a single advertised address
+cannot be routable from both the clab network and the host.
+
+**Log template / template_id** — a syslog line with its variable parts masked
+(`neighbor <IP> Down after <N> seconds`) plus a stable hash of the residue. Shipping
+templated events instead of raw text is 10–50× smaller and keeps log parsing out of
+the training loop (`streaming/bridge.py:templatize`).
 
 ## Related Documentation
 

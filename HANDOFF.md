@@ -16,13 +16,14 @@ A reproducible, air-gapped **Containerlab SD-WAN-over-MPLS** lab that produces r
 ## How it's built (component map)
 - **`generator/`** — `generate.py` + Jinja2 templates render the entire lab (`clab.yml` + all per-node FRR/snmpd/qos/wireguard config + the telemetry node-mappings) from `topology-spec.yaml`. Reads only `ce_asn_base` / `wg_overlay_subnet` / `wg_port` from the spec's addressing/underlay/overlay blocks — the rest of those blocks are reference-only comments, everything else is derived from node indices in `generate.py` itself (`generator/generate.py:22-30`). Idempotent; `--check` guards addressing.
 - **`frr-node/`** — the node image (FRR 10.5.1 + snmpd + pmacctd + tc + wireguard-go + rsyslog). Tag `frr-node:0.1`.
-- **`telemetry/`** — `docker-compose.yml`, 9 services on docker net `clab`: Telegraf (SNMP + scrape controller) → VictoriaMetrics; Grafana (11-panel NOC dashboard); pmacctd → nfacctd (IPFIX flows); FRR rsyslog → promtail → Loki. **Universal join key = `device`.**
+- **`telemetry/`** — `docker-compose.yml`, 11 services on docker net `clab`: Telegraf (SNMP + scrape controller) → VictoriaMetrics; Grafana (11-panel NOC dashboard); pmacctd → nfacctd (IPFIX flows); FRR rsyslog → promtail → Loki; `ldp-metrics` + `env-metrics` sidecars; Kafka (KRaft). **Universal join key = `device`.**
 - **`controller/`** — simulated SD-WAN controller. Tunnel RTT/loss/jitter is **modelled**, read back from the site's netem qdisc config, not independently measured (see escalation 1 below); Prometheus on :9362.
 - **`trafficgen/`** — diurnal per-VRF traffic (nc backend) so counters/flows move.
 - **`faults/`** — `injectors.py` (netem/flap/BGP/kill/rekey/drift, each reversible) + `orchestrator.py` (single scenarios + `--campaign` mode) writing the ground-truth **labels timeline** (joinable on device+time). 21 scenarios.
 - **`dataapi/`** — FastAPI (localhost): `/metrics /events /flows /labels /topology /datasets`; `export.py` joins everything → canonical 40-column Parquet (schema in `dataapi/schema/`). `ragcorpus/` seeds the RAG team.
 - **`synthetic/`** — `calibrate.py` (profile from real captures) + `generate.py` (ML-scale labeled time-series in the same canonical schema; `--scale`/`--days`).
 - **`airgap/`** — `pull-and-save.sh` / `load-offline.sh` / `verify-airgap.sh` (zero runtime egress).
+- **`streaming/`** — `bridge.py` (Kafka producer → `noc.metrics` / `noc.events` / `noc.faults` / `noc.topology`, keyed by `device`) + `consume.py` (two consumer groups: `noc-predictive` from earliest, `noc-copilot` from latest).
 
 ## Current state
 A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs across the generator, controller/faults, dataapi, synthetic, and telemetry/airgap subsystems. Full detail: the repair notes covering every changed behaviour. Topology and counts, re-derived from code:
@@ -34,13 +35,14 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 - **Overlay:** 168 spoke-hub WireGuard tunnels + 3 hub-hub, 28 spokes across 6 hubs.
 - **VRFs:** CORP / VOICE / GUEST. **ASNs:** branch 65101–65124, hub 65201–65206, dc 65301–65304.
 - **Faults:** 21 scenarios. 4 lost their probes and are now `impact_method: modelled` (not `vm_threshold`): `hub_spoke_congest`, `bgp_cascade`, `brownout`. New `impact_method: probe_unavailable` for empty-probe windows.
-- **Telemetry:** 9 compose services, 70 SNMP agents (all FRR nodes), 11 Grafana panels — all verified against actual metric emitters this pass.
+- **Telemetry:** 11 compose services, 70 SNMP agents (all FRR nodes), 11 Grafana panels — all verified against actual metric emitters this pass.
 - **Data schema:** 40 Parquet columns (was 21 pre-repair).
 - **Host:** 19 cores / 108 GB RAM / 1007 GB disk.
 
 ## What is verified vs. not
 - Verified this pass (by reading/re-deriving from code): the counts above, the fault `impact_method` changes, the dataset schema column count, the airgap compose `pull_policy: never` keys, Grafana panel-to-metric mapping.
 - **Verified against a live deploy on 2026-07-26.** Full 148-container lab + telemetry stack deployed; `env-metrics` sidecar exercised (three bugs found and fixed: OSPF LSA nesting under `areas`, queue iface hardcoded to `eth1`, `tc` `(dropped` token never parsed). Real 40-column dataset exported and `profile.json` recalibrated from that capture. Lab destroyed afterwards — `docker ps -a` returns none now.
+- **Streaming layer added (`streaming/`).** Kafka broker in the telemetry compose (KRaft, `noc-kafka`, 172.20.20.60:9092 in-lab / 127.0.0.1:29092 host); host-side producer `bridge.py` → 4 topics; two consumer groups in `consume.py`. Verified against the broker + the committed 49,844-row capture in replay mode (lab down): 4 topics with intended partitions/retention, 49,844 metric + 14 fault records in 7.5 s, 4,000 predictive windows of which 363 label-joined across 4 fault types, 49,858 records consumed by the copilot group with a rendered brief. Live paths (`noc.events` from Loki, `noc.topology` from topology-meta) are NOT verified — they need a deployed lab. See `streaming/README.md`.
 - Two reference datasets are committed and documented in **`DATASETS.md`** (real 49,844 rows; synthetic 2,589,120 rows, all 21 fault types). Everything else under `dataapi/datasets/` and `synthetic/output/` remains gitignored and stale — older files are 21-column pre-device-health and fail `check.py`.
 
 ## How to run / verify
@@ -60,11 +62,12 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 3. `t_impact` should be null on `probe_unavailable`, but `dataapi/export.py:206` would raise `TypeError` on that — needs an export change first.
 4. Generator should emit `p_pe_ifaces` directly rather than the orchestrator inferring P-PE links from link ordering.
 5. Telegraf's SNMP agent list and the generator have no single source of truth.
-6. The airgap image list is triplicated across `airgap/pull-and-save.sh`, `airgap/load-offline.sh`, `airgap/verify-airgap.sh` — cannot be derived from one place.
+6. The airgap image list is triplicated across `airgap/pull-and-save.sh`, `airgap/load-offline.sh`, `airgap/verify-airgap.sh` — cannot be derived from one place. (`apache/kafka:3.9.1` was added to all three by hand; the next image will need the same three edits.)
 7. Synthetic `flow_bytes`/`flow_packets` are null — needs new profile keys and a `calibrate.py` re-run against a live capture.
-8. New dependency `jsonschema` (`dataapi/requirements.txt:10`) must be added to the offline bundle.
+8. New dependencies `jsonschema` (`dataapi/requirements.txt:10`) and `kafka-python` (`streaming/requirements.txt`) must be added to the offline wheel bundle.
 9. **MPLS forwarding is impossible on this kernel.** `ip route add ... encap mpls` fails with `Error: CONFIG_LWTUNNEL is not enabled in this kernel.` Consequence on the live run: `Status: Label Changed Failed`, 114 OSPF routes but only 9 in pe1's FIB, iBGP VPNv4 stuck in `Connect`, `bgp_peer_established` = 0. Phase 0's check gives a **false pass** because `CONFIG_MPLS_ROUTING=y` and `modprobe mpls_router` succeeds. A `vrflite` fallback underlay is described in `topology-spec.yaml:52-53,239` but the generator never reads it — switching is real work, not a config flip.
-10. **Interface error counters are structurally dead in containers.** `if_in_errors`, `if_in_discards`, `if_out_errors` are constant 0 in the real capture: veth pairs produce no CRC/input errors. OIDs are wired correctly and will populate on real hardware. The literature's top-ranked failure signal is therefore unavailable in this lab.
+10. **The copilot has no inject-time signal.** `noc.faults` records are written at revert, so the copilot learns about an incident only after it ends (`streaming/consume.py:partition_faults` works around this with recency). Fix: publish the orchestrator's existing `campaign_inject` JSON to `noc.events` at inject time.
+11. **Interface error counters are structurally dead in containers.** `if_in_errors`, `if_in_discards`, `if_out_errors` are constant 0 in the real capture: veth pairs produce no CRC/input errors. OIDs are wired correctly and will populate on real hardware. The literature's top-ranked failure signal is therefore unavailable in this lab.
 
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the two reference Parquets in `DATASETS.md` are force-added and tracked.

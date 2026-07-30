@@ -11,7 +11,7 @@
 ## 0. Prerequisites
 
 The lab requires:
-- Linux host: ~108 GB RAM, 19 cores (148 lab containers (70 FRR + 78 hosts) + 9 telemetry/infra ≈ 157 total)
+- Linux host: ~108 GB RAM, 19 cores (148 lab containers (70 FRR + 78 hosts) + 11 telemetry/infra ≈ 159 total)
 - MPLS kernel modules: `mpls_router`, `mpls_gso`, `mpls_iptunnel`
 - Tools: `containerlab`, `docker`, `docker-compose`, `python3` with `pandas`, `fastapi`, `uvicorn`
 
@@ -55,7 +55,7 @@ sudo containerlab deploy --topo clab.yml --reconfigure
 ```bash
 cd /root/LAB/telemetry
 docker compose up -d
-# Expected: 6 containers running in ~10s
+# Expected: 11 containers running in ~10s
 # Check: docker compose ps
 ```
 
@@ -71,7 +71,7 @@ uvicorn app:app --host 127.0.0.1 --port 8000 &
 ```bash
 # Containers running
 docker ps | grep -E "tele-|clab-sdwan" | wc -l
-# Expected: ~157 (148 network + 9 telemetry)
+# Expected: ~159 (148 network + 11 telemetry)
 
 # Telemetry stack responsive
 curl -s http://172.20.20.50:8428/api/v1/status/tsdb | jq '.status'
@@ -929,6 +929,8 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_lsp_count%7Bdevice%3D%
 | **Controller** | noc-controller | 9362 | http://172.20.20.56:9362 | SD-WAN path selection (Prometheus metrics) |
 | **Traffic Gen** | noc-trafficgen | — | (internal) | Diurnal traffic simulator (drives flows) |
 | **Data API** | (host) | 8000 | http://127.0.0.1:8000 | ML-ready endpoints: /metrics, /flows, /labels, /datasets |
+| **Kafka** | noc-kafka | 9092 / 29092 | 172.20.20.60:9092 (in-lab), 127.0.0.1:29092 (host) | Streaming fan-out to the predictive + copilot pipelines |
+| **Kafka bridge** | (host) | — | — | Producer: VM/Loki/labels/topology → 4 topics (`streaming/start.sh`) |
 
 ### Most-Used Commands (One Per Line)
 
@@ -952,6 +954,14 @@ cd /root/LAB/faults && python3 orchestrator.py --campaign --duration 600 --mean-
 curl http://127.0.0.1:8000/labels | jq '.rows | length'
 curl -o dataset.parquet 'http://127.0.0.1:8000/datasets'
 cd /root/LAB/synthetic && python3 generate.py --days 7 --scale 3
+
+# Streaming (Kafka) — see streaming/README.md
+cd /root/LAB/telemetry && docker compose up -d kafka
+cd /root/LAB/streaming && ./start.sh                          # producer, live stack
+cd /root/LAB/streaming && python3 consume.py --pipeline predictive
+cd /root/LAB/streaming && python3 consume.py --pipeline copilot
+cd /root/LAB/streaming && python3 bridge.py --replay ../dataapi/datasets/*.parquet --speed 400  # no lab needed
+docker exec noc-kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server 127.0.0.1:9092 --describe --all-groups
 
 # Config
 cd /root/LAB/generator && python3 generate.py
@@ -977,6 +987,8 @@ cd /root/LAB/airgap && ./verify-airgap.sh
 | `/root/LAB/telemetry/env-metrics.py` | Device-health sidecar (real CPU/queue/routing + modelled sensors) | Add a device-scoped metric |
 | `/root/LAB/telemetry/grafana/dashboards/*.json` | Grafana panels | Customize dashboard visualizations |
 | `/root/LAB/synthetic/generate.py` | Synthetic data generator | Tweak diurnal curves or fault injection rates |
+| `/root/LAB/streaming/bridge.py` | Kafka producer (4 topics, keyed by device) | Add a topic or change a record shape |
+| `/root/LAB/streaming/consume.py` | The two consumer pipelines (predictive, copilot) | Change window length/stride or the copilot brief |
 | `/root/LAB/airgap/pull-and-save.sh` | Air-gap bundler | Update image list for new services |
 | `/root/LAB/airgap/verify-airgap.sh` | Air-gap validator | Change egress filter rules (rare) |
 

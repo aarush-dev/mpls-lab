@@ -20,7 +20,7 @@ From `topology-spec.yaml`, the generator emits:
 | CE | 34 (24 branch + 6 hub + 4 dc) | bgpd (per-VRF instance) | eBGP to PE; one `router bgp <asn> vrf vrf_<VRF>` per VRF. Kernel vrf devices bound via clab exec. |
 | host | 78 (1 per site-VRF) | none (multitool image) | Traffic source/sink. branch=2 VRFs, hub/dc=3 VRFs each. |
 
-FRR nodes: 24 P + 12 PE + 34 CE = **70**. Lab containers: 70 FRR + 78 hosts = **148**. Total including 9 telemetry/infra containers: **~157**. At 50–150 MB each — comfortable on 108 GB / 19 cores.
+FRR nodes: 24 P + 12 PE + 34 CE = **70**. Lab containers: 70 FRR + 78 hosts = **148**. Total including 11 telemetry/infra containers: **~159**. At 50–150 MB each — comfortable on 108 GB / 19 cores.
 
 ### Option A — per-VRF host separation (structural kernel VRF isolation)
 
@@ -626,3 +626,69 @@ are 21-column and predate both the 40-column feature set and the mandatory
 the current checker; other files in the same directory are already 40-column.
 Verify column count and run the relevant `check*.py` before using any shipped
 file rather than assuming freshness from the directory name.
+
+## Streaming layer (Kafka) — decisions
+
+**Why Kafka at all, given the Parquet path already exists.** The `/datasets`
+endpoint is a batch interface: it answers "give me the last hour." Neither
+downstream pipeline is batch. The predictive pipeline wants a continuously
+advancing window; the copilot wants current state. Polling the data API for both
+means two pollers, duplicated joins, and no replay when one falls behind.
+
+**Two consumer GROUPS, not two topics or two producers.** The two pipelines differ
+in exactly one dimension that matters — where they start reading. Predictive needs
+`earliest` (replay history to fill an L-bucket window); copilot needs `latest`
+(history is not its job). Those are incompatible inside one consumer group, and
+Kafka already solves it: separate `group.id` values get separate committed offsets
+over the same topics, so one producer feeds both and neither can block the other.
+Publishing twice, or to per-consumer topics, would double the volume and let the
+two views drift apart.
+
+**Records keyed by `device`.** Kafka guarantees order within a partition only. The
+predictive windower assumes a device's buckets arrive in production order, so the
+key must be the thing that ordering is needed over. An unkeyed (round-robin)
+producer would scatter one device's buckets across 6 partitions and silently
+corrupt every window.
+
+**Four topics, not one.** Different retention is the reason, not tidiness:
+`noc.metrics` is high-volume and only replayed by one consumer (1 day),
+`noc.faults` is the training target and must outlive both pipelines (30 days). One
+topic would force the longest retention on the largest stream. Auto-create is
+disabled on the broker so a typo cannot silently produce a 1-partition,
+default-retention topic and lose the ordering design.
+
+**`noc.events` exists because 30 s buckets hide the signal.** A BGP session reset,
+hold-timer expiry and reconvergence can all complete inside one bucket, so
+`bgp_msg_rx` averaged over 30 s cannot show them. Events ship with exact
+timestamps. They are also templated at extraction (`bridge.templatize`) rather than
+shipped raw: matched lines drop their text entirely, unmatched lines keep it so the
+mask set can be tuned against real unmatched volume.
+
+**Producer runs on the host, not in a container.** It imports `dataapi/export.py`
+for the metric maps and column list, so containerising it would mean either a new
+image carrying pandas/pyarrow or a second copy of the schema. Running it beside
+`dataapi/start.sh` costs one dependency (`kafka-python`, pure Python — no
+librdkafka to build offline) and keeps the schema single-sourced.
+
+**Labels are drained to completion before windowing, and re-read on every start.**
+Kafka has no cross-topic ordering, so a consumer subscribed to both metrics and
+labels can receive a label after the window it should have tagged — measured as
+4,000 windows built, 0 labelled. `drain_faults()` reads `noc.faults` to its
+captured end offsets first, via `assign()` with no group: labels are small and
+idempotent, so re-reading them beats tracking a cursor and guarantees a restart
+never trains on a partial label set.
+
+**Timestamps are compared as parsed epochs, never as strings.** The orchestrator
+writes `2026-07-26T02:22:30Z`; a pandas-sourced value stringifies as
+`2026-07-26 02:22:30+00:00`. `' ' < 'T'` in ASCII, so a string comparison in the
+window/fault overlap test returns the wrong answer whenever both formats are in
+play.
+
+**The copilot's incident state is classified by recency, not by `t_end`.** The
+orchestrator writes its label row exactly once, in the `finally` block at revert
+(`faults/orchestrator.py:689-707`), so any record on `noc.faults` describes a fault
+that has already ended. Treating "no `t_end`" as "open" would therefore report
+every real incident as resolved. Recency is the honest proxy. A genuinely live
+incident view needs the orchestrator to publish its existing `campaign_inject`
+event — it already prints that JSON at inject time, it just never reaches a topic.
+That is a known gap, not a design choice.
