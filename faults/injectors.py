@@ -114,13 +114,23 @@ class NetemImpair:
                 "delay_ms": self.delay_ms, "jitter_ms": self.jitter_ms,
                 "loss_pct": self.loss_pct, "rate_kbit": self.rate_kbit}
 
-    def ramp(self, steps=6, step_seconds=10.0, on_step=None):
+    def ramp(self, steps=6, step_seconds=10.0, on_step=None, total_seconds=None):
         """Gradually increase impairment from 0 to target over `steps`.
 
         Simulates congestion building up (queue fills, then loss starts). Calls
         on_step(i, frac) after each step if provided (lets the orchestrator poll
         telemetry mid-ramp). Returns the apply() descriptor of the final step.
+
+        DEFECT 1b: `total_seconds` sets the WALL DURATION of the whole ramp, so
+        the orchestrator can make it equal the lead it drew from
+        faults/leadpriors.py. Without it the ramp was a fixed ~4 buckets whatever
+        the label said, which makes the lead unpredictable from telemetry.
+        Rate stays excluded from the ramp (a cap is binary).
         """
+        if total_seconds is not None:
+            # steps-1 sleeps happen (none after the final step), so divide by
+            # that to make the elapsed ramp equal total_seconds.
+            step_seconds = max(0.0, float(total_seconds) / max(1, steps - 1))
         desc = None
         for i in range(1, steps + 1):
             frac = i / steps

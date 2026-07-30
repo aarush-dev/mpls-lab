@@ -40,6 +40,10 @@ COLUMNS = [
     "if_in_octets", "if_out_octets", "if_oper_status",
     "tunnel_latency_ms", "tunnel_jitter_ms", "tunnel_loss_pct", "tunnel_rekeys",
     "flow_bytes", "flow_packets",
+    # DEFECT 5b/6a: these four keep their original names and positions and now
+    # hold the PRIMARY (highest-severity) episode; the full concurrent set is in
+    # the list columns at the end. `severity` is an ordinal float, not a string
+    # -- the string is kept in `severity_label`.
     "is_fault", "scenario_id", "fault_type", "severity",
     "lead_time_s", "time_to_impact_s",
     # --- interface-scoped additions (entity_type == "interface") ---
@@ -50,7 +54,21 @@ COLUMNS = [
     "cpu_pct", "mem_pct",
     "bgp_msg_rx", "bgp_msg_tx", "rib_routes", "ospf_lsa_count",
     "device_temp_c", "device_power_watts", "device_fan_rpm", "device_psu_voltage_v",
+    # --- DEFECT 5b: concurrent-fault supervision -------------------------------
+    # Overlapping episodes on one row are all emitted instead of collapsing to
+    # the highest-severity one. Every list is index-aligned across the five, and
+    # element 0 is the primary (the scalars above).
+    "fault_types", "severities", "scenario_ids", "impact_methods", "n_concurrent",
+    # DEFECT 6a: string severity kept for humans; explicit primary aliases so a
+    # reader does not have to know that the legacy scalar names ARE the primary.
+    "severity_label",
+    "fault_type_primary", "severity_primary", "scenario_id_primary",
 ]
+
+# DEFECT 6a: ordinal severity. A magnitude the loss function can use, with the
+# convention that severity is NULL for scenarios whose injector ignores it
+# (faults/orchestrator.py:_label_row) preserved -- null stays null.
+SEVERITY_ORDINAL = {"low": 0.33, "medium": 0.66, "high": 1.0}
 
 # entity_type values and what carries their metrics:
 #   "interface"  one row per (device, physical interface) -- SNMP IF-MIB counters,
@@ -180,6 +198,35 @@ def _flow_bucketed(start, end, step):
 
 _SEV_RANK = {"low": 1, "medium": 2, "high": 3}
 
+# DEFECT 3: the VRF a VRF-scoped interface belongs to. The SNMP pillar carries no
+# `vrf` label, so the identity has to come from the interface name -- CEs run
+# `vrf_CORP`-style kernel VRF devices, PEs name theirs after the VRF itself. It
+# used to leak into `entity` while the dedicated column stayed 100% null.
+_VRF_NAMES = ("CORP", "VOICE", "GUEST")
+
+
+def vrf_of_entity(entity):
+    """VRF for an interface-like entity name, or None where VRF has no meaning
+    (physical eth*, lo, wg0, and every P-router interface)."""
+    e = str(entity)
+    if e.startswith("vrf_") and e[4:] in _VRF_NAMES:
+        return e[4:]
+    return e if e in _VRF_NAMES else None
+
+
+def tunnel_vrf_set(vrfs):
+    """VRF label for a tunnel row.
+
+    A WireGuard tunnel is shared: every VRF of the site rides it, and under
+    failover a non-preferred hub carries them too (controller.VRF_PREFERRED_HUB
+    is a preference, not a binding). So the honest value is the SET, joined --
+    `CORP+VOICE` on a branch, `CORP+GUEST+VOICE` on a hub/dc. Naming one VRF per
+    tunnel would be a fabrication, and splitting tunnel rows per VRF would change
+    the row-count arithmetic (899 keys/bucket) the consumers depend on.
+    """
+    present = sorted(v for v in _VRF_NAMES if v in set(vrfs or ()))
+    return "+".join(present) or None
+
 
 def _apply_labels(df, step):
     """LEFT-join the fault timeline on device + bucket-interval overlap.
@@ -187,54 +234,166 @@ def _apply_labels(df, step):
     A row covers [ts, ts+step); it is faulty if that interval overlaps the
     label's [t_start, t_end]. Instant containment (ts in [t_start, t_end])
     would drop every window narrower than `step` -- most of the label file.
+
+    DEFECT 5b: every overlapping label is emitted, not just the highest-severity
+    one. Collapsing to a single winner was deterministic but threw away the
+    concurrency the consumer's multi-label head is built to learn.
     """
     labels = sources.label_rows()
-    df["is_fault"] = False
-    for c in ["scenario_id", "fault_type", "severity"]:
-        df[c] = pd.NA
-    df["lead_time_s"] = pd.NA
-    df["time_to_impact_s"] = pd.NA
-    if df.empty or not labels:
-        return df
+    n = len(df)
+    acc = [[] for _ in range(n)]  # per-row list of episode dicts
+    if not df.empty and labels:
+        epoch = df["ts"].map(_parse_iso).to_numpy()
+        for lab in labels:
+            dev = lab.get("device")
+            try:
+                t0 = _parse_iso(lab["t_start"])
+                t_end = _parse_iso(lab["t_end"])
+                t_imp = _parse_iso(lab["t_impact"])
+            except (KeyError, ValueError):
+                continue
+            mask = (df["device"] == dev) & (epoch + step > t0) & (epoch <= t_end)
+            # entity-scoped faults hit their own interface, not every interface on
+            # the box; tunnel/device rows stay in scope (genuinely affected).
+            # target is either a dict {device, interface|neighbor|vrf} or a bare
+            # device-name string (13 of the labels); only the former narrows scope.
+            target = lab.get("target")
+            tgt = target.get("interface") if isinstance(target, dict) else None
+            if tgt:
+                mask &= (df["entity"] == tgt) | (df["entity_type"] != "interface")
+            idx = mask.to_numpy().nonzero()[0]
+            if not len(idx):
+                continue
+            sev = lab.get("severity")
+            for i in idx:
+                acc[i].append({
+                    "scenario_id": lab.get("scenario_id"),
+                    "fault_type": lab.get("type"),
+                    "severity": SEVERITY_ORDINAL.get(sev),
+                    "severity_label": sev,
+                    "rank": _SEV_RANK.get(sev, 0),
+                    "lead_time_s": lab.get("lead_time"),
+                    "time_to_impact_s": round(t_imp - float(epoch[i]), 1),
+                    "impact_method": lab.get("impact_method"),
+                })
+    return attach_labels(df, acc)
 
-    df["_epoch"] = df["ts"].map(_parse_iso)
-    for lab in labels:
-        dev = lab.get("device")
-        try:
-            t0 = _parse_iso(lab["t_start"])
-            t_end = _parse_iso(lab["t_end"])
-            t_imp = _parse_iso(lab["t_impact"])
-        except (KeyError, ValueError):
+
+def attach_labels(df, acc):
+    """Write the label columns from a per-row list of episode dicts.
+
+    Shared with synthetic/generate.py so the two paths cannot produce different
+    label schemas. Primary = highest severity, ties broken by the first episode
+    seen, and it is placed at index 0 of every list so element 0 is always the
+    primary.
+    """
+    cols = {c: [] for c in ("is_fault", "scenario_id", "fault_type", "severity",
+                            "severity_label", "lead_time_s", "time_to_impact_s",
+                            "fault_types", "severities", "scenario_ids",
+                            "impact_methods", "n_concurrent")}
+    for eps in acc:
+        if not eps:
+            cols["is_fault"].append(False)
+            for c in ("scenario_id", "fault_type", "severity", "severity_label",
+                      "lead_time_s", "time_to_impact_s", "fault_types", "severities",
+                      "scenario_ids", "impact_methods"):
+                cols[c].append(None)
+            cols["n_concurrent"].append(0)
             continue
-        mask = (df["device"] == dev) & (df["_epoch"] + step > t0) & (df["_epoch"] <= t_end)
-        # entity-scoped faults hit their own interface, not every interface on
-        # the box; tunnel/device rows stay in scope (genuinely affected).
-        # target is either a dict {device, interface|neighbor|vrf} or a bare
-        # device-name string (13 of the labels); only the former narrows scope.
-        target = lab.get("target")
-        tgt = target.get("interface") if isinstance(target, dict) else None
-        if tgt:
-            mask &= (df["entity"] == tgt) | (df["entity_type"] != "interface")
-        if not mask.any():
-            continue
-        # overlapping windows: keep the highest-severity label as primary rather
-        # than whichever happened to come last in the file.
-        clash = mask & df["is_fault"]
-        if clash.any():
-            print(f"WARN: {int(clash.sum())} rows already labelled "
-                  f"{sorted(df.loc[clash, 'scenario_id'].dropna().unique())}; "
-                  f"{lab.get('scenario_id')} overlaps", file=sys.stderr)
-            keep = df.loc[clash, "severity"].map(_SEV_RANK).fillna(0) >= \
-                _SEV_RANK.get(lab.get("severity"), 0)
-            mask &= ~mask.index.isin(keep[keep].index)
-        df.loc[mask, "is_fault"] = True
-        df.loc[mask, "scenario_id"] = lab.get("scenario_id")
-        df.loc[mask, "fault_type"] = lab.get("type")
-        df.loc[mask, "severity"] = lab.get("severity")
-        df.loc[mask, "lead_time_s"] = lab.get("lead_time")
-        # time_to_impact_s: seconds from this bucket until t_impact (>=0 before impact)
-        df.loc[mask, "time_to_impact_s"] = (t_imp - df.loc[mask, "_epoch"]).round(1)
-    df.drop(columns=["_epoch"], inplace=True)
+        eps = sorted(eps, key=lambda e: -e["rank"])
+        p = eps[0]
+        cols["is_fault"].append(True)
+        cols["scenario_id"].append(p["scenario_id"])
+        cols["fault_type"].append(p["fault_type"])
+        cols["severity"].append(p["severity"])
+        cols["severity_label"].append(p["severity_label"])
+        cols["lead_time_s"].append(p["lead_time_s"])
+        cols["time_to_impact_s"].append([e["time_to_impact_s"] for e in eps])
+        cols["fault_types"].append([e["fault_type"] for e in eps])
+        cols["severities"].append([e["severity"] for e in eps])
+        cols["scenario_ids"].append([e["scenario_id"] for e in eps])
+        cols["impact_methods"].append([e["impact_method"] for e in eps])
+        cols["n_concurrent"].append(len(eps))
+    for c, v in cols.items():
+        df[c] = v
+    df["fault_type_primary"] = df["fault_type"]
+    df["severity_primary"] = df["severity"]
+    df["scenario_id_primary"] = df["scenario_id"]
+    return df
+
+
+# DEFECT 6b: ts is a real timestamp, not a string. 2.6M ISO strings parsed on
+# every training epoch is pure overhead, and a timestamp type lets a loader check
+# monotonicity without a parse.
+_LIST_COLS = ("fault_types", "severities", "scenario_ids", "impact_methods",
+              "time_to_impact_s")
+_FLOAT_COLS = ("if_in_octets", "if_out_octets", "if_oper_status",
+               "tunnel_latency_ms", "tunnel_jitter_ms", "tunnel_loss_pct",
+               "tunnel_rekeys", "flow_bytes", "flow_packets", "lead_time_s",
+               "severity", "severity_primary",
+               "if_in_errors", "if_in_discards", "if_out_errors", "if_out_discards",
+               "q_backlog_bytes", "q_drops",
+               "xcvr_temp_c", "xcvr_rx_power_dbm", "xcvr_tx_bias_ma",
+               "cpu_pct", "mem_pct", "bgp_msg_rx", "bgp_msg_tx",
+               "rib_routes", "ospf_lsa_count",
+               "device_temp_c", "device_power_watts", "device_fan_rpm",
+               "device_psu_voltage_v")
+
+
+def precursor_mask(df):
+    """Rows whose label set contains at least one pre-impact episode.
+
+    `time_to_impact_s` is a LIST per row since DEFECT 5b, so `> 0` no longer
+    works on it -- every reader that used to do that needs this instead.
+    """
+    return df["is_fault"].fillna(False).astype(bool) & df["time_to_impact_s"].map(
+        lambda v: bool(v is not None and not isinstance(v, float)
+                       and any((x or 0) > 0 for x in v)))
+
+
+def finalize_schema(df):
+    """Canonical column order + dtypes. Both the real and synthetic paths call
+    this, so a dtype can never diverge between them (check.py gate 6)."""
+    for c in COLUMNS:
+        if c not in df.columns:
+            df[c] = pd.NA
+    df = df[COLUMNS].copy()
+    df["ts"] = pd.to_datetime(df["ts"], utc=True).astype("datetime64[us, UTC]")
+    df["is_fault"] = df["is_fault"].fillna(False).astype(bool)
+    df["n_concurrent"] = pd.to_numeric(df["n_concurrent"], errors="coerce") \
+        .fillna(0).astype("int8")
+    for c in _FLOAT_COLS:
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype("float64")
+    for c in ("scenario_id", "fault_type", "severity_label", "vrf",
+              "fault_type_primary", "scenario_id_primary") + _LIST_COLS:
+        df[c] = df[c].astype("object")
+    return df.sort_values(["ts", "device", "entity"]).reset_index(drop=True)
+
+
+def _site_vrfs():
+    """{device: [vrf, ...]} from the generated topology, for the tunnel rows.
+    Empty dict if topology-meta is absent -- then tunnel vrf stays null rather
+    than being guessed."""
+    try:
+        meta = sources.topology_graph()
+    except Exception:  # no generated topology (e.g. synthetic-only host)
+        return {}
+    return {n["id"]: n["vrfs"] for n in (meta or {}).get("nodes", []) if n.get("vrfs")}
+
+
+def _fill_vrf(df):
+    """DEFECT 3: populate `vrf` wherever VRF is meaningful, leave it null where
+    it is not (physical interfaces, device rows)."""
+    if df.empty:
+        return df
+    sv = _site_vrfs()
+    have = df["vrf"].notna() if "vrf" in df.columns else pd.Series(False, index=df.index)
+    iface = (df["entity_type"] == "interface") & ~have
+    df.loc[iface, "vrf"] = df.loc[iface, "entity"].map(vrf_of_entity)
+    tun = (df["entity_type"] == "tunnel") & ~have
+    if tun.any() and sv:
+        df.loc[tun, "vrf"] = df.loc[tun, "device"].map(
+            lambda d: tunnel_vrf_set(sv.get(d)))
     return df
 
 
@@ -259,12 +418,8 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
                          ignore_index=True)
 
     base = _apply_labels(base, step)
-
-    # ensure all canonical columns exist, in order
-    for c in COLUMNS:
-        if c not in base.columns:
-            base[c] = pd.NA
-    base = base[COLUMNS].sort_values(["ts", "device", "entity"]).reset_index(drop=True)
+    base = _fill_vrf(base)
+    base = finalize_schema(base)
 
     fname = f"dataset_{start}_{end}_{step}s.parquet"
     path = os.path.join(DATASETS_DIR, fname)

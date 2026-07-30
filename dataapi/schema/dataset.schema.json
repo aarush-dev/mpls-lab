@@ -5,10 +5,10 @@
   "type": "object",
   "required": ["ts", "device", "entity", "entity_type", "is_fault"],
   "properties": {
-    "ts":                {"type": "string", "description": "UTC ISO-8601 …Z bucket start"},
+    "ts":                {"type": "string", "description": "UTC bucket start. Parquet type is timestamp[us, tz=UTC]; this schema validates the JSON projection, where it is ISO-8601 …Z text"},
     "device":            {"type": "string", "description": "node name — join key"},
     "site_type":         {"type": ["string", "null"], "enum": ["branch", "hub", "dc", "core", "pe", null]},
-    "vrf":               {"type": ["string", "null"], "description": "VRF name on CE vrf_* pseudo-interfaces; null elsewhere"},
+    "vrf":               {"type": ["string", "null"], "description": "VRF on VRF-scoped interface rows; on tunnel rows the '+'-joined SET of VRFs riding that tunnel (a tunnel is shared); null on physical interfaces and device rows"},
     "entity":            {"type": "string", "description": "interface name, tunnel id, or the device name on entity_type=device rows"},
     "entity_type":       {"type": "string", "enum": ["interface", "tunnel", "device"]},
 
@@ -25,11 +25,11 @@
     "flow_packets":      {"type": ["number", "null"], "description": "device-wide, carried on the entity_type=device row only"},
 
     "is_fault":          {"type": "boolean"},
-    "scenario_id":       {"type": ["string", "null"]},
-    "fault_type":        {"type": ["string", "null"]},
-    "severity":          {"type": ["string", "null"], "enum": ["low", "medium", "high", null]},
-    "lead_time_s":       {"type": ["number", "null"]},
-    "time_to_impact_s":  {"type": ["number", "null"]},
+    "scenario_id":       {"type": ["string", "null"], "description": "PRIMARY (highest-severity) episode; full set in scenario_ids"},
+    "fault_type":        {"type": ["string", "null"], "description": "primary episode's type"},
+    "severity":          {"type": ["number", "null"], "description": "ordinal magnitude 0.33/0.66/1.0 of the primary episode; null when the injector ignores severity. String form in severity_label"},
+    "lead_time_s":       {"type": ["number", "null"], "description": "primary episode's lead; drawn per episode from faults/leadpriors.py"},
+    "time_to_impact_s":  {"type": ["array", "null"], "items": {"type": ["number", "null"]}, "description": "one entry per concurrent episode, index-aligned with the other list columns; element 0 is the primary"},
 
     "if_in_errors":      {"type": ["number", "null"]},
     "if_in_discards":    {"type": ["number", "null"]},
@@ -50,6 +50,16 @@
     "device_temp_c":        {"type": ["number", "null"]},
     "device_power_watts":   {"type": ["number", "null"]},
     "device_fan_rpm":       {"type": ["number", "null"]},
-    "device_psu_voltage_v": {"type": ["number", "null"]}
+    "device_psu_voltage_v": {"type": ["number", "null"]},
+
+    "fault_types":        {"type": ["array", "null"], "items": {"type": ["string", "null"]}, "description": "every episode overlapping this row; element 0 is the primary"},
+    "severities":         {"type": ["array", "null"], "items": {"type": ["number", "null"]}, "description": "ordinal severities, index-aligned with fault_types"},
+    "scenario_ids":       {"type": ["array", "null"], "items": {"type": ["string", "null"]}, "description": "the train/test split key -- unique per injection"},
+    "impact_methods":     {"type": ["array", "null"], "items": {"type": ["string", "null"]}, "description": "how each episode's t_impact was established: vm_threshold | ramp_derived | modelled_fallback | probe_unavailable | modelled"},
+    "n_concurrent":       {"type": "integer", "description": "length of the list columns; 0 on healthy rows"},
+    "severity_label":     {"type": ["string", "null"], "enum": ["low", "medium", "high", null], "description": "primary episode's severity as a string"},
+    "fault_type_primary":  {"type": ["string", "null"]},
+    "severity_primary":    {"type": ["number", "null"]},
+    "scenario_id_primary": {"type": ["string", "null"]}
   }
 }

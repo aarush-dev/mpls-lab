@@ -420,9 +420,11 @@ curl 'http://127.0.0.1:8000/topology' | jq '.nodes[] | select(.role == "PE") | .
 curl -o dataset.parquet 'http://127.0.0.1:8000/datasets'
 # Downloads the most recent labeled Parquet to ./dataset.parquet
 # EXECUTED: the one committed real dataset is
-#   dataapi/datasets/dataset_1785032386_1785033870_30s.parquet  (586 KB, 49,844 rows, 40 cols)
-# It is the only local capture on the current 40-col schema; other cached files in
-# that dir are stale 21-column pre-device-health datasets and FAIL validation.
+#   dataapi/datasets/dataset_1785032386_1785033870_30s.parquet  (49,844 rows, 49 cols,
+#   391 fault rows, 266 precursors) -- re-joined onto the current schema in place by
+#   `python3 dataapi/reschema.py <file>`; metric columns untouched.
+# It is the only local capture on the current schema; other cached files in that dir
+# are stale 21-column pre-device-health datasets and FAIL validation.
 # Committed reference datasets are catalogued in DATASETS.md.
 ```
 
@@ -433,7 +435,7 @@ START=$(date -d '1 hour ago' +%s)
 END=$(date +%s)
 curl -o dataset_fresh.parquet "http://127.0.0.1:8000/datasets?start=${START}&end=${END}&step=30&build=true"
 
-# Expected: joins metrics + flows + events + labels into one table, 40 columns
+# Expected: joins metrics + flows + events + labels into one table, 49 columns
 # Size: ~500K–2M rows per hour (depends on step size and fault count)
 ```
 
@@ -446,13 +448,14 @@ curl -o dataset_fresh.parquet "http://127.0.0.1:8000/datasets?start=${START}&end
 import pandas as pd
 
 df = pd.read_parquet("dataset.parquet")
-print(df.shape)  # (N rows, 40 columns)
+print(df.shape)  # (N rows, 49 columns)
 print(df.columns.tolist())
 # ['ts', 'device', 'site_type', 'vrf', 'entity', 'entity_type',
 #  'if_in_octets', 'if_out_octets', 'if_oper_status',
 #  'tunnel_latency_ms', 'tunnel_jitter_ms', 'tunnel_loss_pct', 'tunnel_rekeys',
 #  'flow_bytes', 'flow_packets',
 #  'is_fault', 'scenario_id', 'fault_type', 'severity', 'lead_time_s', 'time_to_impact_s',
+#  ... 'fault_types', 'severities', 'scenario_ids', 'impact_methods', 'n_concurrent',
 #  ... + 19 more device-health/environmental columns, see Section 12 schema block]
 ```
 
@@ -570,8 +573,9 @@ python3 generate.py --days 7 --step 30 --scale 3
 ### Scale down (1 day, 1x, test):
 ```bash
 cd /root/LAB/synthetic
-python3 generate.py --days 1 --scale 1
-# EXECUTED: rows=2,589,120, ~47MB, wall time 1m14s
+python3 generate.py --days 1 --step 30 --scale 3.0
+# EXECUTED: rows=2,589,120, fault_rows=159,021 (6.14%), precursor_rows=124,108,
+# max_concurrent=3, 48MB, wall time 2m25s -- this is the shipped train file
 ```
 
 ### Adjust parameters
@@ -586,11 +590,13 @@ python3 generate.py --days 1 --step 60  # 1-minute buckets
 ### Independent holdout (`--seed`, default 42)
 ```bash
 cd /root/LAB/synthetic
-python3 generate.py --days 0.5 --step 30 --scale 3.0 --seed 7
-# EXECUTED: rows=1,294,560, fault_rows=36,965 (2.86%), precursor_rows=15,532,
-# 23.7MB, wall time 41s, all 21 fault types, check.py OK
-# Located: output/synthetic_1781481600_d0.5_s30_x3.0_seed7.parquet
-# 0 scenario_id overlap with the seed-42 file -> split on scenario_id, not time.
+python3 generate.py --days 1 --step 30 --scale 3.0 --seed 7
+# EXECUTED: rows=2,589,120, fault_rows=156,054 (6.03%), precursor_rows=122,627,
+# max_concurrent=3, 48MB, wall time 2m25s, all 21 fault types, check.py OK
+# Located: output/synthetic_1781481600_d1.0_s30_x3.0_seed7.parquet
+# 0 scenario_id overlap with the seed-42 file (719 vs 720 episodes) -> split on
+# scenario_id, not time. Same --days as train, so the holdout does not also
+# change time-of-day coverage.
 # Same --days/--step/--scale/--seed reruns byte-identical; the _seed<N> filename
 # suffix and the Parquet `seed` metadata key appear for any seed but 42.
 ```
@@ -1004,7 +1010,7 @@ cd /root/LAB/airgap && ./verify-airgap.sh
 | `/root/LAB/airgap/pull-and-save.sh` | Air-gap bundler | Update image list for new services |
 | `/root/LAB/airgap/verify-airgap.sh` | Air-gap validator | Change egress filter rules (rare) |
 
-### Dataset Schema (40 columns)
+### Dataset Schema (49 columns)
 
 ```
 ts, device, site_type, vrf, entity, entity_type,
@@ -1018,8 +1024,15 @@ q_backlog_bytes, q_drops,
 xcvr_temp_c, xcvr_rx_power_dbm, xcvr_tx_bias_ma,
 # device-scoped (entity_type == "device")
 cpu_pct, mem_pct, bgp_msg_rx, bgp_msg_tx, rib_routes, ospf_lsa_count,
-device_temp_c, device_power_watts, device_fan_rpm, device_psu_voltage_v
+device_temp_c, device_power_watts, device_fan_rpm, device_psu_voltage_v,
+# concurrent-fault supervision (index-aligned lists, element 0 = primary)
+fault_types, severities, scenario_ids, impact_methods, n_concurrent,
+severity_label, fault_type_primary, severity_primary, scenario_id_primary
 ```
+
+`ts` is `timestamp[us, tz=UTC]`. `severity` is an ordinal float (0.33/0.66/1.0);
+`severity_label` keeps the string. `time_to_impact_s` is a LIST — one entry per
+concurrent episode — so use `export.precursor_mask(df)` instead of `> 0`.
 
 **Join key for all telemetry:** `device` (e.g., "ce_branch1", "pe1", "p3")
 

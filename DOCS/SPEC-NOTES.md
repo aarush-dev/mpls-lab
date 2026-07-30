@@ -616,14 +616,11 @@ really happened in the lab — floor it rather than ship unlearnable positives.
 **Both `dataapi/datasets/` and `synthetic/output/` are a mix of stale and current
 files — check each before trusting it.** 4 of the 5 `dataapi/datasets/*.parquet`
 files are pre-repair 21-column exports and fail `check_dataset.py`'s schema
-check; only `dataset_1785032386_1785033870_30s.parquet` (40 columns) passes.
+check; only `dataset_1785032386_1785033870_30s.parquet` passes (49 columns after
+`reschema.py` re-joined its labels).
 One of the 4 stale files, `dataset_1782715445_1782719045_30s.parquet`, also has
 `is_fault.sum() == 0` — a relic of the pre-fix single-bucket-instant label join.
-`synthetic/output/` is similarly mixed: several files (including the largest,
-`synthetic_..._d7.0_s30_x3.0.parquet`, 8,890,560 rows from `--days 7 --scale 3`)
-are 21-column and predate both the 40-column feature set and the mandatory
-`synthetic=true` Parquet metadata `check.py` gate 0 now requires, so they fail
-the current checker; other files in the same directory are already 40-column.
+`synthetic/output/` was cleaned out: every file lacking `seed` + `calibrated_from` file metadata was deleted (14 of 16), leaving only the two shipped one-day files, and `check.py` now asserts both keys are present.
 Verify column count and run the relevant `check*.py` before using any shipped
 file rather than assuming freshness from the directory name.
 
@@ -713,3 +710,120 @@ not a behaviour change. Row counts, schema and distributions are unchanged.
 the same `profile.json`, so their distributions are shared by construction. Seed 7
 shares zero `scenario_id` values with seed 42, which makes it a clean episode-level
 holdout — it does not test generalisation to a different network.
+
+## Lead-time priors, theta_SLA, and the deliberately-zero counters
+
+Six defects found by an audit of the three shipped Parquets. Full acceptance output
+in the commit body; the gate is `synthetic/verify_fixes.py`.
+
+### `lead_time_s` is now a per-type prior, not a calibrated value
+
+`calibrate.py` used to overwrite `lead_s` with the median `lead_time_s` of the real
+capture. That capture is 24.5 minutes at 30 s resolution, which cannot estimate a
+lead; it produced ~2 s for most types, and the generator's 4-bucket safety floor
+then clamped **every** draw to exactly 120 s. Shipped result: `lead_time_s` CV 0.03,
+9 distinct values across 668 episodes, and 98.2% of precursor rows carrying one of
+four `time_to_impact_s` values. A discrete-time hazard head cannot learn a
+distribution from a constant.
+
+`faults/leadpriors.py` now owns the priors, in **buckets** so they survive a `--step`
+change, drawn lognormal with p10/p90 pinned to the range:
+
+| group | buckets | at step=30s | reasoning |
+|---|---|---|---|
+| `bgp_flap` `ldp_session_flap` `node_failure` `rr_failure` `p_node_failure` `ospf_area_flap` `bgp_cascade` | 4–10 | 2–5 min | control-plane churn is visible only shortly before the session actually drops |
+| `congestion` `core_congestion` `hub_spoke_congest` `brownout` | 10–40 | 5–20 min | queues fill slowly; the longest genuinely-observable dataplane precursor |
+| `tunnel_degrade` `asymmetric_loss` `policy_drift` `path_asymmetry` `controller_drift` | 8–30 | 4–15 min | overlay/policy degradation, medium horizon |
+| `mpls_underlay_failure` `pop_isolation` `core_partition` `srlg_cut` | 6–20 | 3–10 min | some IGP/LDP warning, then the path is gone |
+| `gray_failure` | 20–80 | 10–40 min | physical-layer decay — the longest horizon, and why the SFF-8472 columns exist |
+
+The p10 of the 4–10 group is lifted to 1.15× the floor: pinning it exactly at 4
+buckets makes the safety net fire on ~10% of that group, and a net catching a tenth
+of all draws is shaping the distribution rather than guarding it. The generator
+**warns** if the floor fires on >5% of episodes, so this regression cannot recur
+silently. A measured median is kept as `lead_s_hint` only when the capture spans a
+full `DIURNAL_PERIOD` — never as the value.
+
+Both paths draw from this one module: the generator for the synthetic ramp, and
+`faults/orchestrator.draw_ramp_seconds` for the live netem ramp
+(`injectors.NetemImpair.ramp(total_seconds=...)`). Live leads are capped at 0.7 ×
+`--duration` so a ramp cannot outlast its own fault; at the default 90 s duration
+that cap binds almost always, so campaigns need a longer `--duration` to exercise
+the untruncated prior.
+
+### `t_impact` is the SLA crossing inside the ramp (`ramp_derived`)
+
+The lead used to move only the label: the ramp itself was a fixed ~4 buckets, so the
+impairment slope was identical for the shortest- and longest-lead deciles (measured
+0.4129 vs 0.4121) and the lead was unpredictable from telemetry even in principle.
+
+The synthetic ramp is now four knots — `t_start`→0, `t_impact`→`p_cross`,
+`t_impact + 0.3·dur`→1 (the calibrated peak), `t_end`→0 — where `p_cross` is the
+impairment fraction that breaches `theta_SLA`. So `t_impact` **is** the crossing,
+the rising edge spans the drawn lead, and the fault still reaches its measured peak
+during the impact phase. Capping the episode at `p_cross` instead was tried first and
+left every fault at ~20% of its peak; `check.py`'s per-key ramp gate caught it.
+
+`theta_SLA` per VRF, from `faults/leadpriors.THETA_SLA`:
+
+| VRF | latency | loss |
+|---|---|---|
+| VOICE | 150 ms | 1.0 % |
+| CORP | 250 ms | 2.0 % |
+| GUEST | 400 ms | 5.0 % |
+
+**Not derivable from the lab**: `generator/templates/qos.sh.j2` shapes bandwidth only
+(HTB rate/ceil/prio — no latency or loss target), so these are stated policy
+objectives. The GUEST loss figure is the one with an in-repo anchor: it equals the
+controller's `FAILOVER_LOSS_PCT`, the point at which path selection abandons a
+tunnel. A tunnel carries every VRF of its site, so the SLA that breaks first is the
+strictest one present. In practice the crossing is loss-driven — the calibrated
+latency peaks (40–70 ms) sit below every latency objective, so a latency-only
+scenario reports `modelled`, which is the honest answer: that signature never
+breaches SLA.
+
+`vm_threshold` still wins when a live probe genuinely crosses, and the label row now
+carries `t_impact_ramp` alongside, so the two methods can be compared instead of one
+silently replacing the other.
+
+### Three counters are deliberately zero
+
+`if_in_errors`, `if_in_discards`, `if_out_errors` are emitted as **0** by the
+generator, matching the lab, where veth pairs produce no CRC or input errors. They
+were previously a load-dependent Poisson process, which made `if_in_errors > 0` a
+perfect synthetic-row detector: a shortcut to the synthetic fault distribution for
+anything trained on the mixed corpus, and three features that are zero at live
+validation time. The alternative — dropping them from the model's channel list —
+would have kept a generator model that is correct for real hardware, but two paths
+disagreeing on a column is worse than one honest zero.
+
+They are **reserved for real-hardware deployment**: the OIDs are polled correctly and
+will populate on physical switches, at which point they are the literature's
+top-ranked failure signal (ClusterRCA, arXiv 2506.20673). The fault path's discard
+perturbation moved onto `if_out_discards`, which the lab does measure via
+`tc -s qdisc`. `synthetic/check.py` asserts all three stay zero.
+
+### Multi-label labels, ordinal severity, timestamp `ts`
+
+`export.py` emits every overlapping label instead of collapsing to the
+highest-severity one: `fault_types` / `severities` / `scenario_ids` /
+`impact_methods` / `time_to_impact_s` are index-aligned lists with the primary at
+element 0, plus `n_concurrent`. The four legacy scalars keep their names and
+positions and hold the primary, so a reader written against the original column
+order still works; `fault_type_primary` / `severity_primary` / `scenario_id_primary`
+are explicit aliases for readers that would rather say so. `severity` is an ordinal
+float (0.33/0.66/1.0) with the string in `severity_label`, and null stays null for
+scenarios whose injector ignores severity. `ts` is `timestamp[us, tz=UTC]`.
+
+Concurrency needed the campaign lock split too: it keyed on the bare **device**, so a
+device carried at most one fault at a time and `n_concurrent` was 1 everywhere —
+nothing for a multi-label head to learn. `faults/orchestrator._lock_key` now keys on
+the resource a scenario mutates (interface / tunnel / vrf / neighbor / process), with
+`node_failure`, `rr_failure` and `bgp_cascade` device-exclusive because ProcessKill
+takes the routing daemon away from anything needing `vtysh`. Two netem installs on
+one interface still exclude each other. The synthetic path mirrors it with a
+per-`kind` lock and a same-device, different-kind cascade.
+
+Schema went 40 → 49 columns. The shipped real capture was re-joined in place by
+`dataapi/reschema.py` (labels re-derived from `faults/labels/labels.jsonl`, metric
+columns untouched), which is why its fault rows went 327 → 391.

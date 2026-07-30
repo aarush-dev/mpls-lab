@@ -52,7 +52,11 @@ BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "127.0.0.1:9092")
 # not need editing here too.
 _NON_FEATURE = {"ts", "device", "site_type", "vrf", "entity", "entity_type",
                 "is_fault", "scenario_id", "fault_type", "severity",
-                "lead_time_s", "time_to_impact_s"}
+                "severity_label", "lead_time_s", "time_to_impact_s",
+                # multi-label label columns (DEFECT 5b) -- supervision, not input
+                "fault_types", "severities", "scenario_ids", "impact_methods",
+                "n_concurrent",
+                "fault_type_primary", "severity_primary", "scenario_id_primary"}
 
 
 def feature_columns():

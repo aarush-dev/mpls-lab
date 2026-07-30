@@ -37,8 +37,14 @@ import pyarrow.parquet as pq
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "dataapi"))
 sys.path.insert(0, os.path.join(HERE, "..", "telemetry"))
-from export import COLUMNS  # canonical column list/order -- single source of truth
+sys.path.insert(0, os.path.join(HERE, "..", "faults"))
+sys.path.insert(0, os.path.join(HERE, "..", "trafficgen"))
+# canonical schema + the label writer, so real and synthetic cannot diverge
+from export import (COLUMNS, SEVERITY_ORDINAL, attach_labels, finalize_schema,
+                    precursor_mask, tunnel_vrf_set, vrf_of_entity)
 import envmodel  # chassis/optical models, shared with the live sidecar
+import leadpriors  # lead-time priors + per-VRF SLA, shared with the live orchestrator
+from trafficgen import VRF_FLOW  # per-VRF flow shapes, for flow_bytes/flow_packets
 
 OUTDIR = os.path.join(HERE, "output")
 os.makedirs(OUTDIR, exist_ok=True)
@@ -82,6 +88,35 @@ def _pop_of(dev):
 def _has_optic(ent):
     """Only physical uplinks carry a transceiver -- not lo, VRF devices or wg0."""
     return ent.startswith("eth")
+
+
+def site_vrfs(meta):
+    """VRFs a site participates in, read off its interface list (CEs carry
+    vrf_CORP-style devices, PEs name theirs after the VRF)."""
+    return sorted({v for v in (vrf_of_entity(e) for e in meta["interfaces"]) if v})
+
+
+def _flow_row(meta, d, step, rng):
+    """DEFECT 4: flow_bytes/flow_packets on DEVICE rows, from the per-VRF flow
+    shapes trafficgen actually offers (trafficgen.VRF_FLOW), scaled by the
+    diurnal curve. Device rows only -- the real export merges flows there too,
+    because spreading one device-wide measurement over every interface and tunnel
+    row inflates any naive sum ~15x (export.py). Sites with no VRFs (P routers)
+    get null, which is what the real capture shows for them.
+    """
+    vrfs = site_vrfs(meta)
+    if not vrfs:
+        return None, None
+    period = max(1.0, 360.0)  # a trafficgen tick is ~6 min of modelled time
+    ticks = step / period
+    total = 0.0
+    for v in vrfs:
+        shape = VRF_FLOW[v]
+        noise = max(0.0, 1.0 + rng.normal(0, shape["burstiness"]))
+        flows = shape["flows_max"] * d * noise
+        total += flows * shape["bytes_per_flow"] * ticks
+    # ~1400 B/packet on the wire (1500 MTU less headers)
+    return round(total, 1), round(total / 1400.0, 1)
 
 
 def _sid_hex(rng):
@@ -129,10 +164,7 @@ def _gen_interfaces(rng, inv, prof, times):
                              or ent.isupper()) else 1.0
             cin = float(seed.get(st, 1e5)) * rng.uniform(0.5, 1.5)
             cout = cin * 0.6
-            # cumulative error/discard/drop counters, seeded near zero
-            e_in = float(rng.integers(0, 3))
-            e_out = float(rng.integers(0, 3))
-            d_in = float(rng.integers(0, 8))
+            # cumulative discard/drop counters, seeded near zero
             d_out = float(rng.integers(0, 8))
             q_drops = float(rng.integers(0, 5))
             optic = _has_optic(ent)
@@ -144,21 +176,31 @@ def _gen_interfaces(rng, inv, prof, times):
                 jit = rng.uniform(0.8, 1.2)
                 cin += rin0 * scale * d * jit
                 cout += rout0 * scale * d * rng.uniform(0.8, 1.2)
-                # Errors/discards: rare Poisson events whose rate rises with load.
-                e_in += float(rng.poisson(err_rate * scale * (0.4 + d)))
-                e_out += float(rng.poisson(err_rate * 0.6 * scale * (0.4 + d)))
-                d_in += float(rng.poisson(disc_rate * scale * (0.3 + d)))
+                # DEFECT 2: if_in_errors / if_in_discards / if_out_errors are
+                # STRUCTURALLY ZERO in this lab -- veth pairs produce no CRC or
+                # input errors, so every real capture has them constant 0. A
+                # load-dependent Poisson process here made `if_in_errors > 0` a
+                # perfect synthetic-row detector: a shortcut for a model trained
+                # on the mixed corpus, and three features that vanish at live
+                # validation time. The OIDs are polled correctly and will
+                # populate on real hardware -- see DATASETS.md.
+                # if_out_discards and q_drops stay generated: those two ARE
+                # measured in the lab (tc -s qdisc), so their dynamics are real.
                 d_out += float(rng.poisson(disc_rate * scale * (0.3 + d)))
                 # Queue: shallow standing occupancy that grows nonlinearly with load.
                 backlog = q_base * scale * (0.2 + d ** 2 * 2.2) * rng.uniform(0.7, 1.3)
                 q_drops += float(rng.poisson(q_drop_rate * scale * max(0.0, d - 0.55) * 6))
                 row = {
                     "ts": _iso(ep), "device": dev, "site_type": st,
+                    # DEFECT 3: VRF identity used to leak into `entity` while the
+                    # dedicated column stayed 100% null. Same rule as the real
+                    # export (export.vrf_of_entity), so the two paths agree.
+                    "vrf": vrf_of_entity(ent),
                     "entity": ent, "entity_type": "interface",
                     "if_in_octets": round(cin, 1), "if_out_octets": round(cout, 1),
                     "if_oper_status": 1.0,
-                    "if_in_errors": e_in, "if_out_errors": e_out,
-                    "if_in_discards": d_in, "if_out_discards": d_out,
+                    "if_in_errors": 0.0, "if_out_errors": 0.0,
+                    "if_in_discards": 0.0, "if_out_discards": d_out,
                     "q_backlog_bytes": round(backlog, 1), "q_drops": q_drops,
                 }
                 if optic:
@@ -174,7 +216,7 @@ def _gen_interfaces(rng, inv, prof, times):
     return rows
 
 
-def _gen_devices(rng, inv, prof, times):
+def _gen_devices(rng, inv, prof, times, step=30):
     """Device-scoped rows (entity_type='device', entity == device name).
 
     Whole-box signals: control-plane CPU/memory, routing-table and LSDB size,
@@ -223,9 +265,11 @@ def _gen_devices(rng, inv, prof, times):
             temp = envmodel.temp_c(temp, ambient, util, 0.0, rng.normal())
             bgp_rx += max(0.0, rng.normal(bgp_m, bgp_m * 0.4))
             bgp_tx += max(0.0, rng.normal(bgp_m, bgp_m * 0.4))
+            fb, fp = _flow_row(meta, d, step, rng)
             rows.append({
                 "ts": _iso(ep), "device": dev, "site_type": st,
                 "entity": dev, "entity_type": "device",
+                "flow_bytes": fb, "flow_packets": fp,
                 "cpu_pct": round(cpu, 3), "mem_pct": round(mem, 3),
                 "bgp_msg_rx": round(bgp_rx, 1), "bgp_msg_tx": round(bgp_tx, 1),
                 "rib_routes": round(rib, 1), "ospf_lsa_count": round(lsa, 1),
@@ -247,6 +291,9 @@ def _gen_tunnels(rng, inv, prof, times):
     rows = []
     for dev, meta in inv.items():
         st = meta["site_type"] or "branch"
+        # DEFECT 3: a tunnel carries every VRF of its site, so the honest label
+        # is the set -- see export.tunnel_vrf_set for why not a single VRF.
+        tvrf = tunnel_vrf_set(site_vrfs(meta))
         # pick site-specific or global baseline
         tb = by_site.get(st, global_tb)
         lat = tb.get("tunnel_latency_ms", global_tb["tunnel_latency_ms"])
@@ -264,7 +311,7 @@ def _gen_tunnels(rng, inv, prof, times):
                 if rng.random() < 0.002:  # occasional spontaneous rekey
                     rekeys += 1
                 rows.append({
-                    "ts": _iso(ep), "device": dev, "site_type": st,
+                    "ts": _iso(ep), "device": dev, "site_type": st, "vrf": tvrf,
                     "entity": ent, "entity_type": "tunnel",
                     "tunnel_latency_ms": round(l, 4), "tunnel_jitter_ms": round(j, 4),
                     "tunnel_loss_pct": round(lo, 4), "tunnel_rekeys": rekeys,
@@ -306,8 +353,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     iout_arr = df["if_out_octets"].to_numpy(dtype=float, na_value=np.nan).copy()
     ops_arr  = df["if_oper_status"].to_numpy(dtype=float, na_value=np.nan).copy()
     # device-health arrays perturbed by _apply_env below
-    err_arr  = df["if_in_errors"].to_numpy(dtype=float, na_value=np.nan).copy()
-    disc_arr = df["if_in_discards"].to_numpy(dtype=float, na_value=np.nan).copy()
+    dout_arr = df["if_out_discards"].to_numpy(dtype=float, na_value=np.nan).copy()
     qb_arr   = df["q_backlog_bytes"].to_numpy(dtype=float, na_value=np.nan).copy()
     qd_arr   = df["q_drops"].to_numpy(dtype=float, na_value=np.nan).copy()
     xrx_arr  = df["xcvr_rx_power_dbm"].to_numpy(dtype=float, na_value=np.nan).copy()
@@ -321,13 +367,17 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     etype    = df["entity_type"].to_numpy()
     ent_arr  = df["entity"].to_numpy()
 
-    # label columns as object arrays
-    fault_col = np.full(len(df), False, dtype=bool)
-    sid_col   = np.full(len(df), None, dtype=object)
-    ftype_col = np.full(len(df), None, dtype=object)
-    sev_col   = np.full(len(df), None, dtype=object)
-    lead_col  = np.full(len(df), np.nan)
-    tti_col   = np.full(len(df), np.nan)
+    # DEFECT 5b: one list of episode dicts per row instead of six scalar arrays.
+    # export.attach_labels turns these into the primary scalars + list columns.
+    acc = [[] for _ in range(len(df))]
+    # DEFECT 5a: the clash guard was device-wide, so a device could carry at most
+    # one episode ever and `n_concurrent` was 1 everywhere. It is now per-KIND:
+    # two netem-style ramps on the same entity still conflict (one impairment
+    # install), but a tunnel ramp, an interface churn and the device-scoped
+    # thermal/CPU trace of a third fault can overlap, which is what the
+    # consumer's multi-label head needs to see.
+    active = {}  # kind -> bool array of rows already perturbed by that kind
+    floored_n = [0]
 
     # Fault types whose signature is control-plane churn (CPU burns during
     # reconvergence) vs dataplane congestion (queues fill, errors climb).
@@ -338,13 +388,34 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     _CONGEST = {"congestion", "core_congestion", "brownout", "tunnel_degrade",
                 "hub_spoke_congest", "asymmetric_loss"}
 
-    def _prog(mask, t_start, t_impact, lead, dur, sevmul):
-        """Ramp-to-impact then decay, evaluated on an arbitrary row mask."""
+    def _prog(mask, t_start, t_impact, t_end, dur, sevmul, p_cross=1.0):
+        """Impairment fraction over one episode, on an arbitrary row mask.
+
+        Piecewise linear through four knots:
+
+            t_start          0          healthy
+            t_impact         p_cross    the SLA threshold is reached  <-- DEFECT 1b
+            t_impact+0.3dur  1          the signature's calibrated peak
+            t_end            0          recovered
+
+        DEFECT 1b: the rising edge spans the DRAWN LEAD, so the ramp's slope
+        carries the lead -- when the lead was a constant 120 s the slope was
+        identical for every episode (measured 0.4129 vs 0.4121 between the
+        shortest- and longest-lead deciles) and the lead was unpredictable from
+        telemetry even in principle.
+
+        p_cross is the fraction at which the impairment breaches theta_SLA, so
+        t_impact IS the crossing rather than an independent offset. The fault
+        keeps climbing to its full calibrated peak after the crossing, which is
+        why the crossing is a knot and not the end of the ramp: capping the
+        episode at p_cross would leave every fault at ~20% of its measured peak.
+        p_cross == 1 means the signature never reaches the SLA -- then this is
+        the original ramp-then-decay shape and t_impact is modelled.
+        """
         ep = epoch[mask].astype(float)
-        p = np.where(ep <= t_impact,
-                     (ep - t_start) / max(lead, step),
-                     np.maximum(0.0, 1.0 - (ep - t_impact) / max(dur, step)))
-        return np.clip(p, 0.0, 1.0) * sevmul
+        knots_t = [t_start, t_impact, t_impact + 0.3 * max(dur, step), t_end]
+        knots_p = [0.0, p_cross, 1.0, 0.0]
+        return np.clip(np.interp(ep, knots_t, knots_p), 0.0, 1.0) * sevmul
 
     def _counter_adjust(arr, mask, adj):
         """Add adj * per-bucket-increment to a CUMULATIVE counter, integrated.
@@ -371,17 +442,14 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         off = np.repeat(extra[seg], np.diff(np.append(seg, len(sub))))
         arr[mask] = np.round(sub + extra - off, 1)
 
-    def _iface_churn(target, t_start, t_impact, t_end, lead, dur, sevmul):
+    def _iface_churn(target, t_start, t_impact, t_end, dur, sevmul, p_cross=1.0):
         """Churn = up to 40% extra bytes per bucket while the episode runs."""
         amask = (dev_arr == target) & (etype == "interface")
         if not amask.any():
             return
         ep_a = epoch[amask].astype(float)
-        p = np.where(ep_a <= t_impact,
-                     (ep_a - t_start) / max(lead, step),
-                     np.maximum(0.0, 1.0 - (ep_a - t_impact) / max(dur, step)))
-        adj = np.where((ep_a >= t_start) & (ep_a <= t_end),
-                       np.clip(p, 0.0, 1.0) * sevmul * 0.4, 0.0)
+        p = _prog(amask, t_start, t_impact, t_end, dur, sevmul, p_cross)
+        adj = np.where((ep_a >= t_start) & (ep_a <= t_end), p * 0.4, 0.0)
         _counter_adjust(iin_arr, amask, adj)
 
     def _iface_down(target, t_impact, t_end):
@@ -412,7 +480,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         jit_arr[tmask]  = np.round(jit_arr[tmask]  + p_t * (jit_t - jit_arr[tmask]), 4)
         loss_arr[tmask] = np.round(loss_arr[tmask] + p_t * sig["loss_peak"], 4)
 
-    def _apply_env(win, ft, t_start, t_impact, lead, dur, sevmul):
+    def _apply_env(win, ft, t_start, t_impact, t_end, dur, sevmul, p_cross=1.0):
         """Perturb the device-health features inside one fault window.
 
         Every fault leaves a thermal/power trace (envmodel.fault_heat_c); which
@@ -425,7 +493,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
 
         dmask = win & (etype == "device")
         if dmask.any():
-            p = _prog(dmask, t_start, t_impact, lead, dur, sevmul)
+            p = _prog(dmask, t_start, t_impact, t_end, dur, sevmul, p_cross)
             if heat:
                 temp_arr[dmask] = np.round(temp_arr[dmask] + p * heat, 3)
                 fan_arr[dmask] = np.round(
@@ -440,14 +508,15 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
 
         imask = win & (etype == "interface")
         if imask.any():
-            p = _prog(imask, t_start, t_impact, lead, dur, sevmul)
+            p = _prog(imask, t_start, t_impact, t_end, dur, sevmul, p_cross)
             if ft in _CONGEST:
                 qb_arr[imask] = np.round(qb_arr[imask] * (1 + p * 9.0), 1)
                 qd_arr[imask] = np.round(qd_arr[imask] + p * 40.0, 1)
-                err_arr[imask] = np.round(err_arr[imask] + p * 6.0, 1)
-                disc_arr[imask] = np.round(disc_arr[imask] + p * 25.0, 1)
+                # DEFECT 2: if_out_discards is the measured one (tc -s qdisc);
+                # if_in_errors/if_in_discards stay at the lab's structural zero.
+                dout_arr[imask] = np.round(dout_arr[imask] + p * 25.0, 1)
             elif ft in _CHURN:
-                disc_arr[imask] = np.round(disc_arr[imask] + p * 4.0, 1)
+                dout_arr[imask] = np.round(dout_arr[imask] + p * 4.0, 1)
             if ft == "gray_failure":
                 # Received power sags and laser bias climbs to compensate: the
                 # SFF-8472 laser-ageing signature, with no oper-status change.
@@ -458,38 +527,56 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
                 bi[valid] = np.round(bi[valid] + p[valid] * 5.0, 3)
                 xrx_arr[imask] = rx
                 xb_arr[imask] = bi
-                err_arr[imask] = np.round(err_arr[imask] + p * 12.0, 1)
+                qd_arr[imask] = np.round(qd_arr[imask] + p * 12.0, 1)
 
-    ftypes = list(sigs)
-    targets = list(inv.keys())
-    times_arr = np.array(times, dtype=np.int64)
-    for _ in range(n_ep):
-        ft = rng.choice(ftypes)
+    def _place(ft, target, t_start, dur_impact, sev, suffix=""):
+        """Draw one episode's timing, label it and perturb its metrics.
+
+        Returns the episode's `kind` if it landed, else None. Factored out
+        because the cascade branch was a
+        50-line copy of this with `cascade_` prefixes -- two copies of the lead
+        draw is exactly how DEFECT 1 survived in one path and not the other.
+        """
         sig = sigs[ft]
         kind = sig["kind"]
-        target = rng.choice(pe_devs if ft in ("bgp_flap", "node_failure") and pe_devs else ce_devs)
-        # Gamma(k=2, scale=lead_s/2) → mean≈lead_s, CV≈0.71; always positive.
-        # Floored at 4 buckets: several calibrated lead_s are ~2 s, shorter than
-        # one bucket, which yields prog==0 at the only precursor bucket -- a
-        # time_to_impact_s>0 label with a bit-identical-to-baseline metric.
-        lead = max(float(rng.gamma(2.0, max(sig["lead_s"] / 2.0, 0.5))), 4.0 * step)
-        dur_impact = float(rng.uniform(60, 240))
-        t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
+        sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(sev)]
+        # DEFECT 1a: lead drawn from the per-type prior in faults/leadpriors.py,
+        # not from calibrate.py's median-of-a-24-minute-capture (~2 s, which the
+        # safety floor then clamped to exactly 4 buckets on 100% of episodes).
+        lead, floored = leadpriors.draw_lead_s(ft, step, rng.normal())
+        floored_n[0] += int(floored)
         t_impact = t_start + lead
         t_end = t_impact + dur_impact
-        sid = f"{ft}-{target}-{_sid_hex(rng)}"
-        sev = rng.choice(["low", "medium", "high"], p=[0.3, 0.4, 0.3])
-        sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(sev)]
 
-        # vectorized window mask
         win = (dev_arr == target) & (epoch >= t_start) & (epoch <= t_end)
         if not win.any():
-            continue
-        # Overlapping episodes on one device would silently overwrite the
-        # earlier episode's scenario_id/lead_time/time_to_impact while its ramp
-        # stays in the metrics -- labels desynced from signal. Drop the clash.
-        if (fault_col & win).any():
-            continue
+            return None
+        # DEFECT 5a: only the SAME kind conflicts (one impairment install per
+        # entity). Different kinds may overlap -- that is the concurrency.
+        act = active.get(kind)
+        if act is not None and (act & win).any():
+            return None
+
+        # DEFECT 1b: t_impact is the SLA crossing inside the ramp, not an
+        # independent offset. p_cross is the impairment fraction that breaches
+        # theta_SLA for the VRFs riding this entity, and _prog puts that fraction
+        # exactly at t_impact -- so the crossing lands on the drawn lead by
+        # construction, and the lead keeps its full spread.
+        p_cross, method = 1.0, "modelled"
+        tmask = win & (etype == "tunnel")
+        if kind == "tunnel_ramp" and tmask.any():
+            theta_lat, theta_loss = leadpriors.strictest_sla(
+                site_vrfs(inv[target]))
+            h_lat = float(np.nanmean(lat_arr[tmask]))
+            h_loss = float(np.nanmean(loss_arr[tmask]))
+            peak_lat = max(sig["lat_peak"], h_lat * 1.15)
+            p_lat = ((theta_lat - h_lat) / ((peak_lat - h_lat) * sevmul)
+                     if peak_lat > h_lat else np.inf)
+            p_loss = ((theta_loss - h_loss) / (sig["loss_peak"] * sevmul)
+                      if sig["loss_peak"] > 0 else np.inf)
+            cross = min(p_lat, p_loss)
+            if 0 < cross <= 1.0:
+                p_cross, method = cross, "ramp_derived"
 
         # Label ONLY rows a perturbation actually reaches. The window is
         # device-wide but each `kind` moves one entity_type, so labelling the
@@ -499,85 +586,60 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
                      or ft in _CONGEST or ft in _CHURN or ft == "gray_failure")
         lab = win & (etype == "device")
         if kind == "tunnel_ramp":
-            lab = lab | (win & (etype == "tunnel"))
+            lab = lab | tmask
         if iface_sig:
             lab = lab | (win & (etype == "interface"))
 
-        fault_col[lab] = True
-        sid_col[lab]   = sid
-        ftype_col[lab] = ft
-        sev_col[lab]   = str(sev)
-        lead_col[lab]  = lead
-        tti_col[lab]   = np.round(t_impact - epoch[lab], 1)
+        sid = f"{ft}-{target}-{_sid_hex(rng)}{suffix}"
+        rank = {"low": 1, "medium": 2, "high": 3}[str(sev)]
+        tti = np.round(t_impact - epoch[lab], 1)
+        for i, tt in zip(np.flatnonzero(lab), tti):
+            acc[i].append({"scenario_id": sid, "fault_type": ft,
+                           "severity": SEVERITY_ORDINAL[str(sev)],
+                           "severity_label": str(sev), "rank": rank,
+                           "lead_time_s": round(lead, 1),
+                           "time_to_impact_s": float(tt),
+                           "impact_method": method})
 
-        if kind == "tunnel_ramp":
-            tmask = win & (etype == "tunnel")
-            if tmask.any():
-                # ponytail: recompute prog for tmask slice (subset of win)
-                ep_t = epoch[tmask].astype(float)
-                p_t = np.where(ep_t <= t_impact,
-                               (ep_t - t_start) / max(lead, step),
-                               np.maximum(0.0, 1.0 - (ep_t - t_impact) / max(dur_impact, step)))
-                p_t = np.clip(p_t, 0.0, 1.0) * sevmul
-                _tunnel_ramp(tmask, sig, p_t)
+        if kind == "tunnel_ramp" and tmask.any():
+            _tunnel_ramp(tmask, sig, _prog(tmask, t_start, t_impact, t_end,
+                                           dur_impact, sevmul, p_cross))
         elif kind == "iface_churn":
-            _iface_churn(target, t_start, t_impact, t_end, lead, dur_impact, sevmul)
+            _iface_churn(target, t_start, t_impact, t_end, dur_impact, sevmul, p_cross)
         elif kind == "iface_down":
             _iface_down(target, t_impact, t_end)
 
         # device-health features move for EVERY fault type, not just the three
         # metric "kinds" above (a fault the tunnel metrics barely register can
         # still be loud in CPU, queue depth or optical power).
-        _apply_env(win, ft, t_start, t_impact, lead, dur_impact, sevmul)
+        _apply_env(win, ft, t_start, t_impact, t_end, dur_impact, sevmul, p_cross)
+        if act is None:
+            active[kind] = win.copy()
+        else:
+            act |= win
+        return kind
 
-        # ponytail: cascade — 12% of episodes trigger a second fault
-        if rng.random() < 0.12 and len(targets) > 1:
-            target2 = rng.choice([t for t in targets if t != target])
-            cascade_sig_key = rng.choice(list(sigs.keys()))
-            cascade_sig = sigs[cascade_sig_key]
-            cascade_t_start = t_start + lead * 0.5
-            cascade_lead = max(float(rng.gamma(2.0, max(cascade_sig["lead_s"] / 2.0, 0.5))),
-                               4.0 * step)
-            cascade_dur = float(rng.uniform(60, 240))
-            cascade_t_impact = cascade_t_start + cascade_lead
-            cascade_t_end = cascade_t_impact + cascade_dur
-            cascade_sid = f"{cascade_sig_key}-{target2}-{_sid_hex(rng)}-casc"
-            cascade_sev = rng.choice(["low", "medium", "high"], p=[0.3, 0.4, 0.3])
-            cascade_sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(cascade_sev)]
-            cascade_kind = cascade_sig["kind"]
-            cwin = (dev_arr == target2) & (epoch >= cascade_t_start) & (epoch <= cascade_t_end)
-            if cwin.any() and not (fault_col & cwin).any():
-                c_iface_sig = (cascade_kind in ("iface_churn", "iface_down")
-                               or cascade_sig_key in _CONGEST
-                               or cascade_sig_key in _CHURN
-                               or cascade_sig_key == "gray_failure")
-                clab = cwin & (etype == "device")
-                if cascade_kind == "tunnel_ramp":
-                    clab = clab | (cwin & (etype == "tunnel"))
-                if c_iface_sig:
-                    clab = clab | (cwin & (etype == "interface"))
-                fault_col[clab] = True
-                sid_col[clab]   = cascade_sid
-                ftype_col[clab] = cascade_sig_key
-                sev_col[clab]   = str(cascade_sev)
-                lead_col[clab]  = cascade_lead
-                tti_col[clab]   = np.round(cascade_t_impact - epoch[clab], 1)
-                if cascade_kind == "tunnel_ramp":
-                    ctmask = cwin & (etype == "tunnel")
-                    if ctmask.any():
-                        ep_ct = epoch[ctmask].astype(float)
-                        p_ct = np.where(ep_ct <= cascade_t_impact,
-                                        (ep_ct - cascade_t_start) / max(cascade_lead, step),
-                                        np.maximum(0.0, 1.0 - (ep_ct - cascade_t_impact) / max(cascade_dur, step)))
-                        p_ct = np.clip(p_ct, 0.0, 1.0) * cascade_sevmul
-                        _tunnel_ramp(ctmask, cascade_sig, p_ct)
-                elif cascade_kind == "iface_churn":
-                    _iface_churn(target2, cascade_t_start, cascade_t_impact,
-                                 cascade_t_end, cascade_lead, cascade_dur, cascade_sevmul)
-                elif cascade_kind == "iface_down":
-                    _iface_down(target2, cascade_t_impact, cascade_t_end)
-                _apply_env(cwin, cascade_sig_key, cascade_t_start, cascade_t_impact,
-                           cascade_lead, cascade_dur, cascade_sevmul)
+    ftypes = list(sigs)
+    targets = list(inv.keys())
+    times_arr = np.array(times, dtype=np.int64)
+    sevs = ["low", "medium", "high"]
+    for _ in range(n_ep):
+        ft = rng.choice(ftypes)
+        target = rng.choice(pe_devs if ft in ("bgp_flap", "node_failure") and pe_devs else ce_devs)
+        t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
+        kind = _place(ft, target, t_start, float(rng.uniform(60, 240)),
+                      rng.choice(sevs, p=[0.3, 0.4, 0.3]))
+        # Cascade: 22% of episodes drag a second fault in. DEFECT 5a -- it lands
+        # on the SAME device with a DIFFERENT kind, which is both the realistic
+        # case (a congesting uplink degrades that site's tunnels) and the only
+        # way the dataset gets within-device concurrency for the consumer's
+        # multi-label head. A different kind cannot collide on the per-kind lock.
+        if kind and rng.random() < 0.22:
+            others = [f for f in ftypes if sigs[f]["kind"] != kind]
+            if others:
+                _place(rng.choice(others), target, t_start + 2.0 * step,
+                       float(rng.uniform(60, 240)),
+                       rng.choice(sevs, p=[0.3, 0.4, 0.3]), suffix="-casc")
 
     # write arrays back to df once
     df["tunnel_latency_ms"] = lat_arr
@@ -586,8 +648,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     df["if_in_octets"]      = iin_arr
     df["if_out_octets"]     = iout_arr
     df["if_oper_status"]    = ops_arr
-    df["if_in_errors"]      = err_arr
-    df["if_in_discards"]    = disc_arr
+    df["if_out_discards"]   = dout_arr
     df["q_backlog_bytes"]   = qb_arr
     df["q_drops"]           = qd_arr
     df["xcvr_rx_power_dbm"] = xrx_arr
@@ -596,13 +657,14 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     df["device_power_watts"] = pow_arr
     df["device_fan_rpm"]    = fan_arr
     df["cpu_pct"]           = cpu_arr
-    df["is_fault"]          = fault_col
-    df["scenario_id"]       = sid_col
-    df["fault_type"]        = ftype_col
-    df["severity"]          = sev_col
-    df["lead_time_s"]       = lead_col
-    df["time_to_impact_s"]  = tti_col
-    return df
+    if n_ep and floored_n[0] / n_ep > 0.05:
+        # DEFECT 1a regression guard: the floor is a safety net. If it is firing
+        # this often the priors or --step are wrong, which is exactly how
+        # lead_time_s became a constant without anyone noticing.
+        print(f"WARN: lead floor ({leadpriors.FLOOR_BUCKETS} buckets) fired on "
+              f"{100.0 * floored_n[0] / n_ep:.1f}% of episodes -- check "
+              f"faults/leadpriors.py against --step {step}", file=sys.stderr)
+    return attach_labels(df, acc)
 
 
 def generate(days, step, scale, profile_path, seed=42):
@@ -617,40 +679,14 @@ def generate(days, step, scale, profile_path, seed=42):
 
     rows = (_gen_interfaces(rng, inv, prof, times)
             + _gen_tunnels(rng, inv, prof, times)
-            + _gen_devices(rng, inv, prof, times))
+            + _gen_devices(rng, inv, prof, times, step))
     df = pd.DataFrame(rows)
-
-    # init missing canonical columns. The six label columns are NOT initialised
-    # here: _inject_faults assigns all of them unconditionally on every path.
-    df["vrf"] = pd.NA
-    for c in ["flow_bytes", "flow_packets"]:
-        # KNOWN GAP: the flow pillar is not synthesised. The real capture DOES
-        # carry sparse flow rows (~3% non-null), so this is an omission, not a
-        # match to the real export. Calibrating flow_bytes/flow_packets per
-        # site_type from those rows is the fix; until then they are null.
-        df[c] = pd.NA
 
     df = _inject_faults(rng, df, inv, prof, times, step, scale)
 
-    # exact canonical order + dtypes matching the real Parquet
-    for c in COLUMNS:
-        if c not in df.columns:
-            df[c] = pd.NA
-    df = df[COLUMNS].sort_values(["ts", "device", "entity"]).reset_index(drop=True)
-    df["is_fault"] = df["is_fault"].astype(bool)
-    for c in ["if_in_octets", "if_out_octets", "if_oper_status",
-              "tunnel_latency_ms", "tunnel_jitter_ms", "tunnel_loss_pct", "tunnel_rekeys",
-              "flow_bytes", "flow_packets", "lead_time_s", "time_to_impact_s",
-              "if_in_errors", "if_in_discards", "if_out_errors", "if_out_discards",
-              "q_backlog_bytes", "q_drops",
-              "xcvr_temp_c", "xcvr_rx_power_dbm", "xcvr_tx_bias_ma",
-              "cpu_pct", "mem_pct", "bgp_msg_rx", "bgp_msg_tx",
-              "rib_routes", "ospf_lsa_count",
-              "device_temp_c", "device_power_watts", "device_fan_rpm",
-              "device_psu_voltage_v"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce").astype("float64")
-    for c in ["scenario_id", "fault_type", "severity"]:
-        df[c] = df[c].astype("object")
+    # exact canonical order + dtypes, from the same finalizer the real export
+    # uses (DEFECT 6a/6b live in there: ordinal severity, timestamp ts)
+    df = finalize_schema(df)
 
     # ponytail: seed omitted from the name at 42 so existing filenames stay valid
     sfx = "" if seed == 42 else f"_seed{seed}"
@@ -686,7 +722,8 @@ def main():
     print(f"wrote {path}")
     print(f"rows={len(df)} cols={len(df.columns)} "
           f"fault_rows={int(df.is_fault.sum())} ({df.is_fault.mean()*100:.2f}%) "
-          f"precursor_rows={int(((df.is_fault) & (df.time_to_impact_s > 0)).sum())}")
+          f"precursor_rows={int(precursor_mask(df).sum())} "
+          f"max_concurrent={int(df.n_concurrent.max())}")
 
 
 if __name__ == "__main__":

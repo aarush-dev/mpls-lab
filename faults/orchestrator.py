@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 # (`python3 -c "import faults.orchestrator"` from the repo root).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import injectors as inj  # noqa: E402
+import leadpriors  # noqa: E402  -- lead priors shared with synthetic/generate.py
 
 VM_URL = os.environ.get("VM_URL", "http://172.20.20.50:8428")
 LABELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labels")
@@ -582,35 +583,63 @@ SCENARIOS = {
 
 
 # --------------------------------------------------------------------------- run
-def _resolve_impact(spec, t_start, baseline, duration, dry_run):
-    """Return (t_impact, observed, impact_method) for one running fault.
+def draw_ramp_seconds(name, duration, step=30):
+    """DEFECT 1b: ramp wall-duration for a ramping scenario = the lead drawn from
+    the shared per-type prior, capped so the ramp cannot outlast the fault.
+
+    Returns (ramp_s, capped). The cap bites often at the default 90 s duration --
+    the priors are minutes-scale because that is how far ahead the telemetry
+    actually sees these failures. Run campaigns with a longer --duration to get
+    the untruncated prior.
+    """
+    lead, _ = leadpriors.draw_lead_s(name, step, random.gauss(0, 1))
+    cap = 0.7 * float(duration)
+    return (min(lead, cap), lead > cap)
+
+
+def _resolve_impact(spec, t_start, baseline, duration, dry_run, ramp_s=None):
+    """Return (t_impact, observed, impact_method, t_impact_ramp) for one fault.
 
     Shared by run_scenario and _campaign_fault so both label paths agree.
     impact_method is one of:
       vm_threshold      the probe was read and crossed -> measured t_impact
-      modelled_fallback the probe was read but never crossed -> modelled t_impact
+      ramp_derived      no probe crossing, but the scenario RAMPED: t_impact is
+                        the end of the ramp, which is where the impairment
+                        reaches the level the SLA is defined against
+                        (faults/leadpriors.THETA_SLA)
+      modelled_fallback the probe was read but never crossed, and there was no
+                        ramp to derive from -> constant impact_delay_s
       probe_unavailable the probe returned NOTHING for the whole window (VM
                         down / metric absent / selector matches no series) ->
                         modelled t_impact, but no telemetry stands behind it
-      modelled          the scenario declares no probe at all
+      modelled          the scenario declares no probe at all and does not ramp
+
+    t_impact_ramp is the ramp-derived timestamp whenever a ramp ran, INCLUDING
+    when the probe crossed -- recording both is what lets the two methods be
+    compared instead of one silently replacing the other.
     """
+    t_ramp = (datetime.fromtimestamp(t_start.timestamp() + ramp_s, tz=timezone.utc)
+              if ramp_s else None)
     if spec["impact_method"] == "vm_threshold" and spec.get("probe") and not dry_run:
         t_impact, observed, saw = poll_threshold(
             spec["probe"], spec["threshold"], baseline=baseline,
             timeout_s=int(duration), interval_s=3)
         if t_impact is not None:
-            return t_impact, observed, "vm_threshold"
+            return t_impact, observed, "vm_threshold", t_ramp
         method = "modelled_fallback" if saw else "probe_unavailable"
     else:
         observed = None
         method = "modelled"
+    if t_ramp is not None and method != "probe_unavailable":
+        return t_ramp, observed, "ramp_derived", t_ramp
     delay = spec.get("impact_delay_s", 2)
     return (datetime.fromtimestamp(t_start.timestamp() + delay, tz=timezone.utc),
-            observed, method)
+            observed, method, t_ramp)
 
 
 def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
-               t_end, impact_method, baseline, observed, dry_run, error):
+               t_end, impact_method, baseline, observed, dry_run, error,
+               t_impact_ramp=None):
     """Build the ground-truth label row (one schema, both run paths)."""
     return {
         "scenario_id": scenario_id,
@@ -625,6 +654,9 @@ def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
         "t_end": iso(t_end),
         "lead_time": round((t_impact - t_start).total_seconds(), 1),
         "impact_method": impact_method,
+        # DEFECT 1b: both t_impacts when both exist, so vm_threshold and
+        # ramp_derived can be compared instead of one hiding the other.
+        "t_impact_ramp": iso(t_impact_ramp) if t_impact_ramp else None,
         "probe": spec.get("probe") if spec else None,
         "baseline_value": baseline,
         "impact_value": observed,
@@ -660,19 +692,22 @@ def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
     # failure must still revert the lab and still write a label (flagged with
     # the error) rather than leave core links down and lose the row.
     t_impact, observed, impact_method = t_start, None, "modelled"
+    t_impact_ramp = None
     error = None
+    # DEFECT 1b: the ramp lasts the lead drawn from the shared prior, so the
+    # slope of the impairment carries the lead the label reports.
+    ramp_s = draw_ramp_seconds(name, duration)[0] if spec.get("ramp") else None
     try:
         if not dry_run:
             if spec.get("ramp"):
-                injector.ramp(steps=ramp_steps,
-                              step_seconds=max(3.0, duration / (ramp_steps * 2)))
+                injector.ramp(steps=ramp_steps, total_seconds=ramp_s)
             else:
                 injector.apply()
             if spec.get("extra"):
                 spec["extra"].apply()
 
-        t_impact, observed, impact_method = _resolve_impact(
-            spec, t_start, baseline, duration, dry_run)
+        t_impact, observed, impact_method, t_impact_ramp = _resolve_impact(
+            spec, t_start, baseline, duration, dry_run, ramp_s)
         print(json.dumps({"event": "impact", "scenario_id": scenario_id,
                           "t_impact": iso(t_impact), "method": impact_method,
                           "observed": observed}), flush=True)
@@ -702,7 +737,7 @@ def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
 
         row = _label_row(spec, scenario_id, name, target, severity, t_start,
                          t_impact, t_end, impact_method, baseline, observed,
-                         dry_run, error)
+                         dry_run, error, t_impact_ramp)
         write_label(row)
         print(json.dumps({"event": "label_written", "row": row}), flush=True)
     return row
@@ -820,14 +855,68 @@ def _merged_seconds(intervals):
     return total
 
 
+# Scenarios that cannot share a device with ANYTHING else: ProcessKill takes the
+# routing daemon away, so every scenario that needs vtysh on that box breaks, and
+# the label of the other fault would describe a fault it never really injected.
+_EXCLUSIVE = {"node_failure", "rr_failure", "bgp_cascade"}
+
+
+def _lock_key(name, target):
+    """(device, resource) the scenario mutates. resource=None means whole-device
+    exclusivity. Two scenarios may run on one device iff their keys differ and
+    neither is device-exclusive."""
+    if name in _EXCLUSIVE:
+        return (target, None)
+    spec_target = None
+    try:
+        spec_target = SCENARIOS[name](target, "low", 1).get("target")
+    except Exception:
+        pass
+    if isinstance(spec_target, dict):
+        # netem lives on an interface; two installs on one interface conflict
+        for k in ("interface", "tunnel", "vrf", "neighbor", "process"):
+            if spec_target.get(k):
+                return (target, f"{k}:{spec_target[k]}")
+    return (target, f"scenario:{name}")
+
+
+def _lock_selftest():
+    """The concurrency rule the dataset's multi-label supervision depends on."""
+    d = "ce_branch1"
+    assert _lock_key("congestion", d) == _lock_key("tunnel_degrade", d), \
+        "two netem installs on one interface must still exclude each other"
+    assert _lock_key("policy_drift", d) != _lock_key("congestion", d), \
+        "a VRF-scoped drift must be able to run beside an interface impairment"
+    assert _lock_key("node_failure", "pe1")[1] is None, \
+        "ProcessKill must be device-exclusive"
+    # the ramp duration must actually vary and stay inside the fault
+    spans = {round(draw_ramp_seconds("congestion", 3000)[0], 3) for _ in range(50)}
+    assert len(spans) > 40, f"ramp duration is not varying: {len(spans)} distinct"
+    # the cap must bind at the default 90s duration -- the priors are minutes
+    capped = [draw_ramp_seconds("congestion", 90) for _ in range(20)]
+    assert all(s <= 0.7 * 90 + 1e-6 for s, _ in capped), "ramp outlasts the fault"
+    assert any(c for _, c in capped), "cap never reported at a 90s duration"
+    print("orchestrator selftest OK")
+
+
 def _campaign_fault(name, target, severity, duration, ramp_steps,
                     campaign_id, active_targets, lock, stats, dry_run):
     """Run one fault in a thread; guard active_targets; always revert."""
+    # DEFECT 5a: the lock key was the bare device, so one device could carry at
+    # most one fault at a time and the dataset had ZERO within-device
+    # concurrency -- nothing for a multi-label head to learn. The key is now the
+    # RESOURCE the scenario actually mutates, so a tunnel-scoped degradation and
+    # a device-scoped event on the same box run concurrently, while two netem
+    # installs on one interface still cannot.
+    key = _lock_key(name, target)
     with lock:
-        if target in active_targets:
-            # Another fault is already running on this target — skip silently.
+        blocked = key in active_targets or (target, None) in active_targets
+        if key[1] is None:  # device-exclusive: nothing else may hold this device
+            blocked = blocked or any(k[0] == target for k in active_targets)
+        if blocked:
+            # Another fault already holds this resource — skip silently.
             return
-        active_targets.add(target)
+        active_targets.add(key)
 
     # The target must be released whatever happens (a builder that raises used
     # to leak it for the life of the campaign, so the device was never faulted
@@ -839,6 +928,7 @@ def _campaign_fault(name, target, severity, duration, ramp_steps,
         spec = injector = None
         baseline = observed = error = None
         impact_method = "modelled"
+        t_impact_ramp = None
         t_start = t_impact = now_utc()
         try:
             spec = SCENARIOS[name](target, severity, duration)
@@ -853,17 +943,17 @@ def _campaign_fault(name, target, severity, duration, ramp_steps,
                               "severity": severity, "duration": duration,
                               "t_start": iso(t_start), "dry_run": dry_run}), flush=True)
 
+            ramp_s = draw_ramp_seconds(name, duration)[0] if spec.get("ramp") else None
             if not dry_run:
                 if spec.get("ramp"):
-                    injector.ramp(steps=ramp_steps,
-                                  step_seconds=max(2.0, duration / (ramp_steps * 2)))
+                    injector.ramp(steps=ramp_steps, total_seconds=ramp_s)
                 else:
                     injector.apply()
                 if spec.get("extra"):
                     spec["extra"].apply()
 
-            t_impact, observed, impact_method = _resolve_impact(
-                spec, t_start, baseline, duration, dry_run)
+            t_impact, observed, impact_method, t_impact_ramp = _resolve_impact(
+                spec, t_start, baseline, duration, dry_run, ramp_s)
 
             # Hold for remainder of duration
             elapsed = time.time() - t_start.timestamp()
@@ -892,7 +982,7 @@ def _campaign_fault(name, target, severity, duration, ramp_steps,
 
             row = _label_row(spec, scenario_id, name, target, severity, t_start,
                              t_impact, t_end, impact_method, baseline, observed,
-                             dry_run, error)
+                             dry_run, error, t_impact_ramp)
             row["campaign_id"] = campaign_id
             write_label(row)
             print(json.dumps({"event": "label_written", "row": row}), flush=True)
@@ -906,7 +996,7 @@ def _campaign_fault(name, target, severity, duration, ramp_steps,
                 stats["intervals"].append((t_start.timestamp(), t_end.timestamp()))
     finally:
         with lock:
-            active_targets.discard(target)
+            active_targets.discard(key)
 
 
 def run_campaign(total_duration, mean_gap=120, seed=None, dry_run=False,
@@ -1019,6 +1109,8 @@ def main():
                     help="single-scenario hold duration OR campaign total duration (s)")
     ap.add_argument("--ramp-steps", type=int, default=6)
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
+    ap.add_argument("--selftest", action="store_true",
+                    help="check the lock rule + ramp draw, no lab needed")
     ap.add_argument("--demo", action="store_true", help="run a short demo scenario")
     ap.add_argument("--dry-run", action="store_true",
                     help="write a label without touching the lab (schema check); "
@@ -1034,6 +1126,9 @@ def main():
                     help="campaign: explicit campaign tag (auto-generated if omitted)")
     args = ap.parse_args()
 
+    if args.selftest:
+        _lock_selftest()
+        return
     if args.list:
         for n, fn in SCENARIOS.items():
             print(f"{n:16s} {fn.__doc__.strip().splitlines()[0]}")

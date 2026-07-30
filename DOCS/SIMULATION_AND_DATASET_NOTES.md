@@ -130,7 +130,7 @@ neither blocks the other.
 
 | topic | parts | retention | payload |
 |---|---|---|---|
-| `noc.metrics` | 6 | 1 day | the same canonical 40-column rows |
+| `noc.metrics` | 6 | 1 day | the same canonical 49-column rows, label columns stripped |
 | `noc.events` | 6 | 7 days | discrete routing events at **exact** timestamps, templated |
 | `noc.faults` | 3 | 30 days | orchestrator label rows |
 | `noc.topology` | 1 | 30 days | static graph + the controller's live path choices |
@@ -182,7 +182,7 @@ Two independent producers, one schema. `dataapi/export.COLUMNS` is the single
 source of truth and `synthetic/generate.py` imports it (`generate.py:41`), so the
 two can never disagree.
 
-### 2.1 Schema — 40 columns
+### 2.1 Schema — 49 columns
 
 `dataapi/export.py:38-53`. First 21 are the original schema in their original
 order, so readers written against it still work.
@@ -191,13 +191,20 @@ order, so readers written against it still work.
 - interface: `if_in_octets, if_out_octets, if_oper_status`
 - tunnel: `tunnel_latency_ms, tunnel_jitter_ms, tunnel_loss_pct, tunnel_rekeys`
 - flow: `flow_bytes, flow_packets`
-- label: `is_fault, scenario_id, fault_type, severity, lead_time_s, time_to_impact_s`
+- label (primary episode): `is_fault, scenario_id, fault_type, severity,
+  lead_time_s` — `severity` is an ORDINAL FLOAT (0.33/0.66/1.0), string in
+  `severity_label`; `ts` is `timestamp[us, tz=UTC]`, not a string
 - **added (interface)**: `if_in_errors, if_in_discards, if_out_errors,
   if_out_discards, q_backlog_bytes, q_drops, xcvr_temp_c, xcvr_rx_power_dbm,
   xcvr_tx_bias_ma`
 - **added (device)**: `cpu_pct, mem_pct, bgp_msg_rx, bgp_msg_tx, rib_routes,
   ospf_lsa_count, device_temp_c, device_power_watts, device_fan_rpm,
   device_psu_voltage_v`
+- **added (multi-label)**: `time_to_impact_s, fault_types, severities,
+  scenario_ids, impact_methods` are index-aligned LISTS — one entry per episode
+  overlapping the row, element 0 = primary — plus `n_concurrent` (int8),
+  `severity_label`, and the explicit `fault_type_primary / severity_primary /
+  scenario_id_primary` aliases
 
 Three `entity_type` values (`export.py:55-60`): `interface` (per physical port),
 `tunnel` (per WireGuard tunnel), `device` (whole box, `entity` == device name).
@@ -218,10 +225,13 @@ Three `entity_type` values (`export.py:55-60`): `interface` (per physical port),
    window narrower than one bucket — most of the label file.
 4. Interface-scoped labels narrow to their own interface; tunnel and device rows
    stay in scope (`export.py:215-217`).
-5. Overlapping labels: highest severity wins, not last-in-file
-   (`export.py:222-229`).
-6. `time_to_impact_s = t_impact − bucket_ts` — positive before impact, negative
-   after (`export.py:236`).
+5. Overlapping labels: ALL of them are emitted as index-aligned lists, primary
+   (highest severity) at element 0 (`export.attach_labels`). The old
+   highest-severity-wins collapse was deterministic but discarded the concurrency
+   a multi-label head is built to learn.
+6. `time_to_impact_s = t_impact − bucket_ts` per episode — positive before
+   impact, negative after. It is a LIST, so `> 0` no longer works on it: use
+   `export.precursor_mask(df)`.
 7. Written atomically via `os.replace` so two uvicorn workers can't produce a
    footerless Parquet (`export.py:271-275`).
 
@@ -233,8 +243,13 @@ Join key is `device` throughout.
 per-site octet rates and seeds, per-site-type tunnel baselines,
 `device_health` mean/std per key, an inventory, and 21 `fault_signatures` each
 carrying `lat_peak / loss_peak / jit_peak / lead_s / kind`
-(`calibrate.py:121-157`). `lead_s` is overwritten with the real median lead time
-where the capture has enough samples (`calibrate.py:177`).
+(`calibrate.py:_fault_signatures`). `lead_s` is NO LONGER overwritten from the
+capture: the median lead of a 24.5-minute capture at 30 s resolution came out
+~2 s, the generator's 4-bucket floor clamped every draw to exactly 120 s, and
+`lead_time_s` shipped with CV 0.03. Leads now come from `faults/leadpriors.py`
+(per-fault-type bucket ranges, lognormal, p10/p90 on the endpoints), shared with
+the live orchestrator. A measured median is kept as `lead_s_hint` only when the
+capture spans a full `DIURNAL_PERIOD`.
 
 `synthetic/generate.py` then walks `--days` of `--step` buckets over that
 inventory:
@@ -252,11 +267,16 @@ inventory:
   loop (`generate.py:270-600`).
 
 Episode semantics: `t_start` (ramp begins, precursor visible) → `t_impact`
-(= `t_start + lead`) → `t_end` (= `t_impact + recovery`). Lead time is drawn from
-`Gamma(k=2, scale=lead_s/2)` — mean ≈ `lead_s`, CV ≈ 0.71, always positive — and
-**floored at 4 buckets** because several calibrated `lead_s` values are ~2 s,
-shorter than one bucket, which would produce a `time_to_impact_s > 0` label whose
-metric is bit-identical to baseline (`generate.py:468-470`).
+(the SLA crossing) → `t_end` (= `t_impact + recovery`). The lead is drawn per
+episode from `faults/leadpriors.py` — lognormal, p10/p90 pinned to the fault
+type's bucket range — and the ramp spans it, so the impairment SLOPE carries the
+lead. The impairment is piecewise linear through four knots: `t_start`→0,
+`t_impact`→`p_cross` (the fraction that breaches `THETA_SLA` for the VRFs on that
+entity), `t_impact + 0.3·dur`→1 (the calibrated peak), `t_end`→0. `p_cross == 1`
+means the signature never reaches the objective and `impact_method` is `modelled`
+rather than `ramp_derived`. The 4-bucket floor survives as a safety net only, and
+the generator warns if it fires on more than 5% of episodes — it used to fire on
+100% of them.
 
 Details that exist because the naive version was wrong:
 
@@ -270,25 +290,38 @@ Details that exist because the naive version was wrong:
 - Only rows a perturbation actually reaches get labelled. The window is
   device-wide but each `kind` moves one entity_type, so labelling the whole window
   marked ~45% of `is_fault` rows byte-identical to baseline (`generate.py:490-499`).
-- Overlapping episodes on one device are dropped rather than overwritten — the
-  earlier episode's ramp would stay in the metrics while its label was replaced
-  (`generate.py:483-488`).
-- 12% of episodes trigger a cascade on a second device (`generate.py:528-575`).
+- Overlapping episodes are dropped only when they share a `kind` (one impairment
+  install per entity); different kinds may overlap, which is where within-device
+  concurrency comes from. Labels are lists, so an overlap no longer overwrites
+  anything.
+- 22% of episodes trigger a cascade on the SAME device with a DIFFERENT kind — a
+  congesting uplink degrading that site's tunnels — which is what produces
+  `n_concurrent` up to 3.
 - The Parquet carries `synthetic=true` in **file-level key/value metadata**, not
   just the filename, so a renamed copy is still distinguishable
   (`generate.py:652-661`).
 
 `synthetic/check.py` validates the newest output by mtime and asserts 3
 entity_types, role-scaled power spread >10×, physical temperature range, per-POP
-ambient spread, fault counters rising, and gray_failure optical divergence.
+ambient spread, fault counters rising, gray_failure optical divergence, a per-key
+precursor ramp (a global healthy mean confounds the ramp with the diurnal curve),
+`lead_time_s` CV ≥ 0.50 with one distinct lead per episode, the three error
+counters still zero, `vrf`/`flow_bytes` non-null, `n_concurrent` ≥ 2 somewhere, and
+`seed` + `calibrated_from` in the file metadata.
+
+`synthetic/verify_fixes.py <train> <holdout>` is the audit's own acceptance gate:
+24 checks including hazard-bin occupancy, `corr(lead, ramp span)`, holdout episode
+disjointness and matched load.
 
 ### 2.4 Shipped samples
 
-`DATASETS.md` — real capture 49,844 rows (70 devices, 24.5 min, 327 fault rows, 9
-fault types); synthetic 2,589,120 rows (1 day, seed 42, 72,295 fault rows, 31,017
-precursors, all 21 fault types); synthetic holdout 1,294,560 rows (12 h, `--seed 7`,
-36,965 fault rows, 15,532 precursors, all 21 fault types, 0 `scenario_id` overlap
-with seed 42). Concat-compatible.
+`DATASETS.md` — real capture 49,844 rows (70 devices, 24.5 min, 391 fault rows, 266
+precursors, 10 fault types, 17 episodes); synthetic train 2,589,120 rows (1 day,
+seed 42, 159,021 fault rows, 124,108 precursors, 719 episodes, all 21 fault types,
+lead CV 0.83); synthetic holdout 2,589,120 rows (1 day, `--seed 7`, 156,054 fault
+rows, 122,627 precursors, 720 episodes, lead CV 1.03, 0 `scenario_id` overlap with
+seed 42). Concat-compatible. Both synthetic files are a full day so the holdout
+does not conflate unseen episodes with unseen time-of-day.
 
 ---
 
@@ -435,13 +468,23 @@ never used (`orchestrator.py:620-622`).
    pe1's FIB, VPNv4 iBGP stuck in `Connect`, `bgp_peer_established` = 0. Phase 0's
    check gives a false pass — see `DOCS/PHASE0ENVIRONMENT.md` step 1b. The
    `vrflite` fallback named in `topology-spec.yaml:52-53` is **not implemented**.
-2. **`if_in_errors` / `if_in_discards` / `if_out_errors` are constant 0** in the
-   real capture. veth pairs produce no CRC or input errors. The OIDs are wired
-   correctly and will populate on real hardware — but the literature's top-ranked
-   failure signal is structurally unavailable in a container lab.
-3. **18 of 21 scenarios have a modelled `t_impact`**, per §3.3.
-4. **Synthetic `flow_bytes`/`flow_packets` are null** (`generate.py:621-626`). The
-   real capture does carry sparse flow rows, so this is an omission, not a match.
+2. **`if_in_errors` / `if_in_discards` / `if_out_errors` are constant 0** in
+   BOTH paths, deliberately. veth pairs produce no CRC or input errors, so they
+   are zero in every real capture; the generator emitted a load-dependent Poisson
+   process, which made `if_in_errors > 0` a perfect synthetic-row detector. Now
+   both emit 0 and `check.py` asserts it. The OIDs are wired correctly and will
+   populate on real hardware, so the literature's top-ranked failure signal is
+   reserved, not lost — retrain with it at deployment.
+3. **`t_impact` is the SLA crossing where one exists** (`impact_method:
+   ramp_derived`, `faults/leadpriors.THETA_SLA`), a live probe crossing where one
+   fires (`vm_threshold`), and modelled otherwise — in the shipped synthetic files
+   the split is ~49% `ramp_derived` / ~51% `modelled`, because the calibrated
+   latency peaks sit below every latency objective and only loss breaches.
+4. **`flow_bytes`/`flow_packets` on synthetic device rows are MODELLED from the
+   per-VRF flow shapes** (`trafficgen.VRF_FLOW`) scaled by the diurnal curve, not
+   calibrated against the real flow rows. They were null before, which was itself
+   a synthetic-row detector. Null on P routers, which carry no site VRFs — the
+   same shape the real capture shows.
 5. **Tunnel latency's fault term is a config readback, not a measurement**
    (§1.4).
 6. The diurnal curve shape is hand-tuned, not fitted to a real trace

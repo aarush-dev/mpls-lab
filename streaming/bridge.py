@@ -311,31 +311,47 @@ def replay(parquet, producer, step=30, speed=60.0, limit=None):
     if limit:
         df = df.head(int(limit))
     br = Bridge(producer, step=step)
+    # Label columns are stripped from the metric records and republished on
+    # noc.faults. The list columns arrived with the multi-label schema (DEFECT
+    # 5b); leaving them in a metric record would ship the answer with the
+    # question, and numpy arrays are not JSON-serialisable anyway.
     label_cols = ["is_fault", "scenario_id", "fault_type", "severity",
-                  "lead_time_s", "time_to_impact_s"]
+                  "severity_label", "lead_time_s", "time_to_impact_s",
+                  "fault_types", "severities", "scenario_ids", "impact_methods",
+                  "n_concurrent", "fault_type_primary", "severity_primary",
+                  "scenario_id_primary"]
+    # ts is a timestamp since DEFECT 6b; the wire format stays ISO-8601 text.
+    df = df.assign(ts=pd.to_datetime(df["ts"], utc=True).dt.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    # One row per (row, concurrent episode) for the label side only.
+    lab = df[df["is_fault"].fillna(False).astype(bool)] if "is_fault" in df else df.head(0)
+    if len(lab) and "scenario_ids" in lab.columns:
+        lab = lab.assign(_sid=lab["scenario_ids"].map(
+            lambda v: list(v) if v is not None else [])).explode("_sid")
+        lab = lab.assign(_ft=lab["fault_type_primary"], _sev=lab["severity_label"])
+        spans = lab.groupby("_sid")["ts"].agg(["min", "max"])
+    else:
+        spans = None
     seen_scenarios = set()
     for ts, chunk in df.groupby("ts", sort=True):
         for rec in chunk.drop(columns=[c for c in label_cols if c in chunk.columns],
                               errors="ignore").to_dict("records"):
             rec["_v"] = SCHEMA_VERSION
             br.send("noc.metrics", rec.get("device"), rec)
-        if "scenario_id" in chunk.columns:
-            faulty = chunk[chunk["is_fault"].fillna(False).astype(bool)]
-            for sid, g in faulty.groupby("scenario_id"):
-                if sid in seen_scenarios:
+        if spans is not None:
+            for _, r0 in lab[lab["ts"] == ts].drop_duplicates("_sid").iterrows():
+                sid = r0["_sid"]
+                if sid in seen_scenarios or sid is None:
                     continue
                 seen_scenarios.add(sid)
-                r0 = g.iloc[0]
                 # t_end from the FULL frame, not this bucket: the label must carry
                 # the whole window or a consumer's overlap test sees a fault one
                 # bucket wide. Recovering it from the labelled rows is exact --
                 # they are precisely the buckets the export join marked.
-                span = df.loc[df["scenario_id"] == sid, "ts"]
                 br.send("noc.faults", r0["device"], {
                     "_v": SCHEMA_VERSION, "scenario_id": sid,
-                    "type": r0.get("fault_type"), "severity": r0.get("severity"),
+                    "type": str(sid).split("-")[0], "severity": r0.get("_sev"),
                     "device": r0.get("device"),
-                    "t_start": str(span.min()), "t_end": str(span.max()),
+                    "t_start": spans.loc[sid, "min"], "t_end": spans.loc[sid, "max"],
                     "lead_time": float(r0["lead_time_s"]) if pd.notna(r0.get("lead_time_s")) else None,
                     "replayed_from": os.path.basename(parquet),
                 })

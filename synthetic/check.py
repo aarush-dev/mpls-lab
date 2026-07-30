@@ -32,7 +32,7 @@ import pyarrow.parquet as pq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "dataapi"))
-from export import COLUMNS
+from export import COLUMNS, precursor_mask
 
 OUTDIR = os.path.join(HERE, "output")
 DATASETS = os.path.join(HERE, "..", "dataapi", "datasets")
@@ -55,6 +55,12 @@ def main():
     meta = pq.ParquetFile(path).schema_arrow.metadata or {}
     assert meta.get(b"synthetic") == b"true", \
         f"{os.path.basename(path)} carries no synthetic=true Parquet metadata"
+    # DEFECT 6c: an unattributable file must never ship. One shipped Parquet had
+    # no seed and no calibrated_from, so its labels could not be reproduced or
+    # traced to a capture -- and it was byte-plausible next to the real one.
+    for k in (b"seed", b"calibrated_from"):
+        assert meta.get(k), \
+            f"{os.path.basename(path)} has no {k.decode()} in its Parquet metadata"
     # 1. schema
     assert list(df.columns) == COLUMNS, \
         f"schema mismatch\n exp {COLUMNS}\n got {list(df.columns)}"
@@ -64,7 +70,7 @@ def main():
     frac = df["is_fault"].mean()
     assert 0.0005 < frac < 0.25, f"fault fraction out of band: {frac:.4f}"
     # 4. precursors exist
-    prec = ((df["is_fault"]) & (df["time_to_impact_s"] > 0)).sum()
+    prec = precursor_mask(df).sum()
     assert prec > 0, "no precursor rows (is_fault & time_to_impact_s>0)"
     # 5. distributions match the real calibration.
     # The old gate asserted interval OVERLAP only, which a constant column
@@ -136,14 +142,16 @@ def main():
 
     # Fault rows must be louder than healthy on the counters that faults drive.
     if ifc.is_fault.any():
-        for col in ("if_in_discards", "q_backlog_bytes", "q_drops"):
+        # DEFECT 2: if_in_discards is structurally zero in this lab now, so the
+        # "louder under fault" gate moves to the counters that are measured.
+        for col in ("if_out_discards", "q_backlog_bytes", "q_drops"):
             g = ifc.groupby("is_fault")[col].mean()
             assert g.get(True, 0) > g.get(False, 0), \
                 f"{col} does not rise under fault: {g.to_dict()}"
 
     # gray_failure: rx optical power sags while laser bias climbs, with no
     # oper-status change. This divergence is the scenario's only early signal.
-    gray = ifc[ifc.fault_type == "gray_failure"]
+    gray = ifc[ifc.fault_type_primary == "gray_failure"]
     healthy = ifc[~ifc.is_fault]
     if len(gray) and gray.xcvr_rx_power_dbm.notna().any():
         assert gray.xcvr_rx_power_dbm.mean() < healthy.xcvr_rx_power_dbm.mean(), \
@@ -156,22 +164,57 @@ def main():
     # healthy mean. Calibrated lead_s of ~2s (< one bucket) used to produce
     # time_to_impact_s>0 rows that were bit-identical to baseline.
     tun = df[df.entity_type == "tunnel"]
-    base_lat = tun[~tun.is_fault].tunnel_latency_ms.mean()
+    # Baseline PER (device, entity): the global healthy mean confounds the ramp
+    # with the diurnal curve, because an episode's start time is uniform over the
+    # day and a low-load window sits below the all-day mean on its own.
+    base_key = tun[~tun.is_fault].groupby(["device", "entity"])[
+        ["tunnel_latency_ms", "tunnel_loss_pct"]].mean()
     for ft, sig in prof["fault_signatures"].items():
         if sig.get("kind") != "tunnel_ramp":
             continue
-        pre = tun[(tun.is_fault) & (tun.fault_type == ft) & (tun.time_to_impact_s > 0)]
+        pre = tun[(tun.fault_type_primary == ft) & precursor_mask(tun)]
         if len(pre) < 20:
             continue  # too few draws in a short run to be a meaningful mean
-        assert pre.tunnel_latency_ms.mean() > base_lat, \
-            f"{ft} precursor rows carry no ramp: {pre.tunnel_latency_ms.mean():.2f} vs healthy {base_lat:.2f}"
+        b = base_key.reindex(pd.MultiIndex.from_arrays([pre.device, pre.entity]))
+        d_lat = (pre.tunnel_latency_ms.to_numpy() - b.tunnel_latency_ms.to_numpy())
+        d_loss = (pre.tunnel_loss_pct.to_numpy() - b.tunnel_loss_pct.to_numpy())
+        # Either channel may be the one the SLA crossing is defined against
+        # (loss usually, since the calibrated latency peaks sit below theta), so
+        # the precursor has to be louder on at least one of them.
+        import numpy as _np
+        assert _np.nanmean(d_lat) > 0 or _np.nanmean(d_loss) > 0, \
+            (f"{ft} precursor rows carry no ramp: dlat={_np.nanmean(d_lat):+.3f}ms "
+             f"dloss={_np.nanmean(d_loss):+.4f}%")
 
     print(f"OK {os.path.basename(path)}")
     print(f"  rows={len(df)} cols={len(df.columns)} fault%={frac*100:.2f} precursors={prec}")
     print(f"  entity_type: {df.entity_type.value_counts().to_dict()}")
     print(f"  tunnel_latency_ms {lat.min():.1f}-{lat.max():.1f} (real {tb['min']:.1f}-{tb['max']:.1f})")
     print(f"  device_temp_c {t.min():.1f}-{t.max():.1f}C  power {dev.device_power_watts.min():.0f}-{dev.device_power_watts.max():.0f}W")
-    print(f"  fault_types={df.fault_type.nunique()}  concat real+synth -> {len(cat)} rows, schema stable")
+    # DEFECT 1: lead variance is the whole point of the label -- gate it here so
+    # a collapse back to a constant fails the build, not a downstream audit.
+    lead = df["lead_time_s"].dropna()
+    cv = lead.std() / lead.mean()
+    assert cv >= 0.50, f"lead_time_s CV {cv:.3f} < 0.50 -- leads are near-constant again"
+    # one distinct lead per episode: a continuous draw, not a clamped constant.
+    # Counted against PRIMARY scenario ids -- lead_time_s reports the primary
+    # episode, so an episode that is never primary contributes no lead value.
+    n_ep = df["scenario_id"].dropna().nunique()
+    assert lead.nunique() >= 0.9 * n_ep, \
+        f"{lead.nunique()} distinct leads for {n_ep} primary episodes -- draws collide"
+    # DEFECT 2: three counters must stay at the lab's structural zero
+    for c in ("if_in_errors", "if_in_discards", "if_out_errors"):
+        nz = int((df[c].fillna(0) > 0).sum())
+        assert nz == 0, f"{c}: {nz} nonzero rows -- synthetic-only signal is back"
+    # DEFECT 3/4: the columns that used to be 100% null
+    assert df.vrf.notna().any(), "vrf is all null"
+    assert df.flow_bytes.notna().any(), "flow_bytes is all null"
+    # DEFECT 5: within-device concurrency must exist for the multi-label head
+    assert int(df.n_concurrent.max()) >= 2, \
+        f"max n_concurrent={int(df.n_concurrent.max())} -- no concurrent episodes"
+    print(f"  fault_types={df.fault_type_primary.nunique()}  lead CV={cv:.2f}  "
+          f"max_concurrent={int(df.n_concurrent.max())}")
+    print(f"  concat real+synth -> {len(cat)} rows, schema stable")
 
 
 def _pop_of(dev):

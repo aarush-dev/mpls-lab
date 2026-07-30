@@ -6,62 +6,62 @@
     "branch": {
       "rate_in_median": 311.0,
       "rate_out_median": 42.0,
-      "_src": "real"
+      "_src_rate_in": "real",
+      "_src_rate_out": "real"
     },
     "core": {
       "rate_in_median": 8424.0,
       "rate_out_median": 8382.0,
-      "_src": "real"
+      "_src_rate_in": "real",
+      "_src_rate_out": "real"
     },
     "dc": {
       "rate_in_median": 296.0,
       "rate_out_median": 42.0,
-      "_src": "real"
+      "_src_rate_in": "real",
+      "_src_rate_out": "real"
     },
     "hub": {
       "rate_in_median": 127.0,
       "rate_out_median": 235.0,
-      "_src": "real"
+      "_src_rate_in": "real",
+      "_src_rate_out": "real"
     },
     "pe": {
       "rate_in_median": 235.0,
-      "rate_out_median": 239.0,
-      "_src": "real"
-    },
-    "nan": {
-      "rate_in_median": 1000000.0,
-      "rate_out_median": 600000.0,
-      "_src": "default"
+      "rate_out_median": 235.0,
+      "_src_rate_in": "real",
+      "_src_rate_out": "real"
     }
   },
   "tunnel_baseline": {
     "tunnel_latency_ms": {
-      "mean": 29.05121838376561,
-      "std": 4.689535636947437,
-      "p50": 28.748350000000002,
+      "mean": 29.062533212560385,
+      "std": 4.691104745183659,
+      "p50": 28.7545,
       "min": 16.3218,
       "max": 58.3231,
       "_src": "real"
     },
     "tunnel_jitter_ms": {
-      "mean": 2.948600012007685,
-      "std": 0.4004700290003445,
-      "p50": 2.9245,
+      "mean": 2.949824154589372,
+      "std": 0.40066460607629906,
+      "p50": 2.9267,
       "min": 2.1014,
       "max": 6.9712,
       "_src": "real"
     },
     "tunnel_loss_pct": {
-      "mean": 0.43645389048991357,
-      "std": 0.5412393291511186,
-      "p50": 0.0777,
+      "mean": 0.43819939613526565,
+      "std": 0.5419702304701849,
+      "p50": 0.08005000000000001,
       "min": 0.0003,
       "max": 5.6996,
       "_src": "real"
     },
     "tunnel_rekeys": {
-      "mean": 8.29695004803074,
-      "std": 4.2903597244912,
+      "mean": 8.319323671497585,
+      "std": 4.289157562368805,
       "p50": 8.0,
       "min": 1.0,
       "max": 17.0,
@@ -71,32 +71,32 @@
   "tunnel_baseline_by_site": {
     "branch": {
       "tunnel_latency_ms": {
-        "mean": 28.994105864197532,
-        "std": 4.742752293499051,
-        "p50": 28.6512,
+        "mean": 29.006951257062145,
+        "std": 4.745080775825324,
+        "p50": 28.66325,
         "min": 16.3218,
         "max": 58.3231,
         "_src": "real"
       },
       "tunnel_jitter_ms": {
-        "mean": 2.940884147025814,
-        "std": 0.4117692589675023,
-        "p50": 2.92075,
+        "mean": 2.942263460451977,
+        "std": 0.4120922248163537,
+        "p50": 2.92435,
         "min": 2.1014,
         "max": 6.9712,
         "_src": "real"
       },
       "tunnel_loss_pct": {
-        "mean": 0.4398162878787879,
-        "std": 0.547339660208111,
-        "p50": 0.08135,
+        "mean": 0.4418804378531073,
+        "std": 0.5482126920249322,
+        "p50": 0.0828,
         "min": 0.0003,
         "max": 5.6996,
         "_src": "real"
       },
       "tunnel_rekeys": {
-        "mean": 8.322811447811448,
-        "std": 4.3032289027611395,
+        "mean": 8.349152542372881,
+        "std": 4.301743831056025,
         "p50": 8.0,
         "min": 1.0,
         "max": 17.0,
@@ -143,49 +143,55 @@
       "lat_peak": 102.0591,
       "loss_peak": 5.7125,
       "jit_peak": 13.5726,
-      "lead_s": 62.2,
+      "lead_s": 50.0,
       "kind": "tunnel_ramp",
-      "_src": "real"
+      "_src_peaks": "real",
+      "_src_lead": "default"
     },
     "bgp_flap": {
-      "lat_peak": 28.748350000000002,
+      "lat_peak": 28.7545,
       "loss_peak": 0.3,
-      "jit_peak": 2.9245,
+      "jit_peak": 2.9267,
       "lead_s": 2.0,
       "kind": "iface_churn",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "tunnel_degrade": {
       "lat_peak": 37.8145,
       "loss_peak": 3.441,
       "jit_peak": 4.0917,
-      "lead_s": 65.2,
+      "lead_s": 40.0,
       "kind": "tunnel_ramp",
-      "_src": "real"
+      "_src_peaks": "real",
+      "_src_lead": "default"
     },
     "policy_drift": {
-      "lat_peak": 30.1559,
-      "loss_peak": 0.0933,
-      "jit_peak": 2.9743,
+      "lat_peak": 32.2543,
+      "loss_peak": 0.1907,
+      "jit_peak": 3.016,
       "lead_s": 3.0,
       "kind": "iface_churn",
-      "_src": "real"
+      "_src_peaks": "real",
+      "_src_lead": "default"
     },
     "node_failure": {
-      "lat_peak": 28.748350000000002,
-      "loss_peak": 1.0,
-      "jit_peak": 2.9245,
+      "lat_peak": 31.198,
+      "loss_peak": 0.0456,
+      "jit_peak": 3.0242,
       "lead_s": 1.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src_peaks": "real",
+      "_src_lead": "default"
     },
     "asymmetric_loss": {
-      "lat_peak": 33.5288,
+      "lat_peak": 35.0238,
       "loss_peak": 9.1383,
-      "jit_peak": 3.2577,
-      "lead_s": 42.0,
+      "jit_peak": 3.4146,
+      "lead_s": 30.0,
       "kind": "tunnel_ramp",
-      "_src": "real"
+      "_src_peaks": "real",
+      "_src_lead": "default"
     },
     "brownout": {
       "lat_peak": 45.0,
@@ -193,39 +199,44 @@
       "jit_peak": 6.0,
       "lead_s": 55.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "p_node_failure": {
-      "lat_peak": 37.372855,
+      "lat_peak": 37.38085,
       "loss_peak": 2.0,
-      "jit_peak": 5.849,
-      "lead_s": 2.0,
+      "jit_peak": 5.8534,
+      "lead_s": 5.0,
       "kind": "iface_down",
-      "_src": "real"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "pop_isolation": {
-      "lat_peak": 45.99736000000001,
+      "lat_peak": 46.007200000000005,
       "loss_peak": 6.0,
-      "jit_peak": 7.31125,
+      "jit_peak": 7.31675,
       "lead_s": 3.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "core_partition": {
-      "lat_peak": 51.74703,
+      "lat_peak": 51.7581,
       "loss_peak": 8.0,
-      "jit_peak": 8.7735,
+      "jit_peak": 8.7801,
       "lead_s": 3.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "srlg_cut": {
-      "lat_peak": 40.24769,
+      "lat_peak": 40.256299999999996,
       "loss_peak": 4.0,
-      "jit_peak": 6.4339,
+      "jit_peak": 6.43874,
       "lead_s": 2.0,
       "kind": "iface_down",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "core_congestion": {
       "lat_peak": 55.0,
@@ -233,15 +244,17 @@
       "jit_peak": 10.0,
       "lead_s": 45.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "ospf_area_flap": {
-      "lat_peak": 34.498020000000004,
+      "lat_peak": 34.5054,
       "loss_peak": 1.0,
-      "jit_peak": 5.849,
-      "lead_s": 2.0,
+      "jit_peak": 5.8534,
+      "lead_s": 4.0,
       "kind": "iface_churn",
-      "_src": "real"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "path_asymmetry": {
       "lat_peak": 30.0,
@@ -249,39 +262,44 @@
       "jit_peak": 4.0,
       "lead_s": 20.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "rr_failure": {
-      "lat_peak": 28.748350000000002,
+      "lat_peak": 28.7545,
       "loss_peak": 1.2,
-      "jit_peak": 2.9245,
+      "jit_peak": 2.9267,
       "lead_s": 3.0,
       "kind": "iface_churn",
-      "_src": "real"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "gray_failure": {
-      "lat_peak": 33.0606025,
+      "lat_peak": 33.067674999999994,
       "loss_peak": 1.8,
-      "jit_peak": 3.8018500000000004,
-      "lead_s": 5.0,
+      "jit_peak": 3.80471,
+      "lead_s": 90.0,
       "kind": "tunnel_ramp",
-      "_src": "real"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "mpls_underlay_failure": {
-      "lat_peak": 37.372855,
+      "lat_peak": 37.38085,
       "loss_peak": 2.0,
-      "jit_peak": 5.2641,
-      "lead_s": 2.0,
+      "jit_peak": 5.26806,
+      "lead_s": 4.0,
       "kind": "iface_down",
-      "_src": "real"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "ldp_session_flap": {
-      "lat_peak": 31.623185000000007,
+      "lat_peak": 31.629950000000004,
       "loss_peak": 0.8,
-      "jit_peak": 4.679200000000001,
+      "jit_peak": 4.68272,
       "lead_s": 3.0,
       "kind": "iface_churn",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "hub_spoke_congest": {
       "lat_peak": 70.0,
@@ -289,15 +307,17 @@
       "jit_peak": 14.0,
       "lead_s": 40.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "bgp_cascade": {
-      "lat_peak": 34.498020000000004,
+      "lat_peak": 34.5054,
       "loss_peak": 1.5,
-      "jit_peak": 5.849,
+      "jit_peak": 5.8534,
       "lead_s": 3.0,
       "kind": "iface_churn",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     },
     "controller_drift": {
       "lat_peak": 38.0,
@@ -305,7 +325,8 @@
       "jit_peak": 5.0,
       "lead_s": 25.0,
       "kind": "tunnel_ramp",
-      "_src": "default"
+      "_src_peaks": "default",
+      "_src_lead": "default"
     }
   },
   "device_health": {
@@ -330,13 +351,13 @@
       "_src": "default"
     },
     "cpu_pct": {
-      "mean": 0.8726883266244968,
-      "std": 0.8901490673678014,
+      "mean": 0.8727729636048527,
+      "std": 0.8904265912813717,
       "_src": "real"
     },
     "mem_pct": {
-      "mean": 0.039798734905117886,
-      "std": 0.006503447337723433,
+      "mean": 0.039789139225880996,
+      "std": 0.006498195505193691,
       "_src": "real"
     },
     "bgp_msg_per_step": {
@@ -345,17 +366,17 @@
       "_src": "default"
     },
     "rib_routes": {
-      "mean": 127.41117318435754,
-      "std": 4.529104473474306,
+      "mean": 127.41414141414141,
+      "std": 4.531898523967069,
       "_src": "real"
     },
     "ospf_lsa_count": {
-      "mean": 267.83240223463685,
-      "std": 90.3853180171613,
+      "mean": 267.7957351290685,
+      "std": 90.3719609378008,
       "_src": "real"
     }
   },
-  "real_fault_fraction": 0.006560468662226145,
+  "real_fault_fraction": 0.007844474761255117,
   "inventory": {
     "ce_branch1": {
       "site_type": "branch",
@@ -1636,11 +1657,10 @@
     }
   },
   "octet_seed_by_site": {
-    "branch": 12304.0,
-    "core": 478607.0,
+    "branch": 12303.0,
+    "core": 479320.0,
     "dc": 11191.0,
     "hub": 7981.0,
-    "pe": 13324.0,
-    "nan": NaN
+    "pe": 13318.0
   }
 }

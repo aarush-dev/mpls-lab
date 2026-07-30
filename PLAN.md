@@ -125,6 +125,10 @@ Start Docker; install `iproute2` + **Containerlab**; probe kernel MPLS support â
   buildup, flap precursors, jitter/loss decay, policy drift).
 - `synthetic/` (sonnet): calibrate to real captures, then emit large **labeled** multivariate
   time-series in the same schema for ML-scale training. **â†’ check in.**
+- Label quality (done): `lead_time_s` drawn per episode from `faults/leadpriors.py` instead of a
+  clamped constant, `t_impact` = the per-VRF SLA crossing inside the ramp, multi-label rows with
+  `n_concurrent`, ordinal `severity`, timestamp `ts`, `vrf`/`flow_*` populated, three container-dead
+  error counters held at 0 in both paths. Gate: `synthetic/verify_fixes.py` (24 checks).
 
 ### Clean data API (contract for the AI engineers)
 - `dataapi/` (sonnet, FastAPI, local-only): `/metrics` `/events` `/flows` `/labels` `/topology`

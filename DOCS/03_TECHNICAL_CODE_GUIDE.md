@@ -23,7 +23,7 @@ Everything flows in one direction: physical network containers emit signals, a t
         |
         | GET /datasets?build=true
         v
-  Labeled Parquet (40 columns, join key = "device")
+  Labeled Parquet (49 columns, join key = "device")
         |
         v
   Your ML Model
@@ -222,7 +222,7 @@ print(df["fault_type"].value_counts())
 
 ```python
 # Basic distribution of fault types
-df[df["is_fault"]].groupby("fault_type")["time_to_impact_s"].describe()
+df[df["is_fault"]].groupby("fault_type_primary")["lead_time_s"].describe()
 
 # Tunnel latency during faults vs. healthy
 df.groupby("is_fault")["tunnel_latency_ms"].agg(["mean", "median", "std"])
@@ -230,10 +230,11 @@ df.groupby("is_fault")["tunnel_latency_ms"].agg(["mean", "median", "std"])
 # Per-device fault rate
 df.groupby("device")["is_fault"].mean().sort_values(ascending=False)
 
-# The precursor window: is_fault=True but time_to_impact_s > 0 (fault started,
+# The precursor window: is_fault=True with a positive time_to_impact_s (fault started,
 # impact not yet felt — this is what ML needs to learn)
-precursor = df[(df["is_fault"]) & (df["time_to_impact_s"] > 0)]
-print(f"{len(precursor)} precursor rows ({precursor['time_to_impact_s'].mean():.1f}s avg ahead)")
+from export import precursor_mask   # time_to_impact_s is a LIST per row
+precursor = df[precursor_mask(df)]
+print(f"{len(precursor)} precursor rows ({precursor['lead_time_s'].mean():.1f}s avg lead)")
 ```
 
 **Train/test split by fault scenario** (never split within a scenario — that leaks):
@@ -257,7 +258,7 @@ print(f"Test:  {len(test)} rows, {test['is_fault'].mean()*100:.1f}% fault")
 
 ## 3. The Dataset Schema — What Every Column Means
 
-The canonical 40-column schema is defined in `export.py` (`COLUMNS` list). Every Parquet file — both real and synthetic — has exactly these columns in this order.
+The canonical 49-column schema is defined in `export.py` (`COLUMNS` list). Every Parquet file — both real and synthetic — has exactly these columns in this order.
 
 ```python
 # From /root/LAB/dataapi/export.py
@@ -276,17 +277,23 @@ COLUMNS = [
     "cpu_pct", "mem_pct",
     "bgp_msg_rx", "bgp_msg_tx", "rib_routes", "ospf_lsa_count",
     "device_temp_c", "device_power_watts", "device_fan_rpm", "device_psu_voltage_v",
+    # --- concurrent-fault supervision (index-aligned lists, element 0 = primary) ---
+    "fault_types", "severities", "scenario_ids", "impact_methods", "n_concurrent",
+    "severity_label",
+    "fault_type_primary", "severity_primary", "scenario_id_primary",
 ]
 ```
 
 The first 21 columns are the original schema in their original order, so readers
-written against it keep working. Columns 22–40 are the device-health feature set.
+written against it keep working. Columns 22–40 are the device-health feature set;
+41–49 are the multi-label set. `time_to_impact_s` (column 21) became a LIST when
+the multi-label columns landed — the only in-place type change.
 
 **Identity columns:**
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `ts` | str (ISO UTC) | 30-second bucket timestamp |
+| `ts` | `timestamp[us, tz=UTC]` | 30-second bucket timestamp (was an ISO string) |
 | `device` | str | Node name. Join key across all signals. E.g. `"ce_branch1"` |
 | `site_type` | str | One of `branch`, `hub`, `dc`, `pe`, `core` |
 | `vrf` | str (nullable) | Virtual network: `CORP`, `VOICE`, `GUEST`. Populated only on `vrf_*` sub-interface rows (Telegraf regex-extracts it from `ifDescr`, e.g. `vrf_CORP` → `CORP`; `telemetry/telegraf/telegraf.conf:188-196`) — null on physical uplinks, tunnels, and device rows, which is most of the table. |
@@ -323,8 +330,8 @@ written against it keep working. Columns 22–40 are the device-health feature s
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `if_in_errors` / `if_out_errors` | float64 | Cumulative IF-MIB error counters (ifInErrors .14 / ifOutErrors .20). **Real** — polled by SNMP. Diff between rows for the rate. |
-| `if_in_discards` / `if_out_discards` | float64 | Cumulative discard counters (ifInDiscards .13 / ifOutDiscards .19). **Real.** |
+| `if_in_errors` / `if_out_errors` | float64 | Cumulative IF-MIB error counters (ifInErrors .14 / ifOutErrors .20). Polled by SNMP, but **constant 0 in this lab** — veth pairs raise no CRC/input errors. The synthetic path emits 0 to match. Reserved for real hardware; do not train on them here. |
+| `if_in_discards` / `if_out_discards` | float64 | Cumulative discard counters (ifInDiscards .13 / ifOutDiscards .19). `if_out_discards` is **real** (netem/qdisc drops); `if_in_discards` is **constant 0**, same reason as the error counters. |
 | `q_backlog_bytes` | float64 | Bytes standing in the qdisc tree on this interface. **Real** — read from `tc -s qdisc`. Fills *before* latency rises and long before loss starts, so it leads `tunnel_latency_ms`. |
 | `q_drops` | float64 | Cumulative qdisc drops. **Real.** |
 
@@ -378,9 +385,9 @@ written against it keep working. Columns 22–40 are the device-health feature s
 | `is_fault` | bool | **The label.** True if this row falls inside a known fault window. |
 | `scenario_id` | str (nullable) | Unique ID for this fault instance. Use for GroupShuffleSplit. |
 | `fault_type` | str (nullable) | Which fault — 21 types total. Edge tier: `congestion`, `bgp_flap`, `tunnel_degrade`, `policy_drift`, `node_failure`, `asymmetric_loss`, `brownout`. Core tier (Phase 6): `p_node_failure`, `pop_isolation`, `core_partition`, `srlg_cut`, `core_congestion`, `ospf_area_flap`, `path_asymmetry`, `rr_failure`, `gray_failure`. |
-| `severity` | str (nullable) | `low`, `medium`, or `high` — maps to impairment magnitude |
-| `lead_time_s` | float64 | Seconds between fault start and user-visible impact. The **prediction horizon**. E.g. `52.0` means the model had 52 seconds of precursor signal before anyone felt anything. |
-| `time_to_impact_s` | float64 | Seconds from THIS ROW until impact. Positive = before impact (precursor). Zero = impact moment. Negative = post-impact. |
+| `severity` | float64 (nullable) | ordinal 0.33 / 0.66 / 1.0 — maps to impairment magnitude. String in `severity_label`. Null when the injector ignores severity |
+| `lead_time_s` | float64 | Seconds between fault start and user-visible impact, for the PRIMARY episode. The **prediction horizon**. Drawn per episode from `faults/leadpriors.py` (2–40 min depending on fault type), so it carries real variance — CV 0.83 in the shipped train file. |
+| `time_to_impact_s` | list\<float64\> | Seconds from THIS ROW until impact, one entry per concurrent episode (element 0 = primary). Positive = before impact (precursor). Negative = post-impact. `n_concurrent` gives the list length. |
 
 **What a good prediction looks like:**
 
@@ -390,14 +397,20 @@ t_start = 10:00:00   (fault injected)
 t_impact = 10:00:52  (latency crosses threshold; users feel it)
 t_end   = 10:01:30   (fault reverted)
 
-Rows:
-ts=10:00:00  is_fault=True  time_to_impact_s=+52.0   <- precursor starts
-ts=10:00:30  is_fault=True  time_to_impact_s=+22.0   <- latency rising
-ts=10:00:52  is_fault=True  time_to_impact_s=0.0     <- IMPACT
-ts=10:01:00  is_fault=True  time_to_impact_s=-8.0    <- post-impact
-ts=10:01:30  is_fault=True  time_to_impact_s=-38.0   <- fault ends
-ts=10:02:00  is_fault=False (null)                   <- recovered
+Rows (time_to_impact_s is a list -- one entry per concurrent episode):
+ts=10:00:00  is_fault=True  time_to_impact_s=[+52.0]  n_concurrent=1  <- precursor starts
+ts=10:00:30  is_fault=True  time_to_impact_s=[+22.0]  n_concurrent=1  <- latency rising
+ts=10:00:52  is_fault=True  time_to_impact_s=[0.0]    n_concurrent=1  <- IMPACT (SLA crossing)
+ts=10:01:00  is_fault=True  time_to_impact_s=[-8.0, +310.0] n_concurrent=2 <- a second
+                                                                           fault started
+ts=10:01:30  is_fault=True  time_to_impact_s=[-38.0, +280.0] n_concurrent=2
+ts=10:02:00  is_fault=False (null)                                    <- recovered
 ```
+
+`t_impact` is where the impairment crosses the VRF's SLA objective
+(`faults/leadpriors.THETA_SLA`), not a fixed offset — `impact_methods` records
+`ramp_derived` for those, `vm_threshold` where a live probe crossed, `modelled`
+where the signature never reaches the objective.
 
 A model that predicts `is_fault=True` at `ts=10:00:00` (52 seconds early) scores full lead time. A model that fires at `ts=10:01:00` (post-impact) is reactive, not predictive. The evaluation metric is `lead_time_s` at prediction time, not just accuracy.
 
@@ -638,9 +651,9 @@ That is the entire extension. The label schema, the `/datasets` join, and the sy
 
 ## 6. Synthetic Data
 
-The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 40-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
+The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 49-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
 
-**What was built:** `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) produces roughly 18.1M rows (`entities_per_tick × ticks`, 899 entities/tick = 661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`; `--scale` only controls fault-episode density, not row count) covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signatures (how much latency rises, how long the precursor lasts) are derived from real lab captures via `calibrate.py`. **The on-disk `synthetic/output/synthetic_1781481600_d7.0_s30_x3.0.parquet` is a stale June artifact** (exactly 8,890,560 rows) from a smaller, no-longer-existing 441-entities-per-tick topology — it is not reproducible from the command above on current code. It has 21 columns, predates the current 40-column feature set, and lacks the synthetic-marker metadata (`synthetic=true`, `generator`, `calibrated_from`) that `check.py` gate 0 now requires — it fails the current checker. Regenerate it with the command above before using it.
+**What was built:** `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) produces roughly 18.1M rows (`entities_per_tick × ticks`, 899 entities/tick = 661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`; `--scale` only controls fault-episode density, not row count) covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signature PEAKS (how much latency, jitter and loss rise) are derived from real lab captures via `calibrate.py`. The precursor LENGTH is not: `lead_time_s` is drawn per episode from the per-fault-type priors in `faults/leadpriors.py`, because a 24.5-minute capture at 30 s resolution cannot estimate a lead — see `DOCS/SPEC-NOTES.md`. Two files are shipped, one day each at seeds 42 and 7 (`DATASETS.md`); every output file without `seed` + `calibrated_from` metadata was deleted, and `check.py` now refuses them.
 
 ### Generating More Data
 
@@ -1184,7 +1197,7 @@ In the live orchestrator, the hardest scenarios to predict early are `bgp_flap` 
 | `/root/LAB/faults/labels/labels.jsonl` | Ground truth written by each fault run |
 | `/root/LAB/synthetic/calibrate.py` | Derives profile.json from real Parquet |
 | `/root/LAB/topology/topology-meta.json` | POP metadata (ABRs, SRLGs, inter-POP links) emitted by generator; consumed by fault orchestrator and data API |
-| `/root/LAB/synthetic/generate.py` | Generates synthetic dataset (~18.1M rows at `--days 7 --scale 3`, 899 entities/tick) |
+| `/root/LAB/synthetic/generate.py` | Generates synthetic dataset (~18.1M rows at `--days 7 --scale 3`, 899 entities/tick; `--seed` for a holdout) |
 | `/root/LAB/synthetic/profile.json` | Calibration parameters (written by calibrate.py) |
 | `/root/LAB/ragcorpus/` | Runbooks + topology map for LLM RAG retrieval |
 | `/root/LAB/telemetry/docker-compose.yml` | VictoriaMetrics, Loki, Grafana, Telegraf stack |

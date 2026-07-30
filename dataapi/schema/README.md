@@ -17,7 +17,7 @@ One row per **(device, entity, entity_type, ts-bucket)**. `ts` buckets are
 `step`-second aligned UTC (default 30s). Fault labels are LEFT-joined on
 `device` + `ts ∈ [t_start, t_end]`. Metric columns are **nullable per
 entity_type** (interface rows have `if_*`; tunnel rows have `tunnel_*`; device
-rows have `flow_*`/`cpu_*`/BGP/OSPF/chassis-sensor columns). 40 columns total,
+rows have `flow_*`/`cpu_*`/BGP/OSPF/chassis-sensor columns). 49 columns total,
 fixed order in `export.COLUMNS` (`export.py:38-53`); `check_dataset.py` validates
 the full set against `dataset.schema.json`.
 
@@ -41,9 +41,13 @@ the full set against `dataset.schema.json`.
 | `is_fault`         | bool        | true if bucket falls in a labeled fault window for the device |
 | `scenario_id`      | string/null | label id (null when not a fault) |
 | `fault_type`       | string/null | `congestion`\|`bgp_flap`\|`tunnel_degrade`\|`policy_drift`\|… |
-| `severity`         | string/null | `low`\|`medium`\|`high`\|null (null for scenarios whose injector ignores severity) |
+| `severity`         | float/null  | ordinal 0.33/0.66/1.0 of the PRIMARY episode; null for scenarios whose injector ignores severity. String form in `severity_label` |
 | `lead_time_s`      | float/null  | label `lead_time` (t_impact − t_start) |
-| `time_to_impact_s` | float/null  | seconds from this bucket to t_impact (>0 before impact, <0 after) |
+| `time_to_impact_s` | list<float>/null | one entry per concurrent episode (element 0 = primary): seconds from this bucket to that episode's t_impact (>0 before impact, <0 after). Use `export.precursor_mask(df)`, not `> 0` |
+| `fault_types` / `severities` / `scenario_ids` / `impact_methods` | list/null | index-aligned with `time_to_impact_s`; every episode overlapping the row |
+| `n_concurrent`     | int8        | length of those lists; 0 on healthy rows |
+| `severity_label`   | string/null | `low`\|`medium`\|`high`\|null — primary episode |
+| `fault_type_primary` / `severity_primary` / `scenario_id_primary` | as above | explicit aliases of the primary scalars |
 | `if_in_errors`     | float/null  | `interface_ifInErrors` (interface rows) |
 | `if_in_discards`   | float/null  | `interface_ifInDiscards` |
 | `if_out_errors`    | float/null  | `interface_ifOutErrors` |

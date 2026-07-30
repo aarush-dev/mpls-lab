@@ -48,9 +48,9 @@ Six major components were built:
 
 **A FastAPI data API.** A local HTTP server at port 8000 gives the ML team a clean, versioned interface to all of the above. They can query raw metrics, retrieve log events, download flow records, read fault labels, inspect the network topology as a graph, and — most importantly — download a pre-joined, labeled Parquet file that combines all four signal types into a single DataFrame ready for model training.
 
-**A Kafka streaming layer for two independent consumers.** The Parquet path above is a batch interface — it answers "give me the last hour." The streaming layer answers "tell me as it happens." One producer (`streaming/bridge.py`) reads the already-running sources and publishes to four topics: `noc.metrics` (the same 40-column rows), `noc.events` (discrete routing events at exact timestamps, not 30-second buckets), `noc.faults` (ground-truth labels) and `noc.topology` (the graph plus the controller's live path choices). Two consumer *groups* then read it independently — the predictive-analysis pipeline replays from the earliest offset to build fixed-length feature windows, while the copilot pipeline starts at the latest offset and maintains a rolling natural-language incident brief. Because Kafka tracks committed offsets per group, each gets a full copy and neither can slow or block the other. Records are keyed by `device`, which turns Kafka's per-partition ordering into a per-device ordering guarantee. See `streaming/README.md`.
+**A Kafka streaming layer for two independent consumers.** The Parquet path above is a batch interface — it answers "give me the last hour." The streaming layer answers "tell me as it happens." One producer (`streaming/bridge.py`) reads the already-running sources and publishes to four topics: `noc.metrics` (the same 49-column rows, labels stripped), `noc.events` (discrete routing events at exact timestamps, not 30-second buckets), `noc.faults` (ground-truth labels) and `noc.topology` (the graph plus the controller's live path choices). Two consumer *groups* then read it independently — the predictive-analysis pipeline replays from the earliest offset to build fixed-length feature windows, while the copilot pipeline starts at the latest offset and maintains a rolling natural-language incident brief. Because Kafka tracks committed offsets per group, each gets a full copy and neither can slow or block the other. Records are keyed by `device`, which turns Kafka's per-partition ordering into a per-device ordering guarantee. See `streaming/README.md`.
 
-**A synthetic dataset and air-gap packaging.** Because 148 lab containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures. Row count is `entities_per_tick × ticks`, linear in `--days` only (`--scale` only changes fault-episode density); at the current 899 entities/tick (661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`), `--days 7 --scale 3` (defaults `--days 2 --scale 1`; `synthetic/generate.py:667-669`) produces roughly 18.1 million rows. The shipped `synthetic/output/synthetic_1781481600_d7.0_s30_x3.0.parquet` (8,890,560 rows) is a stale June artifact from a smaller, no-longer-existing 441-entity topology — not reproducible from any current invocation. It's also 21 columns, predates the 40-column feature set, and fails the current `check.py` gate 0 (missing synthetic-marker metadata) — it needs regenerating. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
+**A synthetic dataset and air-gap packaging.** Because 148 lab containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures. Row count is `entities_per_tick × ticks`, linear in `--days` only (`--scale` only changes fault-episode density); at the current 899 entities/tick (661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`), `--days 7 --scale 3` (defaults `--days 2 --scale 1`; `synthetic/generate.py:667-669`) produces roughly 18.1 million rows. Two files are shipped, both `--days 1 --step 30 --scale 3.0` at 2,589,120 rows each: seed 42 for training and seed 7 as an episode-disjoint holdout (`DATASETS.md`). Everything else in `synthetic/output/` lacked `seed` + `calibrated_from` file metadata and was deleted — `check.py` now refuses an unattributable file. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
 
 ---
 
@@ -196,7 +196,7 @@ print(df.shape)          # (rows, 40)
 print(df.columns.tolist())
 ```
 
-The Parquet schema has 40 columns per row (`dataapi/schema/dataset.schema.json`). Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
+The Parquet schema has 49 columns per row (`dataapi/schema/dataset.schema.json`). Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -218,15 +218,15 @@ The Parquet schema has 40 columns per row (`dataapi/schema/dataset.schema.json`)
 | `is_fault` | bool | True if a fault scenario was active at this timestamp |
 | `scenario_id` | string | Unique identifier for the fault run |
 | `fault_type` | string | One of the twenty-one scenario names |
-| `severity` | string | `low`, `medium`, or `high` |
+| `severity` | float | ordinal magnitude 0.33 / 0.66 / 1.0 (string in `severity_label`) |
 | `lead_time_s` | float | Seconds from fault injection start to `t_impact` |
-| `time_to_impact_s` | float | Seconds remaining until impact at this timestamp |
+| `time_to_impact_s` | list\<float\> | Seconds remaining until impact at this timestamp, one entry per concurrent fault (element 0 = primary) |
 
 Nineteen further columns, added by the device-health + environmental feature set, are sourced from `telemetry/env-metrics.py` (docker stats + `vtysh` JSON, not SNMP) rather than the four streams above:
 
 | Column | Description |
 |--------|-------------|
-| `if_in_errors`, `if_in_discards`, `if_out_errors`, `if_out_discards` | Interface error/discard counters |
+| `if_in_errors`, `if_in_discards`, `if_out_errors`, `if_out_discards` | Interface error/discard counters. Only `if_out_discards` moves in a container lab — the other three are structurally 0 and reserved for real hardware |
 | `q_backlog_bytes`, `q_drops` | Queue backlog and drop counters |
 | `xcvr_temp_c`, `xcvr_rx_power_dbm`, `xcvr_tx_bias_ma` | Transceiver diagnostics |
 | `cpu_pct`, `mem_pct` | Container CPU/memory percent (control-plane load proxy) |
@@ -235,7 +235,7 @@ Nineteen further columns, added by the device-health + environmental feature set
 | `ospf_lsa_count` | OSPF link-state database entry count (`vtysh show ip ospf database json`) |
 | `device_temp_c`, `device_power_watts`, `device_fan_rpm`, `device_psu_voltage_v` | Modelled chassis environmental sensors |
 
-The `time_to_impact_s` column is the key ML target for a regression model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies which of the twenty-one fault types is active.
+The `time_to_impact_s` column is the key ML target for a regression or hazard model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies the primary fault type and `fault_types` the full concurrent set — up to 3 faults overlap on one row in the shipped data. Because the label columns are lists, select precursor rows with `export.precursor_mask(df)` rather than `time_to_impact_s > 0`.
 
 **Raw telemetry endpoints** give the team access to the underlying signals if they need to engineer custom features:
 
@@ -260,7 +260,7 @@ r = requests.get("http://localhost:8000/topology")
 # Useful for graph neural network features
 ```
 
-**The synthetic dataset**, run as `python3 synthetic/generate.py --days 7 --scale 3`, produces roughly 18.1 million additional labeled rows (899 entities/tick × ticks) calibrated to match the statistical properties of the real lab captures. The on-disk `synthetic/output/*.parquet` is currently a stale June run from a smaller, since-replaced 441-entity topology (8,890,560 rows, 21 columns) and needs regenerating against the 40-column schema before use. It can be concatenated directly with the real data for training:
+**The synthetic dataset**, run as `python3 synthetic/generate.py --days 7 --scale 3`, produces roughly 18.1 million additional labeled rows (899 entities/tick × ticks) calibrated to match the statistical properties of the real lab captures. The two shipped files are one day each (2,589,120 rows, 49 columns) at seeds 42 and 7. It can be concatenated directly with the real data for training:
 
 ```python
 real = pd.read_parquet("dataapi/datasets/noc_dataset_*.parquet")
@@ -336,7 +336,7 @@ cd /root/LAB/topology && sudo containerlab destroy -t clab.yml
 | `/root/LAB/dataapi/app.py` | FastAPI endpoints — ML team's primary interface |
 | `/root/LAB/dataapi/export.py` | Joins all signals into labeled Parquet |
 | `/root/LAB/dataapi/schema/dataset.schema.json` | JSON Schema for the Parquet format |
-| `/root/LAB/synthetic/generate.py` | Synthetic data generator (`--days 7 --scale 3` → ~18.1M rows at 899 entities/tick; defaults `--days 2 --scale 1` → 5,178,240 rows) |
+| `/root/LAB/synthetic/generate.py` | Synthetic data generator (`--days 7 --scale 3` → ~18.1M rows at 899 entities/tick; `--seed` for an episode-disjoint holdout) |
 | `/root/LAB/telemetry/docker-compose.yml` | VictoriaMetrics/Grafana/Loki/Telegraf stack |
 | `/root/LAB/airgap/verify-airgap.sh` | Air-gap compliance verifier |
 | `/root/LAB/problem_statement.md` | Original competition problem statement |

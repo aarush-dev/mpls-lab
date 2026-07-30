@@ -13,6 +13,7 @@ import json
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 from jsonschema import Draft202012Validator
 
@@ -47,8 +48,21 @@ def main():
 
     # enforce the published contract, not just the column list
     validator = Draft202012Validator(json.load(open(SCHEMA_PATH)))
-    # NaN is not JSON null; convert so nullable fields validate as they should
-    sample = [{k: (None if pd.isna(v) else v) for k, v in rec.items()}
+    # The schema describes the JSON projection of a row, so project first:
+    # ts is a timestamp on the wire (DEFECT 6b) and the label columns are numpy
+    # arrays (DEFECT 5b). NaN is not JSON null either, so nullable fields need
+    # the conversion to validate as intended.
+    def _json(v):
+        if isinstance(v, (list, tuple, np.ndarray)):
+            return [None if (x is None or (isinstance(x, float) and pd.isna(x))) else x
+                    for x in v]
+        if isinstance(v, pd.Timestamp):
+            return v.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if isinstance(v, (np.integer, np.floating)):
+            v = v.item()
+        return None if pd.isna(v) else v
+
+    sample = [{k: _json(v) for k, v in rec.items()}
               for rec in df.head(500).to_dict(orient="records")]
     errors = [f"{list(e.path)}: {e.message}"
               for rec in sample for e in validator.iter_errors(rec)]
@@ -56,7 +70,8 @@ def main():
 
     # A zero-positive label column is the exact failure this gate exists to
     # catch. Only demand positives when a fault window actually overlaps.
-    t_lo, t_hi = _parse_iso(df["ts"].min()), _parse_iso(df["ts"].max())
+    ts = pd.to_datetime(df["ts"], utc=True)  # timestamp column since DEFECT 6b
+    t_lo, t_hi = ts.min().timestamp(), ts.max().timestamp()
     devices = set(df["device"])
     overlapping = [l["scenario_id"] for l in sources.label_rows()
                    if l.get("device") in devices

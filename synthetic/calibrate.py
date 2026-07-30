@@ -118,8 +118,28 @@ def _tunnel_baseline(tun_nf):
     return out, by_site
 
 
-def _fault_signatures(f, tun_nf):
-    """Peak perturbation per fault_type relative to baseline, + lead_time."""
+def _spans_a_cycle(df):
+    """True if the capture covers at least one full diurnal period.
+
+    DEFECT 1a: a lead estimate off a 24.5-minute window is not an estimate. Any
+    lead figure derived from a capture shorter than one cycle is a hint at best.
+    """
+    try:
+        ts = pd.to_datetime(df["ts"], utc=True, format="mixed")
+    except Exception:
+        return False
+    period = float(os.environ.get("DIURNAL_PERIOD", 3600))
+    return (ts.max() - ts.min()).total_seconds() >= period
+
+
+def _fault_signatures(f, tun_nf, df=None):
+    """Peak perturbation per fault_type relative to baseline.
+
+    lead_s stays at its default and is never overwritten from the capture --
+    the generator draws leads from faults/leadpriors.py (DEFECT 1a). A measured
+    median lands in `lead_s_hint` only when the capture is long enough to mean
+    anything.
+    """
     base_lat = tun_nf["tunnel_latency_ms"].median()
     base_loss = tun_nf["tunnel_loss_pct"].median()
     base_jit = tun_nf["tunnel_jitter_ms"].median()
@@ -172,10 +192,17 @@ def _fault_signatures(f, tun_nf):
                 sig["loss_peak"] = float(gt["tunnel_loss_pct"].max())
                 sig["jit_peak"] = float(gt["tunnel_jitter_ms"].max())
                 sig["_src_peaks"] = "real"
+            # DEFECT 1a: lead_s is NO LONGER taken from the capture. The
+            # median of a 24.5-minute capture at 30 s resolution came out ~2 s
+            # for most types, the generator's 4-bucket floor then clamped every
+            # draw to exactly 120 s, and lead_time_s shipped with CV 0.03. The
+            # generator now draws from faults/leadpriors.py; the measured median
+            # is kept as a HINT only, and only when the capture spans at least
+            # one full diurnal period (below), never as the value.
             lt = g["lead_time_s"].dropna()
-            if len(lt):
-                sig["lead_s"] = float(lt.median())
-                sig["_src_lead"] = "real"
+            if len(lt) and df is not None and _spans_a_cycle(df):
+                sig["lead_s_hint"] = float(lt.median())
+                sig["_src_lead"] = "hint_real"
         out[ft] = sig
     return out
 
@@ -245,7 +272,7 @@ def build_profile(real_path):
         "octet_rate_by_site": _octet_rate(iface[~iface.is_fault]),
         "tunnel_baseline": tun_baseline,
         "tunnel_baseline_by_site": tun_baseline_by_site,
-        "fault_signatures": _fault_signatures(f, tun_nf),
+        "fault_signatures": _fault_signatures(f, tun_nf, df),
         "device_health": _device_health(df[~df.is_fault]),
         "real_fault_fraction": float(df.is_fault.mean()),
         "inventory": _inventory(df),

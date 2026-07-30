@@ -26,7 +26,7 @@ the windower needs and what a round-robin key would destroy.
 
 | topic | parts | retention | payload | why that retention |
 |---|---|---|---|---|
-| `noc.metrics` | 6 | 1 day | one canonical 40-column row per (device, entity, 30 s bucket) | high volume; only the predictive pipeline replays it |
+| `noc.metrics` | 6 | 1 day | one canonical 49-column row per (device, entity, 30 s bucket), label columns stripped | high volume; only the predictive pipeline replays it |
 | `noc.events` | 6 | 7 days | discrete BGP/OSPF/LDP/link/WireGuard events at **exact** timestamps, templated | cheap, and both pipelines want history |
 | `noc.faults` | 3 | 30 days | orchestrator label rows (ground truth) | outlives both pipelines; it is the training target |
 | `noc.topology` | 1 | 30 days | static graph + the controller's live active-path selections | low volume, needs history to see topology *changes* |
@@ -83,11 +83,18 @@ Against the broker + the committed 49,844-row real capture (lab down, replay mod
 | check | result |
 |---|---|
 | topics created with intended partitions/retention | 4/4, verified via `kafka-topics.sh --describe` |
-| replay throughput | 49,844 metric + 14 fault records in 7.5 s |
-| predictive windows built | 4,000 windows, 28 feature channels, L=20 demo |
-| labels joined onto windows | 363 labelled windows across 4 fault types |
-| copilot live consumption | 49,858 records, brief rendered with named incidents |
+| replay throughput | 49,844 metric + 17 fault records (every episode, `speed 0`) |
+| predictive windows built | 8,442 windows, 28 feature channels, L=20 stride 4 |
+| labels joined onto windows | 745 labelled windows across 10 fault types |
+| **concurrent labels survive the wire** | 628 windows with 1 fault, 103 with 2, 14 with 3 |
+| copilot live consumption | 49,861 records, brief rendered: 17 resolved incidents named |
 | per-group offsets independent | `noc-predictive` / `noc-copilot` listed separately with own committed offsets |
+
+Re-measured after the multi-label schema landed. `bridge.replay` explodes
+`scenario_ids`, so every concurrent episode reaches `noc.faults` (17, not the 14 the
+old single-winner collapse produced), and `n_concurrent` up to 3 arrives intact at
+the windower. `consume.py` treats the whole multi-label set as supervision, not
+input: the feature channel count is unchanged at 28.
 
 The demo uses `--window 20`, not the intended `L=168`: the real capture is only 50
 buckets deep, so a 168-bucket window cannot fill. Use the synthetic Parquet (2,880

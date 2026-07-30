@@ -54,6 +54,23 @@ telemetry on `device` and the `[t_start, t_end]` window; `t_impact` marks when
 the effect became observable, and `lead_time` is the precursor window the model
 must predict within.
 
+For **ramping** scenarios the ramp's wall duration is the lead drawn from
+`leadpriors.py` (`orchestrator.draw_ramp_seconds` →
+`NetemImpair.ramp(total_seconds=)`), so the impairment slope carries the lead
+instead of every fault ramping over a fixed ~2 min. The draw is capped at
+0.7 × `--duration` so a ramp cannot outlast its own fault — at the default 90 s
+that cap binds on nearly every draw, so use a much longer `--duration` to see the
+untruncated prior.
+
+**Campaign concurrency:** the active-target lock keys on the RESOURCE a scenario
+mutates — `(device, interface|tunnel|vrf|neighbor|process)` — not the bare device,
+so a VRF policy drift and an interface impairment run together on one box while two
+netem installs on one interface still exclude each other. `node_failure`,
+`rr_failure` and `bgp_cascade` are device-exclusive: ProcessKill removes the routing
+daemon, so anything needing `vtysh` on that box would be labelled for a fault it
+never really injected. `python3 orchestrator.py --selftest` checks this rule and the
+ramp draw without a lab.
+
 | field            | type        | meaning |
 |------------------|-------------|---------|
 | `scenario_id`    | string      | unique id `<type>-<target>-<hex8>` |
@@ -65,6 +82,7 @@ must predict within.
 | `t_end`          | ISO-8601 Z  | fault cleared / reverted |
 | `lead_time`      | float (s)   | `t_impact - t_start` — the precursor lead window |
 | `impact_method`  | string      | how `t_impact` was derived (see below) |
+| `t_impact_ramp`  | ISO-8601 Z / null | the ramp-derived `t_impact` whenever a ramp ran, recorded even when `impact_method` is `vm_threshold`, so the two estimates can be compared |
 | `probe`          | string/null | PromQL query polled to detect impact (null if modelled) |
 | `baseline_value` | float/null  | probe value just before injection |
 | `impact_value`   | float/null  | probe value at threshold crossing |
