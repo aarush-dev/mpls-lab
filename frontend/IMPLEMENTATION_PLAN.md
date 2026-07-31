@@ -265,8 +265,13 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   (congestion/node-failure/policy-drift) — fixtures cite only the 4 existing docs, new stubs would
   be unreferenced (YAGNI). Build green, `tsc --noEmit` exit 0, plugin.json 1.0.5, serves in Grafana
   11.1.0. **Gate met:** send/success/error/retry.
-- **M5 QA + handoff — next.** Tests, build, Compose startup, visual QA, doc sync, air-gap review,
-  acceptance checklist.
+- **M5 QA + handoff — DONE.** Jest: 86 tests / 9 suites, all pass. `tsc --noEmit` clean, `eslint
+  ./src` clean, prod webpack build green (dist 1.0.6). Docs written: `frontend/README.md`,
+  `frontend/API_CONTRACT.md`, `frontend/INTEGRATION_GUIDE.md`. Canonical run: `docker compose up -d`
+  → Grafana 11.1.0 at `/a/mplslab-noccopilot-app`. Air-gap: mock mode fully client-side, no network
+  egress. Not built: single full-app multi-page E2E test (covered by unit + integration tests
+  instead); browser pixel-QA at 1920/1366 left for the user. **M1–M5 all DONE — frontend
+  feature-complete, draft PR opened.**
 
 **Future (NOT in this scope):** api mode — build `HttpDataClient`, wire the 6 real `dataapi`
 endpoints via a Compose-service proxy, execute the query catalog, per-source live failure, live

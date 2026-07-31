@@ -204,7 +204,8 @@ built now** — kept cheap by the DataClient seam. Full plan: `frontend/IMPLEMEN
   the query catalog (PromQL) is authored from verified metric names but not executed now. Every
   fabricated prediction/chat reply is `source:'mock'` with a visible **Demo data** marker.
 - Milestones M1–M5 (foundation → fixtures → operator UI+topology/node-details → mock copilot →
-  QA/handoff), each user-gated. **M1–M4 DONE, M5 next.** M2: deterministic
+  QA/handoff), each user-gated. **M1–M5 all DONE — frontend feature-complete, draft PR opened.**
+  M2: deterministic
   `frontend/scripts/generate_fixtures.py` (verified byte-identical rerun), fixtures
   (bucketCount=152, deviceIds=70, incidents=28, predictions=69, faultTypes=21 all covered,
   topologyNodes=148, topologyLinks=361), `MockDataClient`, global demo clock, live OverviewPage.
@@ -217,7 +218,9 @@ built now** — kept cheap by the DataClient seam. Full plan: `frontend/IMPLEMEN
   = live incident synced to the demo clock, seeded replies for all 21 fault types with
   citations/evidence/root-cause/actions, citations restricted to the 4 existing `ragcorpus/*.md`
   docs). All 7 pages now implemented. Build green, `tsc --noEmit` clean, plugin.json 1.0.5, serves
-  in Grafana 11.1.0. M5 (QA/handoff) is the only remaining milestone.
+  in Grafana 11.1.0. M5: Jest 86 tests/9 suites all pass, `tsc`/`eslint` clean, prod build green
+  (dist 1.0.6), docs (`README.md`/`API_CONTRACT.md`/`INTEGRATION_GUIDE.md`), air-gap verified
+  (mock mode client-side only). All 5 milestones DONE.
 
 ## Reuse-before-build (don't reinvent)
 Adapt: `martimy/clab_mpls_frr`, `frr01`, `upa/nante-wan`, `ntaka329` pmacct lab, `sflow/frr`;
