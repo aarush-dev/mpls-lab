@@ -12,7 +12,7 @@ import { BucketMeta } from '../utils/time';
 const NAV_LINKS = [
   { to: '', label: 'Overview', exact: true },
   { to: 'topology', label: 'Topology' },
-  { to: 'node/1', label: 'Node Detail' },
+  { to: 'node/pe1', label: 'Node Detail' },
   { to: 'telemetry', label: 'Telemetry' },
   { to: 'incidents', label: 'Incidents' },
   { to: 'copilot', label: 'Copilot' },

@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useHistory } from 'react-router-dom';
 import { css } from '@emotion/css';
 import { PluginPage } from '@grafana/runtime';
-import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2, Link } from '@grafana/ui';
+import { GrafanaTheme2, SelectableValue } from '@grafana/data';
+import { useStyles2, Link, Select } from '@grafana/ui';
 
 import { TimeSeriesPanel } from '../components/TimeSeriesPanel';
 import { EmptyState } from '../components/EmptyState';
@@ -39,6 +39,7 @@ function groupSeries(series: MetricSeries[]): Array<{ title: string; series: Met
 
 export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const history = useHistory();
   const styles = useStyles2(getStyles);
   const { cursor } = useAppState();
   const dataClient = useDataClient();
@@ -49,6 +50,12 @@ export function NodeDetailPage() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+
+  // Clear telemetry only when the selected device changes (not on clock ticks) so switching nodes
+  // shows a clean "Loading…" instead of the previous node's charts, without per-tick blinking.
+  useEffect(() => {
+    setTelemetry(null);
+  }, [id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,9 +109,27 @@ export function NodeDetailPage() {
 
   const loading = telemetry === null && !error;
 
+  const deviceOptions = useMemo<Array<SelectableValue<string>>>(
+    () =>
+      (topology?.nodes ?? [])
+        .map((n) => n.id)
+        .sort()
+        .map((d) => ({ label: d, value: d })),
+    [topology]
+  );
+
   return (
     <PluginPage>
-      <h1>{id}</h1>
+      <div className={styles.titleRow}>
+        <h1 className={styles.title}>{id}</h1>
+        <Select
+          width={30}
+          placeholder="Select device…"
+          options={deviceOptions}
+          value={id}
+          onChange={(v: SelectableValue<string>) => v?.value && history.push(nodeDetailPath(v.value))}
+        />
+      </div>
 
       {error ? (
         <ErrorState onRetry={() => setAttempt((a) => a + 1)} />
@@ -125,7 +150,7 @@ export function NodeDetailPage() {
 
           <h3 className={styles.sectionTitle}>Telemetry</h3>
           {panels.length === 0 ? (
-            <EmptyState message="No telemetry for this device." />
+            <EmptyState message="No telemetry feed for this device (unmonitored host/core). Pick a monitored device above." />
           ) : (
             <div className={styles.panels}>
               {panels.map((group) => (
@@ -153,6 +178,16 @@ export function NodeDetailPage() {
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
+  titleRow: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: ${theme.spacing(2)};
+    flex-wrap: wrap;
+  `,
+  title: css`
+    margin: 0;
+  `,
   header: css`
     display: flex;
     flex-direction: column;

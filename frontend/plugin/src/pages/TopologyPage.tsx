@@ -29,8 +29,9 @@ export function TopologyPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setStatus('loading');
-
+    // Do NOT flip to 'loading' on cursor ticks — that unmounts the graph every second and makes it
+    // blink/re-layout. Keep the mounted graph and just replace its data; only the very first load
+    // (or a manual reload) shows the loading state.
     dataClient
       .getTopology(filters)
       .then((graph) => {
@@ -43,7 +44,8 @@ export function TopologyPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setStatus('error');
+          // Only surface an error if we have nothing to show; a transient tick failure keeps stale.
+          setStatus((s) => (s === 'ready' ? 'ready' : 'error'));
         }
       });
 
