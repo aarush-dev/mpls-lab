@@ -1,6 +1,6 @@
 {
   "name": "noccopilot",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Noc copilot",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",

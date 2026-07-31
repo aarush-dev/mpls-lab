@@ -252,9 +252,20 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   `constants.ts`. Build green, `tsc --noEmit` exit 0, plugin.json 1.0.3, serves in Grafana 11.1.0.
   **Gate met:** click node → Node Detail w/ preserved demo clock ✓; topology data-driven with
   default role style, new fixture node needs no code change ✓.
-- **M4 Copilot UI (mock) — next.** Conversations, message state machine, deterministic replies,
-  context, evidence/actions/citations, retry/error, Demo disclosure. **Gate: send/success/error/retry.**
-- **M5 QA + handoff** — tests, build, Compose startup, visual QA, doc sync, air-gap review,
+- **M4 Copilot UI (mock) — DONE.** `CopilotPage.tsx` + `CopilotChat.tsx` live (was a stub). Message
+  state machine draft→sending→complete, sending→error→retry; client-generated message ids via a
+  counter ref (no `Date.now`/`Math.random`); retry reuses the same id; send disabled while
+  in-flight. Context = top live incident at the current cursor (active>open, then severity),
+  passed as `context` to `sendMessage`, kept in sync with the demo clock; banner shows the live
+  incident or "Network nominal". All 21 fault types have a seeded reply (fixture conversations)
+  with citations, evidence, root-cause hypotheses, recommended actions, rendered as a structured
+  card separate from prose; citations point only to existing `ragcorpus/runbook-tunnel-latency-high.md`,
+  `runbook-bgp-adjacency-down.md`, `topology-map.md`, `incident-template.md`. Suggested-question
+  buttons seed the first turn. **Not added:** the plan's optional 3 new ragcorpus runbook stubs
+  (congestion/node-failure/policy-drift) — fixtures cite only the 4 existing docs, new stubs would
+  be unreferenced (YAGNI). Build green, `tsc --noEmit` exit 0, plugin.json 1.0.5, serves in Grafana
+  11.1.0. **Gate met:** send/success/error/retry.
+- **M5 QA + handoff — next.** Tests, build, Compose startup, visual QA, doc sync, air-gap review,
   acceptance checklist.
 
 **Future (NOT in this scope):** api mode — build `HttpDataClient`, wire the 6 real `dataapi`

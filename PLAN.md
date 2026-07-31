@@ -204,7 +204,7 @@ built now** — kept cheap by the DataClient seam. Full plan: `frontend/IMPLEMEN
   the query catalog (PromQL) is authored from verified metric names but not executed now. Every
   fabricated prediction/chat reply is `source:'mock'` with a visible **Demo data** marker.
 - Milestones M1–M5 (foundation → fixtures → operator UI+topology/node-details → mock copilot →
-  QA/handoff), each user-gated. **M1–M3 DONE, M4 next.** M2: deterministic
+  QA/handoff), each user-gated. **M1–M4 DONE, M5 next.** M2: deterministic
   `frontend/scripts/generate_fixtures.py` (verified byte-identical rerun), fixtures
   (bucketCount=152, deviceIds=70, incidents=28, predictions=69, faultTypes=21 all covered,
   topologyNodes=148, topologyLinks=361), `MockDataClient`, global demo clock, live OverviewPage.
@@ -212,8 +212,12 @@ built now** — kept cheap by the DataClient seam. Full plan: `frontend/IMPLEMEN
   Detail (`/node/:id`, preserves demo clock), Telemetry Explorer, Incidents & Predictions
   (risk-ordered, error-not-empty), Data & Integration Status, global FilterBar (POP+device). Gate
   met: click node → Node Detail w/ preserved clock; new fixture node needs no code change. Plugin
-  builds green, `tsc --noEmit` clean, plugin.json 1.0.3, serves in Grafana 11.1.0. Copilot page is
-  the only remaining page (M4).
+  builds green, `tsc --noEmit` clean, plugin.json 1.0.3, serves in Grafana 11.1.0. M4: Copilot page
+  (`CopilotPage.tsx`+`CopilotChat.tsx`, message state machine, client-generated message ids, context
+  = live incident synced to the demo clock, seeded replies for all 21 fault types with
+  citations/evidence/root-cause/actions, citations restricted to the 4 existing `ragcorpus/*.md`
+  docs). All 7 pages now implemented. Build green, `tsc --noEmit` clean, plugin.json 1.0.5, serves
+  in Grafana 11.1.0. M5 (QA/handoff) is the only remaining milestone.
 
 ## Reuse-before-build (don't reinvent)
 Adapt: `martimy/clab_mpls_frr`, `frr01`, `upa/nante-wan`, `ntaka329` pmacct lab, `sflow/frr`;
