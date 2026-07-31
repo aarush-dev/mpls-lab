@@ -1,5 +1,7 @@
 import React from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+// Grafana 11.1 ships react-router-dom v5 (Switch/Route/useRouteMatch), NOT v6.
+// Use the v5 API — Routes/element do not exist on the host-provided module.
+import { NavLink, Route, Switch, useRouteMatch } from 'react-router-dom';
 import { css } from '@emotion/css';
 import { AppRootProps, GrafanaTheme2 } from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
@@ -13,7 +15,7 @@ import { CopilotPage } from './pages/CopilotPage';
 import { StatusPage } from './pages/StatusPage';
 
 const NAV_LINKS = [
-  { to: '', label: 'Overview', end: true },
+  { to: '', label: 'Overview', exact: true },
   { to: 'topology', label: 'Topology' },
   { to: 'node/1', label: 'Node Detail' },
   { to: 'telemetry', label: 'Telemetry' },
@@ -22,8 +24,10 @@ const NAV_LINKS = [
   { to: 'status', label: 'Status' },
 ];
 
-export function App(props: AppRootProps) {
+export function App(_props: AppRootProps) {
   const styles = useStyles2(getStyles);
+  // Base path/url where Grafana mounted this app (/a/mplslab-noccopilot-app).
+  const { path, url } = useRouteMatch();
 
   return (
     <div className={styles.root}>
@@ -31,24 +35,25 @@ export function App(props: AppRootProps) {
         {NAV_LINKS.map((link) => (
           <NavLink
             key={link.to}
-            to={link.to}
-            end={link.end}
-            className={({ isActive }) => (isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink)}
+            exact={link.exact}
+            to={link.to ? `${url}/${link.to}` : url}
+            className={styles.navLink}
+            activeClassName={styles.navLinkActive}
           >
             {link.label}
           </NavLink>
         ))}
       </nav>
       <div className={styles.content}>
-        <Routes>
-          <Route path="/" element={<OverviewPage />} />
-          <Route path="/topology" element={<TopologyPage />} />
-          <Route path="/node/:id" element={<NodeDetailPage />} />
-          <Route path="/telemetry" element={<TelemetryPage />} />
-          <Route path="/incidents" element={<IncidentsPage />} />
-          <Route path="/copilot" element={<CopilotPage />} />
-          <Route path="/status" element={<StatusPage />} />
-        </Routes>
+        <Switch>
+          <Route exact path={path} component={OverviewPage} />
+          <Route path={`${path}/topology`} component={TopologyPage} />
+          <Route path={`${path}/node/:id`} component={NodeDetailPage} />
+          <Route path={`${path}/telemetry`} component={TelemetryPage} />
+          <Route path={`${path}/incidents`} component={IncidentsPage} />
+          <Route path={`${path}/copilot`} component={CopilotPage} />
+          <Route path={`${path}/status`} component={StatusPage} />
+        </Switch>
       </div>
     </div>
   );

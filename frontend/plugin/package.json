@@ -1,6 +1,6 @@
 {
   "name": "noccopilot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Noc copilot",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
@@ -57,11 +57,12 @@
     "@emotion/css": "11.10.6",
     "@grafana/data": "11.1.0",
     "@grafana/runtime": "11.1.0",
-    "@grafana/ui": "11.1.0",
     "@grafana/schema": "11.1.0",
+    "@grafana/ui": "11.1.0",
+    "@types/react-router-dom": "5.3.3",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "react-router-dom": "6.22.3",
+    "react-router-dom": "5.3.4",
     "rxjs": "7.8.0",
     "tslib": "2.5.3"
   },
