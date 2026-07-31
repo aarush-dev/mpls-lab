@@ -6,6 +6,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
 
 import { PlaybackControls } from './PlaybackControls';
+import { FilterBar } from './FilterBar';
 import { BucketMeta } from '../utils/time';
 
 const NAV_LINKS = [
@@ -48,6 +49,9 @@ export function AppShell({ meta, children }: PropsWithChildren<Props>) {
             {link.label}
           </NavLink>
         ))}
+        <div className={styles.filters}>
+          <FilterBar />
+        </div>
       </nav>
       <div className={styles.content}>{children}</div>
     </div>
@@ -77,10 +81,14 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   nav: css`
     display: flex;
+    align-items: center;
     gap: ${theme.spacing(2)};
     padding: ${theme.spacing(1)} 0;
     border-bottom: 1px solid ${theme.colors.border.weak};
     margin-bottom: ${theme.spacing(2)};
+  `,
+  filters: css`
+    margin-left: auto;
   `,
   navLink: css`
     color: ${theme.colors.text.secondary};

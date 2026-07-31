@@ -12,7 +12,7 @@ import { count, secondsToEta } from '../utils/format';
 
 export function OverviewPage() {
   const styles = useStyles2(getStyles);
-  const { cursor } = useAppState();
+  const { cursor, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -23,12 +23,12 @@ export function OverviewPage() {
   useEffect(() => {
     let cancelled = false;
 
-    dataClient.getOverview({}).then((result) => {
+    dataClient.getOverview(filters).then((result) => {
       if (!cancelled) {
         setOverview(result);
       }
     });
-    dataClient.getIncidents({}).then((result) => {
+    dataClient.getIncidents(filters).then((result) => {
       if (!cancelled) {
         setIncidents(result.filter((i) => i.status === 'open' || i.status === 'active'));
       }
@@ -37,7 +37,7 @@ export function OverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor]);
+  }, [dataClient, cursor, filters]);
 
   return (
     <PluginPage>

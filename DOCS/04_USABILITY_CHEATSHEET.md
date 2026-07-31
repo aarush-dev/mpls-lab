@@ -26,6 +26,24 @@ cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
 
 ---
 
+## 0.1 Frontend Grafana App Plugin (`mplslab-noccopilot-app`, mock mode)
+
+Separate from the lab above — `frontend/` is a self-contained folder, mock data only, no lab/backend needed. M1–M3 DONE (M4 copilot still a stub). Run: `cd frontend && docker compose up -d`, open Grafana at the URLs below.
+
+| Page | URL |
+|------|-----|
+| Overview | `/a/mplslab-noccopilot-app/` |
+| Topology | `/a/mplslab-noccopilot-app/topology` |
+| Node Detail | `/a/mplslab-noccopilot-app/node/:id` |
+| Telemetry Explorer | `/a/mplslab-noccopilot-app/telemetry` |
+| Incidents & Predictions | `/a/mplslab-noccopilot-app/incidents` |
+| Copilot (M4 — stub) | `/a/mplslab-noccopilot-app/copilot` |
+| Data & Integration Status | `/a/mplslab-noccopilot-app/status` |
+
+Details: `frontend/IMPLEMENTATION_PLAN.md` and repo-root `HANDOFF.md`.
+
+---
+
 ## 1. Starting Everything
 
 ### Step 0: Build local images (required before generate.py — it shells into frr-node for WireGuard keygen)

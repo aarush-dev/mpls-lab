@@ -1,0 +1,204 @@
+import React, { useEffect, useRef } from 'react';
+import cytoscape, { Core, ElementDefinition } from 'cytoscape';
+import { css } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { useStyles2 } from '@grafana/ui';
+
+import { TopologyLink } from '../data/types';
+import { TopologyNodeLive } from '../data/MockDataClient';
+import { styleForRole, colorForState } from '../data/topologyStyles';
+
+interface Props {
+  nodes: TopologyNodeLive[];
+  links: TopologyLink[];
+  onSelectNode: (id: string) => void;
+}
+
+const POP_PREFIX = 'pop::';
+
+function edgeId(l: TopologyLink, i: number): string {
+  return `${l.source}->${l.target}::${i}`;
+}
+
+function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[]): ElementDefinition[] {
+  const pops = new Set<string>();
+  nodes.forEach((n) => n.pop && pops.add(n.pop));
+
+  const popNodes: ElementDefinition[] = Array.from(pops).map((pop) => ({
+    data: { id: POP_PREFIX + pop, label: pop, isPop: true },
+  }));
+
+  const realNodes: ElementDefinition[] = nodes.map((n) => {
+    const style = styleForRole(n.role);
+    return {
+      data: {
+        id: n.id,
+        label: n.id,
+        role: n.role,
+        state: n.state ?? '',
+        shape: style.shape,
+        baseColor: style.color,
+        size: style.size,
+        parent: n.pop ? POP_PREFIX + n.pop : undefined,
+      },
+    };
+  });
+
+  const edges: ElementDefinition[] = links.map((l, i) => ({
+    data: {
+      id: edgeId(l, i),
+      source: l.source,
+      target: l.target,
+      kind: l.kind ?? 'physical',
+    },
+  }));
+
+  return [...popNodes, ...realNodes, ...edges];
+}
+
+function nodeSetKey(nodes: TopologyNodeLive[], links: TopologyLink[]): string {
+  return `${nodes.map((n) => n.id).join(',')}|${links.map((l) => `${l.source}-${l.target}`).join(',')}`;
+}
+
+export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
+  const styles = useStyles2(getStyles);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<Core | null>(null);
+  const setKeyRef = useRef<string>('');
+  const onSelectRef = useRef(onSelectNode);
+  onSelectRef.current = onSelectNode;
+
+  // Init cytoscape once.
+  useEffect(() => {
+    if (!containerRef.current) {
+      return undefined;
+    }
+    const cy = cytoscape({
+      container: containerRef.current,
+      elements: [],
+      style: [
+        {
+          selector: 'node[?isPop]',
+          style: {
+            'background-color': '#2c3235',
+            'background-opacity': 0.35,
+            shape: 'round-rectangle',
+            label: 'data(label)',
+            'text-valign': 'top',
+            'font-size': 10,
+            color: '#8e9297',
+          },
+        },
+        {
+          selector: 'node[!isPop]',
+          style: {
+            shape: 'ellipse',
+            width: 'data(size)',
+            height: 'data(size)',
+            'background-color': 'data(baseColor)',
+            label: 'data(label)',
+            'font-size': 8,
+            color: '#c7d0d9',
+            'text-valign': 'bottom',
+            'text-margin-y': 4,
+          },
+        },
+        {
+          selector: 'edge',
+          style: {
+            width: 1.5,
+            'line-color': '#5c6370',
+            'target-arrow-shape': 'none',
+            'curve-style': 'bezier',
+          },
+        },
+        {
+          selector: 'edge[kind = "tunnel"]',
+          style: { 'line-style': 'dashed' },
+        },
+        {
+          selector: 'node[state = "red"]',
+          style: { 'background-color': colorForState('red') },
+        },
+        {
+          selector: 'node[state = "amber"]',
+          style: { 'background-color': colorForState('amber') },
+        },
+        {
+          selector: 'node[state = "green"]',
+          style: { 'background-color': colorForState('green') },
+        },
+        {
+          selector: 'edge.state-red',
+          style: { 'line-color': colorForState('red') },
+        },
+        {
+          selector: 'edge.state-amber',
+          style: { 'line-color': colorForState('amber') },
+        },
+      ],
+      layout: { name: 'grid' },
+    });
+
+    cy.on('tap', 'node', (evt) => {
+      const target = evt.target;
+      if (!target.data('isPop')) {
+        onSelectRef.current(target.id());
+      }
+    });
+
+    cyRef.current = cy;
+    return () => {
+      cy.destroy();
+      cyRef.current = null;
+    };
+  }, []);
+
+  // Diff/replace elements + recolor, without re-layout unless the node/link set changed.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) {
+      return;
+    }
+    const key = nodeSetKey(nodes, links);
+    const setChanged = key !== setKeyRef.current;
+
+    if (setChanged) {
+      cy.elements().remove();
+      cy.add(buildElements(nodes, links));
+      const layout = cy.layout({ name: 'cose', animate: false, fit: true } as cytoscape.LayoutOptions);
+      layout.run();
+      cy.fit(undefined, 30);
+      setKeyRef.current = key;
+    } else {
+      // Same topology shape: just recolor nodes/edges for the new cursor tick.
+      const stateById = new Map(nodes.map((n) => [n.id, n.state]));
+      cy.nodes('[!isPop]').forEach((n) => {
+        n.data('state', stateById.get(n.id()) ?? '');
+      });
+      cy.edges().forEach((e) => {
+        const sState = stateById.get(e.data('source'));
+        const tState = stateById.get(e.data('target'));
+        e.removeClass('state-red state-amber');
+        if (sState === 'red' || tState === 'red') {
+          e.addClass('state-red');
+        } else if (sState === 'amber' || tState === 'amber') {
+          e.addClass('state-amber');
+        }
+      });
+    }
+  }, [nodes, links]);
+
+  return <div ref={containerRef} className={styles.container} />;
+}
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  container: css`
+    width: 100%;
+    min-height: 560px;
+    height: 560px;
+    background: ${theme.colors.background.primary};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+  `,
+});

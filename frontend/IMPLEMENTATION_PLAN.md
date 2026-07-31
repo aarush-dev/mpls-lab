@@ -237,12 +237,23 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   `/a/mplslab-noccopilot-app`. **Gate met:** rerun of `generate_fixtures.py` is byte-identical
   (sha256 match); synced fabric animates (degraded devices + active incidents vary per bucket
   across 90/152 buckets).
-- **M3 Operator UI + topology/node-details — next.** Overview, expandable Topology (cytoscape+clustering),
-  Node Details page + `node-detail.json`, Telemetry, Incidents, filters/state,
-  loading/empty/error/stale-not-green. **Gate: click node → node detail w/ preserved range; add a
-  fixture node → appears with no code change.**
-- **M4 Copilot UI (mock)** — conversations, message state machine, deterministic replies, context,
-  evidence/actions/citations, retry/error, Demo disclosure. **Gate: send/success/error/retry.**
+- **M3 Operator UI + topology/node-details — DONE.** Topology page: live cytoscape map
+  (cytoscape@3.30.2, offline/pinned), POP clustering via compound nodes, role→style registry with
+  default fallback (expandable — new fixture node, zero code change), node search, health legend,
+  per-cursor red/amber/green coloring without re-layout, click node → Node Detail. Node Detail page
+  `/node/:id`: header (role/POP/siteType), telemetry charts, neighbor links, active
+  incident/prediction health line; router nav preserves the demo clock. Telemetry Explorer: device
+  + metric multi-select, charts grouped by family, fault-overlay bands, honesty caption for 0
+  interface-error counters. Incidents & Predictions: risk-ordered table (active>open>resolved,
+  severity, soonest time-to-impact), predictions strip, detail drawer, load error renders as error
+  not empty/green. Data & Integration Status page: feeds/dataset window/ingest stats. Global
+  FilterBar (POP + device) in nav, reducer-held, all pages refetch on cursor/filter change. Charts
+  are native SVG (`TimeSeriesPanel`), no charting dep. Shared `EmptyState`/`ErrorState`,
+  `constants.ts`. Build green, `tsc --noEmit` exit 0, plugin.json 1.0.3, serves in Grafana 11.1.0.
+  **Gate met:** click node → Node Detail w/ preserved demo clock ✓; topology data-driven with
+  default role style, new fixture node needs no code change ✓.
+- **M4 Copilot UI (mock) — next.** Conversations, message state machine, deterministic replies,
+  context, evidence/actions/citations, retry/error, Demo disclosure. **Gate: send/success/error/retry.**
 - **M5 QA + handoff** — tests, build, Compose startup, visual QA, doc sync, air-gap review,
   acceptance checklist.
 

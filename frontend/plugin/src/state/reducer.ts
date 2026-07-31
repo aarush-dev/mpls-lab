@@ -3,6 +3,8 @@
 // No wall-clock time is read here — TICK advances the cursor by exactly one bucket per call,
 // driven by a setInterval in AppContext.tsx (deterministic, testable).
 
+import type { Filters } from '../data/types';
+
 export interface AppState {
   cursor: number;
   playing: boolean;
@@ -10,6 +12,8 @@ export interface AppState {
   loop: boolean;
   bucketCount: number;
   windowBuckets: number;
+  // Global operator filters (pop/siteType/device/vrf/hub). Passed to every DataClient call.
+  filters: Filters;
 }
 
 export const initialAppState: AppState = {
@@ -19,6 +23,7 @@ export const initialAppState: AppState = {
   loop: true,
   bucketCount: 0,
   windowBuckets: 50,
+  filters: {},
 };
 
 export type AppAction =
@@ -27,7 +32,12 @@ export type AppAction =
   | { type: 'PAUSE' }
   | { type: 'SEEK'; payload: { cursor: number } }
   | { type: 'SET_SPEED'; payload: { speed: number } }
-  | { type: 'SET_BOUNDS'; payload: { bucketCount: number; windowBuckets: number } };
+  | { type: 'SET_BOUNDS'; payload: { bucketCount: number; windowBuckets: number } }
+  | { type: 'SET_FILTER'; payload: { key: StringFilterKey; value: string | undefined } }
+  | { type: 'CLEAR_FILTERS' };
+
+// String-valued filter keys only (excludes timeRange). SET_FILTER never touches timeRange.
+export type StringFilterKey = 'pop' | 'siteType' | 'device' | 'vrf' | 'hub';
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -53,6 +63,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'SET_SPEED':
       return { ...state, speed: action.payload.speed };
+    case 'SET_FILTER': {
+      const filters = { ...state.filters };
+      if (action.payload.value) {
+        filters[action.payload.key] = action.payload.value;
+      } else {
+        delete filters[action.payload.key];
+      }
+      return { ...state, filters };
+    }
+    case 'CLEAR_FILTERS':
+      return { ...state, filters: {} };
     case 'SET_BOUNDS': {
       const bucketCount = Math.max(0, action.payload.bucketCount);
       const windowBuckets = Math.max(1, action.payload.windowBuckets);

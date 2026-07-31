@@ -1,6 +1,6 @@
 {
   "name": "noccopilot",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Noc copilot",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
@@ -59,7 +59,9 @@
     "@grafana/runtime": "11.1.0",
     "@grafana/schema": "11.1.0",
     "@grafana/ui": "11.1.0",
+    "@types/cytoscape": "^3.21.9",
     "@types/react-router-dom": "5.3.3",
+    "cytoscape": "^3.30.2",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-router-dom": "5.3.4",
