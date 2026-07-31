@@ -184,9 +184,33 @@ integrated into the canonical lab:
   buckets cannot resolve a BGP reset and its reconvergence when both land inside one
   bucket. Telemetry compose grew from 10 to **11 services**.
 
+## Phase 7 — Grafana NOC frontend (React App Plugin)
+
+**Scope now: frontend + mock data only.** A modular **Grafana App Plugin**
+(`mplslab-noccopilot-app`, React+TS) over the committed sample data, shipped as the self-contained
+`frontend/` folder. Runs fully in **mock mode** (bundled deterministic fixtures, no lab/backend,
+air-gapped). Does NOT implement the ML model, copilot backend, lab, telemetry, or any live API —
+those are labelled mock behind stable frontend contracts. **Live `api` mode is future work, not
+built now** — kept cheap by the DataClient seam. Full plan: `frontend/IMPLEMENTATION_PLAN.md`.
+
+- **7 sections:** Network Overview, Interactive Topology, Node Details, Telemetry Explorer,
+  Incidents & Predictions, Copilot, Data & Integration Status.
+- **Data-driven expandable topology:** roles/nodes/links from data (cytoscape.js, POP clustering,
+  no hardcoded counts); adding nodes later needs only updated fixture data, no UI change.
+- **Node Details opens inside Grafana** on node click (app page `/node/:id` via DataClient — works
+  in mock mode with no datasource — plus a provisioned `$device` `node-detail.json` dashboard for
+  the future api mode).
+- **DataClient boundary:** `MockDataClient` (built, default). `HttpDataClient` is a future stub;
+  the query catalog (PromQL) is authored from verified metric names but not executed now. Every
+  fabricated prediction/chat reply is `source:'mock'` with a visible **Demo data** marker.
+- Milestones M1–M5 (foundation → fixtures → operator UI+topology/node-details → mock copilot →
+  QA/handoff), each user-gated.
+
 ## Reuse-before-build (don't reinvent)
 Adapt: `martimy/clab_mpls_frr`, `frr01`, `upa/nante-wan`, `ntaka329` pmacct lab, `sflow/frr`;
 native `containerlab tools netem`; Telegraf SNMP plugin; VictoriaMetrics+Grafana; pmacct pipeline.
+Frontend: `@grafana/ui` + `@grafana/data`; cytoscape.js only where Grafana packages can't
+provide the interactive topology.
 
 ## Verification (on the full lab)
 1. `containerlab inspect` → all nodes healthy at full scale.

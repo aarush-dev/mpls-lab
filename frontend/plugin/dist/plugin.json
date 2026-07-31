@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "NOC Copilot",
+  "id": "mplslab-noccopilot-app",
+  "info": {
+    "keywords": ["app", "noc", "copilot"],
+    "description": "NOC Copilot",
+    "author": {
+      "name": "mplslab"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "screenshots": [],
+    "version": "1.0.0",
+    "updated": "2026-07-31"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Overview",
+      "path": "/a/mplslab-noccopilot-app/",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": true
+    },
+    {
+      "type": "page",
+      "name": "Topology",
+      "path": "/a/mplslab-noccopilot-app/topology",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
+      "name": "Node Detail",
+      "path": "/a/mplslab-noccopilot-app/node/1",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
+      "name": "Telemetry",
+      "path": "/a/mplslab-noccopilot-app/telemetry",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
+      "name": "Incidents",
+      "path": "/a/mplslab-noccopilot-app/incidents",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
+      "name": "Copilot",
+      "path": "/a/mplslab-noccopilot-app/copilot",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
+      "name": "Status",
+      "path": "/a/mplslab-noccopilot-app/status",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=11.1.0",
+    "plugins": []
+  }
+}

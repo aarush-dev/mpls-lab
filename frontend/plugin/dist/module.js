@@ -1,0 +1,20 @@
+define(["@emotion/css","@grafana/data","@grafana/runtime","@grafana/ui","react","react-router-dom"],(e,t,n,l,o,r)=>(()=>{"use strict";var a={89(t){t.exports=e},781(e){e.exports=t},531(e){e.exports=n},7(e){e.exports=l},959(e){e.exports=o},806(e){e.exports=r}};const c={};function u(e){const t=c[e];if(void 0!==t)return t.exports;const n=c[e]={exports:{}};return a[e](n,n.exports,u),n.exports}u.n=e=>{const t=e&&e.__esModule?()=>e.default:()=>e;return u.d(t,{a:t}),t},u.d=(e,t)=>{if(Array.isArray(t))for(var n=0;n<t.length;){var l=t[n++],o=t[n++];u.o(e,l)?0===o&&n++:0===o?Object.defineProperty(e,l,{enumerable:!0,value:t[n++]}):Object.defineProperty(e,l,{enumerable:!0,get:o})}else for(var l in t)u.o(t,l)&&!u.o(e,l)&&Object.defineProperty(e,l,{enumerable:!0,get:t[l]})},u.o=(e,t)=>Object.prototype.hasOwnProperty.call(e,t),u.r=e=>{Symbol.toStringTag&&Object.defineProperty(e,Symbol.toStringTag,{value:"Module"}),Object.defineProperty(e,"__esModule",{value:!0})};let i={};u.r(i),u.d(i,{plugin:()=>R});var s=u(781),m=u(959),p=u.n(m),g=u(806),d=u(89),E=u(7),f=u(531);function v(){return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Overview"),p().createElement("p",null,"Coming soon."))}function y(){return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Topology"),p().createElement("p",null,"Coming soon."))}function b(){const{id:e}=(0,g.useParams)();return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Node Detail",e?`: ${e}`:""),p().createElement("p",null,"Coming soon."))}function P(){return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Telemetry"),p().createElement("p",null,"Coming soon."))}function h(){return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Incidents"),p().createElement("p",null,"Coming soon."))}function x(){return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Copilot"),p().createElement("p",null,"Coming soon."))}function $(){return p().createElement(f.PluginPage,null,p().createElement("h1",null,"Status"),p().createElement("p",null,"Coming soon."))}const C=[{to:"",label:"Overview",end:!0},{to:"topology",label:"Topology"},{to:"node/1",label:"Node Detail"},{to:"telemetry",label:"Telemetry"},{to:"incidents",label:"Incidents"},{to:"copilot",label:"Copilot"},{to:"status",label:"Status"}],O=e=>({root:d.css`
+    display: flex;
+    flex-direction: column;
+  `,nav:d.css`
+    display: flex;
+    gap: ${e.spacing(2)};
+    padding: ${e.spacing(1)} 0;
+    border-bottom: 1px solid ${e.colors.border.weak};
+    margin-bottom: ${e.spacing(2)};
+  `,navLink:d.css`
+    color: ${e.colors.text.secondary};
+    text-decoration: none;
+    padding: ${e.spacing(.5)} ${e.spacing(1)};
+  `,navLinkActive:d.css`
+    color: ${e.colors.text.primary};
+    font-weight: ${e.typography.fontWeightMedium};
+  `,content:d.css`
+    flex: 1;
+  `}),R=(new s.AppPlugin).setRootPage(function(e){const t=(0,E.useStyles2)(O);return p().createElement("div",{className:t.root},p().createElement("nav",{className:t.nav},C.map(e=>p().createElement(g.NavLink,{key:e.to,to:e.to,end:e.end,className:({isActive:e})=>e?`${t.navLink} ${t.navLinkActive}`:t.navLink},e.label))),p().createElement("div",{className:t.content},p().createElement(g.Routes,null,p().createElement(g.Route,{path:"/",element:p().createElement(v,null)}),p().createElement(g.Route,{path:"/topology",element:p().createElement(y,null)}),p().createElement(g.Route,{path:"/node/:id",element:p().createElement(b,null)}),p().createElement(g.Route,{path:"/telemetry",element:p().createElement(P,null)}),p().createElement(g.Route,{path:"/incidents",element:p().createElement(h,null)}),p().createElement(g.Route,{path:"/copilot",element:p().createElement(x,null)}),p().createElement(g.Route,{path:"/status",element:p().createElement($,null)}))))});return i})());
+//# sourceMappingURL=module.js.map
