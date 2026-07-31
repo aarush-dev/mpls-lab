@@ -1,36 +1,64 @@
+// Global demo-clock state. cursor = current bucket index into the composite playback tape.
+// bucketCount/windowBuckets are populated once (SET_BOUNDS) when fixture metadata loads.
+// No wall-clock time is read here — TICK advances the cursor by exactly one bucket per call,
+// driven by a setInterval in AppContext.tsx (deterministic, testable).
+
 export interface AppState {
   cursor: number;
   playing: boolean;
   speed: number;
   loop: boolean;
+  bucketCount: number;
+  windowBuckets: number;
 }
 
 export const initialAppState: AppState = {
   cursor: 0,
-  playing: false,
+  playing: true,
   speed: 1,
-  loop: false,
+  loop: true,
+  bucketCount: 0,
+  windowBuckets: 50,
 };
 
 export type AppAction =
-  | { type: 'TICK'; payload?: { deltaMs: number } }
+  | { type: 'TICK' }
   | { type: 'PLAY' }
   | { type: 'PAUSE' }
   | { type: 'SEEK'; payload: { cursor: number } }
-  | { type: 'SET_SPEED'; payload: { speed: number } };
+  | { type: 'SET_SPEED'; payload: { speed: number } }
+  | { type: 'SET_BOUNDS'; payload: { bucketCount: number; windowBuckets: number } };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
-    case 'TICK':
-      return { ...state, cursor: state.cursor + (action.payload?.deltaMs ?? 0) };
+    case 'TICK': {
+      if (state.bucketCount <= 0) {
+        return state;
+      }
+      const next = state.loop
+        ? (state.cursor + 1) % state.bucketCount
+        : Math.min(state.cursor + 1, state.bucketCount - 1);
+      return { ...state, cursor: next };
+    }
     case 'PLAY':
       return { ...state, playing: true };
     case 'PAUSE':
       return { ...state, playing: false };
-    case 'SEEK':
-      return { ...state, cursor: action.payload.cursor };
+    case 'SEEK': {
+      if (state.bucketCount <= 0) {
+        return { ...state, cursor: Math.max(0, action.payload.cursor) };
+      }
+      const clamped = Math.max(0, Math.min(action.payload.cursor, state.bucketCount - 1));
+      return { ...state, cursor: clamped };
+    }
     case 'SET_SPEED':
       return { ...state, speed: action.payload.speed };
+    case 'SET_BOUNDS': {
+      const bucketCount = Math.max(0, action.payload.bucketCount);
+      const windowBuckets = Math.max(1, action.payload.windowBuckets);
+      const cursor = bucketCount > 0 ? Math.min(state.cursor, bucketCount - 1) : 0;
+      return { ...state, bucketCount, windowBuckets, cursor };
+    }
     default:
       return state;
   }

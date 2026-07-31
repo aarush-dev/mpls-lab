@@ -1,0 +1,1346 @@
+[
+  {
+    "id": "conv-seed-asymmetric_loss",
+    "messages": [
+      {
+        "id": "conv-seed-asymmetric_loss-u1",
+        "role": "user",
+        "content": "What's going on with the asymmetric loss alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-asymmetric_loss-a1",
+        "role": "assistant",
+        "content": "This looks like a asymmetric loss event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a asymmetric loss event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "asymmetric_loss",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for asymmetric_loss",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Loss concentrated in one direction of the tunnel, suggesting a one-way path issue",
+        "Possible asymmetric routing or a half-duplex/negotiation mismatch upstream"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Isolate direction",
+          "detail": "Compare inbound vs outbound loss to localize which leg is impaired."
+        },
+        {
+          "title": "Check upstream link",
+          "detail": "Inspect the egress interface counters on the affected direction."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-bgp_cascade",
+    "messages": [
+      {
+        "id": "conv-seed-bgp_cascade-u1",
+        "role": "user",
+        "content": "What's going on with the bgp cascade alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-bgp_cascade-a1",
+        "role": "assistant",
+        "content": "This looks like a bgp cascade event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a bgp cascade event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "bgp_cascade",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for bgp_cascade",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Initial BGP event cascading into dependent sessions/prefixes",
+        "Downstream churn triggered by an upstream adjacency flap"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Trace the origin",
+          "detail": "Identify the first device in the ADJCHANGE sequence."
+        },
+        {
+          "title": "Contain downstream churn",
+          "detail": "Watch dependent VRF sessions for secondary flaps."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-bgp_flap",
+    "messages": [
+      {
+        "id": "conv-seed-bgp_flap-u1",
+        "role": "user",
+        "content": "What's going on with the bgp flap alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-bgp_flap-a1",
+        "role": "assistant",
+        "content": "This looks like a bgp flap event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a bgp flap event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "bgp_flap",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for bgp_flap",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Repeated BGP session churn (clear bgp / neighbor reset loop)",
+        "Flapping physical/logical link causing adjacency bounce"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check neighbor state",
+          "detail": "Run `show bgp summary` on the device; confirm this is a flap, not a process gap."
+        },
+        {
+          "title": "Dampen if repeated",
+          "detail": "Consider BGP dampening if the flap recurs beyond the SLA window."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-brownout",
+    "messages": [
+      {
+        "id": "conv-seed-brownout-u1",
+        "role": "user",
+        "content": "What's going on with the brownout alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-brownout-a1",
+        "role": "assistant",
+        "content": "This looks like a brownout event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a brownout event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "brownout",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for brownout",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Slow, sustained degradation short of a hard outage",
+        "Gradual resource exhaustion (bandwidth, queue, or CPU) on the affected site"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Correlate with load",
+          "detail": "Check cpu_pct/mem_pct and queue backlog alongside the tunnel metrics."
+        },
+        {
+          "title": "Watch for escalation",
+          "detail": "Brownouts can precede a hard outage -- confirm trend direction."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-congestion",
+    "messages": [
+      {
+        "id": "conv-seed-congestion-u1",
+        "role": "user",
+        "content": "What's going on with the congestion alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-congestion-a1",
+        "role": "assistant",
+        "content": "This looks like a congestion event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a congestion event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "congestion",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for congestion",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Sustained traffic surge exceeding provisioned tunnel bandwidth",
+        "Possible mis-provisioned QoS class letting best-effort traffic starve VOICE/CORP"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check tunnel utilization",
+          "detail": "Compare sdwan_tunnel_loss_pct/latency_ms against the VRF's QoS class share."
+        },
+        {
+          "title": "Rebalance or upsize",
+          "detail": "Consider raising the CE uplink rate or re-weighting HTB classes."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-controller_drift",
+    "messages": [
+      {
+        "id": "conv-seed-controller_drift-u1",
+        "role": "user",
+        "content": "What's going on with the controller drift alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-controller_drift-a1",
+        "role": "assistant",
+        "content": "This looks like a controller drift event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a controller drift event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "controller_drift",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for controller_drift",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "SD-WAN controller state diverged from device-reported state",
+        "Stale controller policy push not yet reconciled with the data plane"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Reconcile controller state",
+          "detail": "Force a controller policy re-push to the drifted device."
+        },
+        {
+          "title": "Audit recent changes",
+          "detail": "Check for manual config changes bypassing the controller."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-core_congestion",
+    "messages": [
+      {
+        "id": "conv-seed-core_congestion-u1",
+        "role": "user",
+        "content": "What's going on with the core congestion alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-core_congestion-a1",
+        "role": "assistant",
+        "content": "This looks like a core congestion event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a core congestion event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "core_congestion",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for core_congestion",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Provider-core link(s) saturated by inter-POP transit load",
+        "Traffic-engineering imbalance concentrating load on one core path"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check core link utilization",
+          "detail": "Identify the saturated inter-POP link(s)."
+        },
+        {
+          "title": "Traffic-engineer around it",
+          "detail": "Shift traffic to an alternate core path if available."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-core_partition",
+    "messages": [
+      {
+        "id": "conv-seed-core_partition-u1",
+        "role": "user",
+        "content": "What's going on with the core partition alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-core_partition-a1",
+        "role": "assistant",
+        "content": "This looks like a core partition event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a core partition event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "core_partition",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for core_partition",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Provider core split into two reachability partitions",
+        "Multiple concurrent core link failures exceeding redundancy"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Map the partition boundary",
+          "detail": "Determine which POPs are on which side."
+        },
+        {
+          "title": "Restore redundant paths",
+          "detail": "Bring up any remaining spare core capacity."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-gray_failure",
+    "messages": [
+      {
+        "id": "conv-seed-gray_failure-u1",
+        "role": "user",
+        "content": "What's going on with the gray failure alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-gray_failure-a1",
+        "role": "assistant",
+        "content": "This looks like a gray failure event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a gray failure event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "gray_failure",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for gray_failure",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Device reports healthy but is silently dropping/degrading a subset of traffic",
+        "Partial hardware fault not surfaced by standard health checks"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Cross-check health vs traffic",
+          "detail": "Compare reported health against actual forwarded traffic/errors."
+        },
+        {
+          "title": "Consider proactive reboot",
+          "detail": "Gray failures often need a hard reset to clear."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-hub_spoke_congest",
+    "messages": [
+      {
+        "id": "conv-seed-hub_spoke_congest-u1",
+        "role": "user",
+        "content": "What's going on with the hub spoke congest alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-hub_spoke_congest-a1",
+        "role": "assistant",
+        "content": "This looks like a hub spoke congest event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a hub spoke congest event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "hub_spoke_congest",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for hub_spoke_congest",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "WireGuard hub concentrator saturated by aggregate spoke traffic",
+        "Hub uplink undersized for current spoke fan-in"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check hub aggregate load",
+          "detail": "Sum spoke tunnel throughput against the hub's uplink capacity."
+        },
+        {
+          "title": "Redistribute spokes",
+          "detail": "Consider moving some spokes to a less-loaded hub."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-ldp_session_flap",
+    "messages": [
+      {
+        "id": "conv-seed-ldp_session_flap-u1",
+        "role": "user",
+        "content": "What's going on with the ldp session flap alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-ldp_session_flap-a1",
+        "role": "assistant",
+        "content": "This looks like a ldp session flap event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a ldp session flap event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "ldp_session_flap",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for ldp_session_flap",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "LDP session instability disrupting label bindings on a P-P or P-PE link",
+        "Underlying OSPF instability cascading into LDP"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check LDP neighbor state",
+          "detail": "Correlate with the underlying OSPF adjacency for the same link."
+        },
+        {
+          "title": "Verify label bindings",
+          "detail": "Confirm LSPs re-establish once the session stabilizes."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-mpls_underlay_failure",
+    "messages": [
+      {
+        "id": "conv-seed-mpls_underlay_failure-u1",
+        "role": "user",
+        "content": "What's going on with the mpls underlay failure alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-mpls_underlay_failure-a1",
+        "role": "assistant",
+        "content": "This looks like a mpls underlay failure event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a mpls underlay failure event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "mpls_underlay_failure",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for mpls_underlay_failure",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "LDP/label-switched path failure in the MPLS underlay",
+        "Underlay OSPF instability breaking label bindings"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check LDP/OSPF underlay",
+          "detail": "Confirm label bindings re-establish once OSPF converges."
+        },
+        {
+          "title": "Verify MPLS forwarding",
+          "detail": "Confirm LSPs are back before declaring resolved."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-node_failure",
+    "messages": [
+      {
+        "id": "conv-seed-node_failure-u1",
+        "role": "user",
+        "content": "What's going on with the node failure alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-node_failure-a1",
+        "role": "assistant",
+        "content": "This looks like a node failure event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a node failure event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "node_failure",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for node_failure",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "bgpd or the device process crashed and is awaiting watchfrr respawn",
+        "Hard device failure on the affected node"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Confirm process state",
+          "detail": "Check whether bgpd/watchfrr is respawning the failed process."
+        },
+        {
+          "title": "Escalate if hard down",
+          "detail": "If the node stays unreachable past the respawn window, treat as hardware failure."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-ospf_area_flap",
+    "messages": [
+      {
+        "id": "conv-seed-ospf_area_flap-u1",
+        "role": "user",
+        "content": "What's going on with the ospf area flap alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-ospf_area_flap-a1",
+        "role": "assistant",
+        "content": "This looks like a ospf area flap event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a ospf area flap event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "ospf_area_flap",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for ospf_area_flap",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "OSPF adjacency flapping within a POP area, forcing repeated SPF runs",
+        "MTU mismatch or unstable link triggering neighbor state churn"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check adjacency stability",
+          "detail": "Look for repeated neighbor state transitions in the affected area."
+        },
+        {
+          "title": "Verify link quality",
+          "detail": "Rule out a marginal physical link or MTU mismatch."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-p_node_failure",
+    "messages": [
+      {
+        "id": "conv-seed-p_node_failure-u1",
+        "role": "user",
+        "content": "What's going on with the p node failure alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-p_node_failure-a1",
+        "role": "assistant",
+        "content": "This looks like a p node failure event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a p node failure event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "p_node_failure",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for p_node_failure",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Core P router failure removing LDP/OSPF transit capacity",
+        "Provider-core hardware or process fault"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Verify core redundancy",
+          "detail": "Confirm alternate P-P/P-PE paths are carrying rerouted traffic."
+        },
+        {
+          "title": "Escalate to hardware",
+          "detail": "Core node failures typically need on-site intervention."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-path_asymmetry",
+    "messages": [
+      {
+        "id": "conv-seed-path_asymmetry-u1",
+        "role": "user",
+        "content": "What's going on with the path asymmetry alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-path_asymmetry-a1",
+        "role": "assistant",
+        "content": "This looks like a path asymmetry event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a path asymmetry event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "path_asymmetry",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for path_asymmetry",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Forward and return paths diverging across the core, producing inconsistent latency",
+        "ECMP hashing sending flows over paths with different costs"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Compare forward/return paths",
+          "detail": "Trace both directions to find the diverging hop."
+        },
+        {
+          "title": "Check ECMP hashing",
+          "detail": "Confirm ECMP isn't sending return traffic over a longer path."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-policy_drift",
+    "messages": [
+      {
+        "id": "conv-seed-policy_drift-u1",
+        "role": "user",
+        "content": "What's going on with the policy drift alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-policy_drift-a1",
+        "role": "assistant",
+        "content": "This looks like a policy drift event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a policy drift event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "policy_drift",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for policy_drift",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Deployed QoS/routing policy diverged from the intended controller policy",
+        "Manual or partial config change not reconciled with the controller"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Diff deployed vs intended policy",
+          "detail": "Compare the device's active config against the controller's intended state."
+        },
+        {
+          "title": "Re-push controller policy",
+          "detail": "Force reconciliation once the drift is confirmed."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-pop_isolation",
+    "messages": [
+      {
+        "id": "conv-seed-pop_isolation-u1",
+        "role": "user",
+        "content": "What's going on with the pop isolation alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-pop_isolation-a1",
+        "role": "assistant",
+        "content": "This looks like a pop isolation event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a pop isolation event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "pop_isolation",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for pop_isolation",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "A POP's inter-POP backbone links all down, isolating it from the rest of the core",
+        "Cascading SRLG/core failures leaving one POP unreachable"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check all inter-POP links for that POP",
+          "detail": "Confirm whether it's a full or partial isolation."
+        },
+        {
+          "title": "Prioritize restoration",
+          "detail": "POP isolation affects every site behind it -- treat as highest priority."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-rr_failure",
+    "messages": [
+      {
+        "id": "conv-seed-rr_failure-u1",
+        "role": "user",
+        "content": "What's going on with the rr failure alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-rr_failure-a1",
+        "role": "assistant",
+        "content": "This looks like a rr failure event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a rr failure event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "rr_failure",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for rr_failure",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Route-reflector (pe1/pe2) session loss collapsing iBGP for its clients",
+        "RR process restart or control-plane resource exhaustion"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Check RR reachability",
+          "detail": "Verify pe1/pe2 loopback reachability from clients."
+        },
+        {
+          "title": "Fail over RR role",
+          "detail": "If one RR is down, confirm the other RR is still serving all clients."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: BGP adjacency down / flapping",
+          "href": "ragcorpus/runbook-bgp-adjacency-down.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-srlg_cut",
+    "messages": [
+      {
+        "id": "conv-seed-srlg_cut-u1",
+        "role": "user",
+        "content": "What's going on with the srlg cut alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-srlg_cut-a1",
+        "role": "assistant",
+        "content": "This looks like a srlg cut event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a srlg cut event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "srlg_cut",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for srlg_cut",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "Shared-risk link group (fiber conduit) cut taking down all its member links at once",
+        "Simultaneous loss of redundant inter-POP links sharing one physical conduit"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Identify the shared conduit",
+          "detail": "Check which SRLG group's links all dropped together."
+        },
+        {
+          "title": "Confirm diverse restoration",
+          "detail": "Verify traffic rerouted over links outside the cut conduit."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  },
+  {
+    "id": "conv-seed-tunnel_degrade",
+    "messages": [
+      {
+        "id": "conv-seed-tunnel_degrade-u1",
+        "role": "user",
+        "content": "What's going on with the tunnel degrade alert?",
+        "createdAt": "2026-07-26T02:19:30Z",
+        "state": "complete"
+      },
+      {
+        "id": "conv-seed-tunnel_degrade-a1",
+        "role": "assistant",
+        "content": "This looks like a tunnel degrade event. See the linked runbook for the telemetry signature and triage steps.",
+        "createdAt": "2026-07-26T02:19:31Z",
+        "state": "complete"
+      }
+    ],
+    "context": {
+      "incidentId": null
+    },
+    "seedResponse": {
+      "summary": "This looks like a tunnel degrade event. See the linked runbook for the telemetry signature and triage steps.",
+      "predictedIssue": "tunnel_degrade",
+      "affectedScope": [],
+      "evidence": [
+        {
+          "label": "Fault type",
+          "detail": "Matches known signature for tunnel_degrade",
+          "source": "ground_truth"
+        }
+      ],
+      "rootCauseHypotheses": [
+        "WireGuard tunnel path experiencing steady latency/jitter buildup",
+        "Underlying transport congestion or a marginal link on the tunnel's egress path"
+      ],
+      "recommendedActions": [
+        {
+          "title": "Inspect wg0 path",
+          "detail": "Check tunnel_latency_ms/jitter_ms trend and rekey count for the affected tunnel."
+        },
+        {
+          "title": "Fail over to alternate hub",
+          "detail": "If a second hub is reachable, prefer it while the primary path recovers."
+        }
+      ],
+      "citations": [
+        {
+          "title": "Runbook: SD-WAN tunnel latency / loss high",
+          "href": "ragcorpus/runbook-tunnel-latency-high.md"
+        },
+        {
+          "title": "Topology map",
+          "href": "ragcorpus/topology-map.md"
+        },
+        {
+          "title": "Incident report template",
+          "href": "ragcorpus/incident-template.md"
+        }
+      ],
+      "disclaimer": "Templated guidance -- confirm against live telemetry before acting."
+    },
+    "source": "mock"
+  }
+]

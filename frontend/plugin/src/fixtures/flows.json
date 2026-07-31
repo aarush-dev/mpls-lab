@@ -1,0 +1,3159 @@
+[
+  {
+    "tsMs": 1785033630000,
+    "device": "ce_branch11",
+    "bytes": 336.0,
+    "packets": 6.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033630000,
+    "device": "ce_branch8",
+    "bytes": 392.0,
+    "packets": 7.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033630000,
+    "device": "ce_dc2",
+    "bytes": 392.0,
+    "packets": 7.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033630000,
+    "device": "ce_hub1",
+    "bytes": 6688176.0,
+    "packets": 1198.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033630000,
+    "device": "p9",
+    "bytes": 168.0,
+    "packets": 3.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch1",
+    "bytes": 1850280.0,
+    "packets": 292.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch10",
+    "bytes": 888.0,
+    "packets": 16.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch12",
+    "bytes": 784.0,
+    "packets": 14.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch13",
+    "bytes": 1849552.0,
+    "packets": 278.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch14",
+    "bytes": 728.0,
+    "packets": 13.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch15",
+    "bytes": 784.0,
+    "packets": 14.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch18",
+    "bytes": 266528.0,
+    "packets": 82.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch20",
+    "bytes": 784.0,
+    "packets": 14.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch21",
+    "bytes": 728.0,
+    "packets": 13.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch23",
+    "bytes": 728.0,
+    "packets": 13.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_branch7",
+    "bytes": 784.0,
+    "packets": 14.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_dc1",
+    "bytes": 728.0,
+    "packets": 13.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "ce_hub2",
+    "bytes": 896.0,
+    "packets": 16.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "p1",
+    "bytes": 784.0,
+    "packets": 14.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "p10",
+    "bytes": 1288.0,
+    "packets": 23.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "p11",
+    "bytes": 1232.0,
+    "packets": 22.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "p13",
+    "bytes": 728.0,
+    "packets": 13.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "p19",
+    "bytes": 840.0,
+    "packets": 15.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "pe1",
+    "bytes": 3699048.0,
+    "packets": 556.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "pe10",
+    "bytes": 784.0,
+    "packets": 14.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "pe11",
+    "bytes": 728.0,
+    "packets": 13.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033690000,
+    "device": "pe2",
+    "bytes": 896.0,
+    "packets": 16.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033900000,
+    "device": "ce_branch11",
+    "bytes": 931985.2,
+    "packets": 665.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033900000,
+    "device": "ce_branch8",
+    "bytes": 2531800.9,
+    "packets": 1808.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033900000,
+    "device": "ce_dc2",
+    "bytes": 2834209.1,
+    "packets": 2024.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033900000,
+    "device": "ce_hub1",
+    "bytes": 2323855.7,
+    "packets": 1659.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch1",
+    "bytes": 1155796.3,
+    "packets": 825.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch10",
+    "bytes": 1531269.7,
+    "packets": 1093.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch12",
+    "bytes": 1482016.5,
+    "packets": 1058.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch13",
+    "bytes": 1574411.2,
+    "packets": 1124.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch14",
+    "bytes": 1415802.6,
+    "packets": 1011.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch15",
+    "bytes": 339346.8,
+    "packets": 242.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch18",
+    "bytes": 504039.8,
+    "packets": 360.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch20",
+    "bytes": 1310663.5,
+    "packets": 936.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch21",
+    "bytes": 2365307.0,
+    "packets": 1689.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch23",
+    "bytes": 813324.3,
+    "packets": 580.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch7",
+    "bytes": 2197407.0,
+    "packets": 1569.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_dc1",
+    "bytes": 994022.0,
+    "packets": 710.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_hub2",
+    "bytes": 6389458.7,
+    "packets": 4563.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "pe1",
+    "bytes": 4491031.1,
+    "packets": 3207.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "pe10",
+    "bytes": 1731892.9,
+    "packets": 1237.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "pe11",
+    "bytes": 1544768.5,
+    "packets": 1103.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "pe2",
+    "bytes": 5178247.9,
+    "packets": 3698.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034050000,
+    "device": "ce_branch11",
+    "bytes": 2136858.3,
+    "packets": 1526.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034050000,
+    "device": "ce_branch8",
+    "bytes": 1855443.9,
+    "packets": 1325.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034050000,
+    "device": "ce_dc2",
+    "bytes": 6847902.3,
+    "packets": 4891.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034050000,
+    "device": "ce_hub1",
+    "bytes": 5591886.3,
+    "packets": 3994.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch1",
+    "bytes": 2669683.0,
+    "packets": 1906.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch10",
+    "bytes": 2424842.6,
+    "packets": 1732.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch12",
+    "bytes": 1809979.4,
+    "packets": 1292.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch13",
+    "bytes": 348343.0,
+    "packets": 248.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch14",
+    "bytes": 2614487.5,
+    "packets": 1867.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch15",
+    "bytes": 993503.2,
+    "packets": 709.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch18",
+    "bytes": 2561635.7,
+    "packets": 1829.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch20",
+    "bytes": 758661.4,
+    "packets": 541.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch21",
+    "bytes": 1649503.2,
+    "packets": 1178.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch23",
+    "bytes": 61369.1,
+    "packets": 43.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_branch7",
+    "bytes": 844561.9,
+    "packets": 603.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_dc1",
+    "bytes": 1867620.2,
+    "packets": 1334.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "ce_hub2",
+    "bytes": 3900666.9,
+    "packets": 2786.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "pe1",
+    "bytes": 1383578.7,
+    "packets": 988.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "pe10",
+    "bytes": 2897738.4,
+    "packets": 2069.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "pe11",
+    "bytes": 1374776.6,
+    "packets": 982.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034080000,
+    "device": "pe2",
+    "bytes": 6471226.7,
+    "packets": 4622.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034200000,
+    "device": "ce_branch11",
+    "bytes": 28676.4,
+    "packets": 20.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034200000,
+    "device": "ce_branch8",
+    "bytes": 888608.4,
+    "packets": 634.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034200000,
+    "device": "ce_dc2",
+    "bytes": 1902133.2,
+    "packets": 1358.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034200000,
+    "device": "ce_hub1",
+    "bytes": 822688.2,
+    "packets": 587.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch1",
+    "bytes": 812206.8,
+    "packets": 580.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch10",
+    "bytes": 865841.0,
+    "packets": 618.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch12",
+    "bytes": 894399.9,
+    "packets": 638.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch13",
+    "bytes": 115634.9,
+    "packets": 82.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch14",
+    "bytes": 641391.0,
+    "packets": 458.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch15",
+    "bytes": 289140.9,
+    "packets": 206.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch18",
+    "bytes": 379446.9,
+    "packets": 271.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch20",
+    "bytes": 670866.4,
+    "packets": 479.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch21",
+    "bytes": 906725.2,
+    "packets": 647.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch23",
+    "bytes": 407752.7,
+    "packets": 291.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_branch7",
+    "bytes": 29043.9,
+    "packets": 20.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_dc1",
+    "bytes": 2586476.9,
+    "packets": 1847.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "ce_hub2",
+    "bytes": 699028.2,
+    "packets": 499.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "pe1",
+    "bytes": 2987248.6,
+    "packets": 2133.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "pe10",
+    "bytes": 1926893.3,
+    "packets": 1376.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "pe11",
+    "bytes": 410119.9,
+    "packets": 292.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034230000,
+    "device": "pe2",
+    "bytes": 2023279.2,
+    "packets": 1445.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034380000,
+    "device": "ce_branch11",
+    "bytes": 721195.5,
+    "packets": 515.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034380000,
+    "device": "ce_branch8",
+    "bytes": 287566.8,
+    "packets": 205.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034380000,
+    "device": "ce_dc2",
+    "bytes": 1378989.7,
+    "packets": 985.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034380000,
+    "device": "ce_hub1",
+    "bytes": 1982527.2,
+    "packets": 1416.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch1",
+    "bytes": 542750.2,
+    "packets": 387.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch10",
+    "bytes": 627162.4,
+    "packets": 448.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch12",
+    "bytes": 279735.9,
+    "packets": 199.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch13",
+    "bytes": 731884.4,
+    "packets": 522.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch14",
+    "bytes": 653436.2,
+    "packets": 466.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch15",
+    "bytes": 436621.5,
+    "packets": 311.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch18",
+    "bytes": 224033.2,
+    "packets": 160.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch20",
+    "bytes": 337322.6,
+    "packets": 240.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch21",
+    "bytes": 363773.3,
+    "packets": 259.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch23",
+    "bytes": 321449.9,
+    "packets": 229.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch7",
+    "bytes": 563665.4,
+    "packets": 402.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_dc1",
+    "bytes": 363044.3,
+    "packets": 259.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_hub2",
+    "bytes": 865629.2,
+    "packets": 618.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "pe1",
+    "bytes": 362836.6,
+    "packets": 259.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "pe10",
+    "bytes": 993131.0,
+    "packets": 709.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "pe11",
+    "bytes": 466604.6,
+    "packets": 333.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "pe2",
+    "bytes": 901338.0,
+    "packets": 643.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034530000,
+    "device": "ce_branch11",
+    "bytes": 417225.7,
+    "packets": 298.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034530000,
+    "device": "ce_branch8",
+    "bytes": 515304.7,
+    "packets": 368.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034530000,
+    "device": "ce_dc2",
+    "bytes": 547923.4,
+    "packets": 391.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034530000,
+    "device": "ce_hub1",
+    "bytes": 309990.5,
+    "packets": 221.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch1",
+    "bytes": 285224.1,
+    "packets": 203.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch10",
+    "bytes": 259872.8,
+    "packets": 185.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch12",
+    "bytes": 520548.4,
+    "packets": 371.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch13",
+    "bytes": 344514.7,
+    "packets": 246.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch14",
+    "bytes": 646187.0,
+    "packets": 461.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch15",
+    "bytes": 404364.8,
+    "packets": 288.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch18",
+    "bytes": 422199.7,
+    "packets": 301.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch20",
+    "bytes": 20593.2,
+    "packets": 14.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch21",
+    "bytes": 626236.6,
+    "packets": 447.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch23",
+    "bytes": 47072.9,
+    "packets": 33.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_branch7",
+    "bytes": 458432.7,
+    "packets": 327.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_dc1",
+    "bytes": 2788872.0,
+    "packets": 1992.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "ce_hub2",
+    "bytes": 2147775.8,
+    "packets": 1534.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "pe1",
+    "bytes": 1480237.1,
+    "packets": 1057.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "pe10",
+    "bytes": 1612581.1,
+    "packets": 1151.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "pe11",
+    "bytes": 201280.5,
+    "packets": 143.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034560000,
+    "device": "pe2",
+    "bytes": 2022291.9,
+    "packets": 1444.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034680000,
+    "device": "ce_branch11",
+    "bytes": 1475796.7,
+    "packets": 1054.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034680000,
+    "device": "ce_branch8",
+    "bytes": 644806.5,
+    "packets": 460.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034680000,
+    "device": "ce_dc2",
+    "bytes": 567630.0,
+    "packets": 405.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034680000,
+    "device": "ce_hub1",
+    "bytes": 8158833.6,
+    "packets": 5827.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch1",
+    "bytes": 1849294.7,
+    "packets": 1320.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch10",
+    "bytes": 2678765.8,
+    "packets": 1913.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch12",
+    "bytes": 836663.2,
+    "packets": 597.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch13",
+    "bytes": 720239.3,
+    "packets": 514.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch14",
+    "bytes": 1408221.9,
+    "packets": 1005.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch15",
+    "bytes": 2245336.2,
+    "packets": 1603.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch18",
+    "bytes": 2352636.4,
+    "packets": 1680.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch20",
+    "bytes": 2160405.7,
+    "packets": 1543.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch21",
+    "bytes": 2348475.6,
+    "packets": 1677.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch23",
+    "bytes": 1708342.3,
+    "packets": 1220.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_branch7",
+    "bytes": 79307.6,
+    "packets": 56.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_dc1",
+    "bytes": 4756500.2,
+    "packets": 3397.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "ce_hub2",
+    "bytes": 1547033.7,
+    "packets": 1105.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "pe1",
+    "bytes": 6008992.6,
+    "packets": 4292.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "pe10",
+    "bytes": 5352361.9,
+    "packets": 3823.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "pe11",
+    "bytes": 2639783.7,
+    "packets": 1885.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034710000,
+    "device": "pe2",
+    "bytes": 1712831.4,
+    "packets": 1223.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch1",
+    "bytes": 26764.9,
+    "packets": 19.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch10",
+    "bytes": 383560.0,
+    "packets": 274.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch11",
+    "bytes": 757542.1,
+    "packets": 541.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch12",
+    "bytes": 324803.5,
+    "packets": 232.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch13",
+    "bytes": 55505.3,
+    "packets": 39.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch14",
+    "bytes": 424205.7,
+    "packets": 303.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch15",
+    "bytes": 951489.9,
+    "packets": 679.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch18",
+    "bytes": 473090.3,
+    "packets": 337.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch20",
+    "bytes": 304623.5,
+    "packets": 217.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch21",
+    "bytes": 450467.0,
+    "packets": 321.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch23",
+    "bytes": 928328.5,
+    "packets": 663.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch7",
+    "bytes": 516434.4,
+    "packets": 368.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_branch8",
+    "bytes": 1233289.4,
+    "packets": 880.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_dc1",
+    "bytes": 3572277.5,
+    "packets": 2551.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_dc2",
+    "bytes": 1701586.2,
+    "packets": 1215.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_hub1",
+    "bytes": 435359.8,
+    "packets": 311.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "ce_hub2",
+    "bytes": 2038521.8,
+    "packets": 1456.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "pe1",
+    "bytes": 134004.0,
+    "packets": 95.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "pe10",
+    "bytes": 1747150.8,
+    "packets": 1248.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "pe11",
+    "bytes": 744992.4,
+    "packets": 532.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034830000,
+    "device": "pe2",
+    "bytes": 1091446.5,
+    "packets": 779.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034950000,
+    "device": "ce_branch11",
+    "bytes": 504706.1,
+    "packets": 360.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034950000,
+    "device": "ce_branch8",
+    "bytes": 685313.9,
+    "packets": 489.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034950000,
+    "device": "ce_dc2",
+    "bytes": 955322.4,
+    "packets": 682.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034950000,
+    "device": "ce_hub1",
+    "bytes": 1969289.8,
+    "packets": 1406.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch1",
+    "bytes": 226404.8,
+    "packets": 161.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch10",
+    "bytes": 180890.1,
+    "packets": 129.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch12",
+    "bytes": 25636.5,
+    "packets": 18.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch13",
+    "bytes": 582057.3,
+    "packets": 415.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch14",
+    "bytes": 625858.0,
+    "packets": 447.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch15",
+    "bytes": 305814.9,
+    "packets": 218.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch18",
+    "bytes": 1020919.7,
+    "packets": 729.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch20",
+    "bytes": 187722.2,
+    "packets": 134.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch21",
+    "bytes": 302752.4,
+    "packets": 216.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch23",
+    "bytes": 25628.2,
+    "packets": 18.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_branch7",
+    "bytes": 821468.4,
+    "packets": 586.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_dc1",
+    "bytes": 335184.0,
+    "packets": 239.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "ce_hub2",
+    "bytes": 381782.2,
+    "packets": 272.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "pe1",
+    "bytes": 2509285.7,
+    "packets": 1792.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "pe10",
+    "bytes": 1566437.1,
+    "packets": 1118.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "pe11",
+    "bytes": 662427.2,
+    "packets": 473.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785034980000,
+    "device": "pe2",
+    "bytes": 1001222.9,
+    "packets": 715.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035100000,
+    "device": "ce_branch11",
+    "bytes": 1348848.5,
+    "packets": 963.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035100000,
+    "device": "ce_branch8",
+    "bytes": 592391.2,
+    "packets": 423.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035100000,
+    "device": "ce_dc2",
+    "bytes": 1702619.6,
+    "packets": 1216.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035100000,
+    "device": "ce_hub1",
+    "bytes": 3796020.4,
+    "packets": 2711.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch1",
+    "bytes": 1590521.0,
+    "packets": 1136.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch10",
+    "bytes": 1699953.5,
+    "packets": 1214.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch12",
+    "bytes": 1771929.2,
+    "packets": 1265.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch13",
+    "bytes": 663399.9,
+    "packets": 473.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch14",
+    "bytes": 484414.8,
+    "packets": 346.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch15",
+    "bytes": 1225263.1,
+    "packets": 875.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch18",
+    "bytes": 1422268.2,
+    "packets": 1015.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch20",
+    "bytes": 715646.6,
+    "packets": 511.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch21",
+    "bytes": 1491871.0,
+    "packets": 1065.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch23",
+    "bytes": 817438.8,
+    "packets": 583.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch7",
+    "bytes": 1889217.5,
+    "packets": 1349.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_dc1",
+    "bytes": 6441838.5,
+    "packets": 4601.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_hub2",
+    "bytes": 1312193.7,
+    "packets": 937.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "pe1",
+    "bytes": 6805722.8,
+    "packets": 4861.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "pe10",
+    "bytes": 1392723.8,
+    "packets": 994.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "pe11",
+    "bytes": 1191570.7,
+    "packets": 851.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "pe2",
+    "bytes": 777180.7,
+    "packets": 555.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035250000,
+    "device": "ce_branch11",
+    "bytes": 1453200.1,
+    "packets": 1038.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035250000,
+    "device": "ce_branch8",
+    "bytes": 683856.4,
+    "packets": 488.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035250000,
+    "device": "ce_dc2",
+    "bytes": 3198056.2,
+    "packets": 2284.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035250000,
+    "device": "ce_hub1",
+    "bytes": 2757484.2,
+    "packets": 1969.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch1",
+    "bytes": 754324.8,
+    "packets": 538.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch10",
+    "bytes": 653306.0,
+    "packets": 466.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch12",
+    "bytes": 1378170.9,
+    "packets": 984.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch13",
+    "bytes": 784418.3,
+    "packets": 560.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch14",
+    "bytes": 569130.6,
+    "packets": 406.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch15",
+    "bytes": 1737285.4,
+    "packets": 1240.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch18",
+    "bytes": 861259.2,
+    "packets": 615.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch20",
+    "bytes": 1770684.6,
+    "packets": 1264.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch21",
+    "bytes": 1307514.8,
+    "packets": 933.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch23",
+    "bytes": 1145363.4,
+    "packets": 818.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_branch7",
+    "bytes": 332735.4,
+    "packets": 237.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_dc1",
+    "bytes": 3933321.6,
+    "packets": 2809.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "ce_hub2",
+    "bytes": 2118506.9,
+    "packets": 1513.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "pe1",
+    "bytes": 3886185.1,
+    "packets": 2775.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "pe10",
+    "bytes": 2145930.6,
+    "packets": 1532.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "pe11",
+    "bytes": 1434566.0,
+    "packets": 1024.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035280000,
+    "device": "pe2",
+    "bytes": 3199953.1,
+    "packets": 2285.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035400000,
+    "device": "ce_branch11",
+    "bytes": 572805.8,
+    "packets": 409.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035400000,
+    "device": "ce_branch8",
+    "bytes": 1344811.0,
+    "packets": 960.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035400000,
+    "device": "ce_dc2",
+    "bytes": 4203298.7,
+    "packets": 3002.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035400000,
+    "device": "ce_hub1",
+    "bytes": 2572291.5,
+    "packets": 1837.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch1",
+    "bytes": 1151044.6,
+    "packets": 822.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch10",
+    "bytes": 1525113.9,
+    "packets": 1089.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch12",
+    "bytes": 1633198.9,
+    "packets": 1166.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch13",
+    "bytes": 1945804.6,
+    "packets": 1389.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch14",
+    "bytes": 83408.7,
+    "packets": 59.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch15",
+    "bytes": 2943940.6,
+    "packets": 2102.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch18",
+    "bytes": 1009315.2,
+    "packets": 720.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch20",
+    "bytes": 1160775.9,
+    "packets": 829.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch21",
+    "bytes": 2041493.5,
+    "packets": 1458.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch23",
+    "bytes": 947747.4,
+    "packets": 677.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_branch7",
+    "bytes": 184203.5,
+    "packets": 131.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_dc1",
+    "bytes": 3352481.7,
+    "packets": 2394.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "ce_hub2",
+    "bytes": 6370606.4,
+    "packets": 4550.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "pe1",
+    "bytes": 7407509.6,
+    "packets": 5291.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "pe10",
+    "bytes": 2006443.9,
+    "packets": 1433.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "pe11",
+    "bytes": 2972616.2,
+    "packets": 2123.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035430000,
+    "device": "pe2",
+    "bytes": 6792676.8,
+    "packets": 4851.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035550000,
+    "device": "ce_branch11",
+    "bytes": 499216.7,
+    "packets": 356.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035550000,
+    "device": "ce_branch8",
+    "bytes": 285306.9,
+    "packets": 203.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035550000,
+    "device": "ce_dc2",
+    "bytes": 1000801.1,
+    "packets": 714.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035550000,
+    "device": "ce_hub1",
+    "bytes": 935332.4,
+    "packets": 668.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch1",
+    "bytes": 149505.9,
+    "packets": 106.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch10",
+    "bytes": 249290.2,
+    "packets": 178.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch12",
+    "bytes": 401392.9,
+    "packets": 286.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch13",
+    "bytes": 470956.1,
+    "packets": 336.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch14",
+    "bytes": 678286.8,
+    "packets": 484.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch15",
+    "bytes": 396831.5,
+    "packets": 283.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch18",
+    "bytes": 423053.1,
+    "packets": 302.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch20",
+    "bytes": 864216.8,
+    "packets": 617.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch21",
+    "bytes": 208339.5,
+    "packets": 148.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch23",
+    "bytes": 533640.1,
+    "packets": 381.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_branch7",
+    "bytes": 369321.9,
+    "packets": 263.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_dc1",
+    "bytes": 230834.7,
+    "packets": 164.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "ce_hub2",
+    "bytes": 1403272.4,
+    "packets": 1002.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "pe1",
+    "bytes": 1137320.5,
+    "packets": 812.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "pe10",
+    "bytes": 1881441.8,
+    "packets": 1343.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "pe11",
+    "bytes": 804195.9,
+    "packets": 574.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035580000,
+    "device": "pe2",
+    "bytes": 2142939.3,
+    "packets": 1530.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035700000,
+    "device": "ce_branch11",
+    "bytes": 235339.5,
+    "packets": 168.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035700000,
+    "device": "ce_branch8",
+    "bytes": 398081.3,
+    "packets": 284.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035700000,
+    "device": "ce_dc2",
+    "bytes": 1896333.3,
+    "packets": 1354.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035700000,
+    "device": "ce_hub1",
+    "bytes": 543161.6,
+    "packets": 388.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch1",
+    "bytes": 217563.2,
+    "packets": 155.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch10",
+    "bytes": 227354.0,
+    "packets": 162.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch12",
+    "bytes": 383263.5,
+    "packets": 273.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch13",
+    "bytes": 361886.5,
+    "packets": 258.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch14",
+    "bytes": 228150.0,
+    "packets": 163.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch15",
+    "bytes": 776007.8,
+    "packets": 554.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch18",
+    "bytes": 111348.6,
+    "packets": 79.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch20",
+    "bytes": 522381.7,
+    "packets": 373.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch21",
+    "bytes": 732093.9,
+    "packets": 522.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch23",
+    "bytes": 177624.7,
+    "packets": 126.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_branch7",
+    "bytes": 292942.7,
+    "packets": 209.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_dc1",
+    "bytes": 1386954.0,
+    "packets": 990.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "ce_hub2",
+    "bytes": 779007.6,
+    "packets": 556.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "pe1",
+    "bytes": 1277426.2,
+    "packets": 912.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "pe10",
+    "bytes": 29699.7,
+    "packets": 21.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "pe11",
+    "bytes": 502742.6,
+    "packets": 359.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035730000,
+    "device": "pe2",
+    "bytes": 826252.5,
+    "packets": 590.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035850000,
+    "device": "ce_branch11",
+    "bytes": 1328278.3,
+    "packets": 948.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035850000,
+    "device": "ce_branch8",
+    "bytes": 2549732.7,
+    "packets": 1821.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035850000,
+    "device": "ce_dc2",
+    "bytes": 6423962.7,
+    "packets": 4588.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035850000,
+    "device": "ce_hub1",
+    "bytes": 3678195.9,
+    "packets": 2627.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch1",
+    "bytes": 91427.4,
+    "packets": 65.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch10",
+    "bytes": 166728.1,
+    "packets": 119.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch12",
+    "bytes": 1704814.5,
+    "packets": 1217.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch13",
+    "bytes": 84166.3,
+    "packets": 60.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch14",
+    "bytes": 283383.3,
+    "packets": 202.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch15",
+    "bytes": 2660656.0,
+    "packets": 1900.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch18",
+    "bytes": 2142108.5,
+    "packets": 1530.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch20",
+    "bytes": 618550.1,
+    "packets": 441.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch21",
+    "bytes": 4175704.2,
+    "packets": 2982.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch23",
+    "bytes": 782454.2,
+    "packets": 558.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_branch7",
+    "bytes": 2751162.3,
+    "packets": 1965.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_dc1",
+    "bytes": 6023959.0,
+    "packets": 4302.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "ce_hub2",
+    "bytes": 3408170.6,
+    "packets": 2434.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "pe1",
+    "bytes": 11108578.0,
+    "packets": 7934.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "pe10",
+    "bytes": 6114084.7,
+    "packets": 4367.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "pe11",
+    "bytes": 2242259.4,
+    "packets": 1601.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785035880000,
+    "device": "pe2",
+    "bytes": 2396580.6,
+    "packets": 1711.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036000000,
+    "device": "ce_branch11",
+    "bytes": 1641155.1,
+    "packets": 1172.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036000000,
+    "device": "ce_branch8",
+    "bytes": 720037.1,
+    "packets": 514.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036000000,
+    "device": "ce_dc2",
+    "bytes": 7554594.1,
+    "packets": 5396.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036000000,
+    "device": "ce_hub1",
+    "bytes": 4562396.5,
+    "packets": 3258.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch1",
+    "bytes": 1211858.1,
+    "packets": 865.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch10",
+    "bytes": 2503452.0,
+    "packets": 1788.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch12",
+    "bytes": 1427334.7,
+    "packets": 1019.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch13",
+    "bytes": 3416035.5,
+    "packets": 2440.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch14",
+    "bytes": 1071399.1,
+    "packets": 765.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch15",
+    "bytes": 1947750.7,
+    "packets": 1391.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch18",
+    "bytes": 56496.1,
+    "packets": 40.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch20",
+    "bytes": 2646061.3,
+    "packets": 1890.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch21",
+    "bytes": 1002071.7,
+    "packets": 715.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch23",
+    "bytes": 1610301.6,
+    "packets": 1150.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_branch7",
+    "bytes": 1371530.3,
+    "packets": 979.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_dc1",
+    "bytes": 5305897.2,
+    "packets": 3789.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "ce_hub2",
+    "bytes": 1707334.7,
+    "packets": 1219.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "pe1",
+    "bytes": 3959966.1,
+    "packets": 2828.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "pe10",
+    "bytes": 3608011.0,
+    "packets": 2577.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "pe11",
+    "bytes": 90512.2,
+    "packets": 64.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036030000,
+    "device": "pe2",
+    "bytes": 3659188.5,
+    "packets": 2613.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036150000,
+    "device": "ce_branch11",
+    "bytes": 1536126.4,
+    "packets": 1097.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036150000,
+    "device": "ce_branch8",
+    "bytes": 730620.9,
+    "packets": 521.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036150000,
+    "device": "ce_dc2",
+    "bytes": 807042.7,
+    "packets": 576.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036150000,
+    "device": "ce_hub1",
+    "bytes": 5843759.0,
+    "packets": 4174.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch1",
+    "bytes": 1044563.7,
+    "packets": 746.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch10",
+    "bytes": 2062687.4,
+    "packets": 1473.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch12",
+    "bytes": 1863640.8,
+    "packets": 1331.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch13",
+    "bytes": 1137323.3,
+    "packets": 812.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch14",
+    "bytes": 2220875.3,
+    "packets": 1586.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch15",
+    "bytes": 917879.2,
+    "packets": 655.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch18",
+    "bytes": 2526901.1,
+    "packets": 1804.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch20",
+    "bytes": 1331008.0,
+    "packets": 950.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch21",
+    "bytes": 2032389.2,
+    "packets": 1451.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch23",
+    "bytes": 1007499.1,
+    "packets": 719.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_branch7",
+    "bytes": 1583831.9,
+    "packets": 1131.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_dc1",
+    "bytes": 2885006.5,
+    "packets": 2060.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "ce_hub2",
+    "bytes": 7436940.1,
+    "packets": 5312.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "pe1",
+    "bytes": 2177884.0,
+    "packets": 1555.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "pe10",
+    "bytes": 9477563.6,
+    "packets": 6769.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "pe11",
+    "bytes": 3230632.8,
+    "packets": 2307.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036180000,
+    "device": "pe2",
+    "bytes": 5174384.6,
+    "packets": 3696.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036300000,
+    "device": "ce_branch11",
+    "bytes": 929998.2,
+    "packets": 664.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036300000,
+    "device": "ce_branch8",
+    "bytes": 921890.2,
+    "packets": 658.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036300000,
+    "device": "ce_dc2",
+    "bytes": 4066006.0,
+    "packets": 2904.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036300000,
+    "device": "ce_hub1",
+    "bytes": 2678319.0,
+    "packets": 1913.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch1",
+    "bytes": 1408451.9,
+    "packets": 1006.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch10",
+    "bytes": 2126940.4,
+    "packets": 1519.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch12",
+    "bytes": 1790481.2,
+    "packets": 1278.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch13",
+    "bytes": 66441.6,
+    "packets": 47.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch14",
+    "bytes": 1138267.0,
+    "packets": 813.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch15",
+    "bytes": 648557.2,
+    "packets": 463.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch18",
+    "bytes": 1598523.4,
+    "packets": 1141.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch20",
+    "bytes": 126047.4,
+    "packets": 90.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch21",
+    "bytes": 129537.1,
+    "packets": 92.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch23",
+    "bytes": 937980.1,
+    "packets": 670.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_branch7",
+    "bytes": 1616057.7,
+    "packets": 1154.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_dc1",
+    "bytes": 2368220.6,
+    "packets": 1691.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "ce_hub2",
+    "bytes": 2178983.8,
+    "packets": 1556.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "pe1",
+    "bytes": 604789.6,
+    "packets": 432.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "pe10",
+    "bytes": 255503.7,
+    "packets": 182.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "pe11",
+    "bytes": 622134.0,
+    "packets": 444.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036330000,
+    "device": "pe2",
+    "bytes": 1950297.7,
+    "packets": 1393.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036450000,
+    "device": "ce_branch11",
+    "bytes": 93598.4,
+    "packets": 66.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036450000,
+    "device": "ce_branch8",
+    "bytes": 1196062.0,
+    "packets": 854.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036450000,
+    "device": "ce_dc2",
+    "bytes": 9836588.8,
+    "packets": 7026.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036450000,
+    "device": "ce_hub1",
+    "bytes": 1539045.2,
+    "packets": 1099.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch1",
+    "bytes": 369224.8,
+    "packets": 263.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch10",
+    "bytes": 1347729.7,
+    "packets": 962.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch12",
+    "bytes": 712847.0,
+    "packets": 509.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch13",
+    "bytes": 356862.7,
+    "packets": 254.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch14",
+    "bytes": 801049.9,
+    "packets": 572.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch15",
+    "bytes": 2267282.2,
+    "packets": 1619.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch18",
+    "bytes": 2107883.1,
+    "packets": 1505.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch20",
+    "bytes": 1313464.0,
+    "packets": 938.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch21",
+    "bytes": 1818336.6,
+    "packets": 1298.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch23",
+    "bytes": 787208.8,
+    "packets": 562.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_branch7",
+    "bytes": 1190667.0,
+    "packets": 850.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_dc1",
+    "bytes": 7027076.3,
+    "packets": 5019.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "ce_hub2",
+    "bytes": 7626520.7,
+    "packets": 5447.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "pe1",
+    "bytes": 7065469.0,
+    "packets": 5046.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "pe10",
+    "bytes": 7262586.1,
+    "packets": 5187.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "pe11",
+    "bytes": 1892704.5,
+    "packets": 1351.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036480000,
+    "device": "pe2",
+    "bytes": 4173090.1,
+    "packets": 2980.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036600000,
+    "device": "ce_branch11",
+    "bytes": 1662238.4,
+    "packets": 1187.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036600000,
+    "device": "ce_branch8",
+    "bytes": 683712.2,
+    "packets": 488.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036600000,
+    "device": "ce_dc2",
+    "bytes": 1062616.1,
+    "packets": 759.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036600000,
+    "device": "ce_hub1",
+    "bytes": 563038.8,
+    "packets": 402.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch1",
+    "bytes": 1794912.6,
+    "packets": 1282.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch10",
+    "bytes": 1063956.4,
+    "packets": 760.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch12",
+    "bytes": 2162297.2,
+    "packets": 1544.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch13",
+    "bytes": 1358116.9,
+    "packets": 970.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch14",
+    "bytes": 405088.2,
+    "packets": 289.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch15",
+    "bytes": 2480127.0,
+    "packets": 1771.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch18",
+    "bytes": 79155.3,
+    "packets": 56.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch20",
+    "bytes": 70272.2,
+    "packets": 50.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch21",
+    "bytes": 1539813.7,
+    "packets": 1099.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch23",
+    "bytes": 710358.4,
+    "packets": 507.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_branch7",
+    "bytes": 1429572.1,
+    "packets": 1021.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_dc1",
+    "bytes": 5426295.7,
+    "packets": 3875.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "ce_hub2",
+    "bytes": 2358658.3,
+    "packets": 1684.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "pe1",
+    "bytes": 3134810.1,
+    "packets": 2239.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "pe10",
+    "bytes": 2696956.3,
+    "packets": 1926.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "pe11",
+    "bytes": 3585925.3,
+    "packets": 2561.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036630000,
+    "device": "pe2",
+    "bytes": 6273834.9,
+    "packets": 4481.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036750000,
+    "device": "ce_branch11",
+    "bytes": 79341.7,
+    "packets": 56.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036750000,
+    "device": "ce_branch8",
+    "bytes": 98833.6,
+    "packets": 70.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036750000,
+    "device": "ce_dc2",
+    "bytes": 6706452.4,
+    "packets": 4790.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036750000,
+    "device": "ce_hub1",
+    "bytes": 2373661.6,
+    "packets": 1695.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch1",
+    "bytes": 2873395.9,
+    "packets": 2052.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch10",
+    "bytes": 256530.1,
+    "packets": 183.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch12",
+    "bytes": 1004158.4,
+    "packets": 717.3,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch13",
+    "bytes": 1909045.0,
+    "packets": 1363.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch14",
+    "bytes": 440505.7,
+    "packets": 314.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch15",
+    "bytes": 2046963.7,
+    "packets": 1462.1,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch18",
+    "bytes": 101511.8,
+    "packets": 72.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch20",
+    "bytes": 3464795.5,
+    "packets": 2474.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch21",
+    "bytes": 1895210.8,
+    "packets": 1353.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch23",
+    "bytes": 2002652.4,
+    "packets": 1430.5,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_branch7",
+    "bytes": 1291951.5,
+    "packets": 922.8,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_dc1",
+    "bytes": 6178165.5,
+    "packets": 4413.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "ce_hub2",
+    "bytes": 7886263.2,
+    "packets": 5633.0,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "pe1",
+    "bytes": 8032061.4,
+    "packets": 5737.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "pe10",
+    "bytes": 8765309.3,
+    "packets": 6260.9,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "pe11",
+    "bytes": 2027467.0,
+    "packets": 1448.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036780000,
+    "device": "pe2",
+    "bytes": 5481869.7,
+    "packets": 3915.6,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036900000,
+    "device": "ce_branch11",
+    "bytes": 2153478.6,
+    "packets": 1538.2,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036900000,
+    "device": "ce_branch8",
+    "bytes": 2904091.5,
+    "packets": 2074.4,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036900000,
+    "device": "ce_dc2",
+    "bytes": 7125556.6,
+    "packets": 5089.7,
+    "source": "measured"
+  },
+  {
+    "tsMs": 1785036900000,
+    "device": "ce_hub1",
+    "bytes": 9448357.5,
+    "packets": 6748.8,
+    "source": "measured"
+  }
+]

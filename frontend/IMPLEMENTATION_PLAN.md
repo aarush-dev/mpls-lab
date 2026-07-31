@@ -218,11 +218,26 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
 
 ## 12. Milestones (each ends with a user check-in per CLAUDE.md)
 
-- **M1 Foundation** — scaffold plugin, folder-local mock Compose, nav + 7 routes, `types.ts`,
-  `DataClient` interface, `config.ts` (mode defaults `mock`). **Gate: plugin loads, empty pages render.**
-- **M2 Fixtures + mock** — `generate_fixtures.py`, 12 scenario fixtures, `MockDataClient`,
-  provenance + Demo marker, topology fixture from spec. **Gate: deterministic regen, pages populated.**
-- **M3 Operator UI + topology/node-details** — Overview, expandable Topology (cytoscape+clustering),
+- **M1 Foundation — DONE.** Scaffolded plugin, folder-local mock Compose, nav + 7 routes,
+  `types.ts`, `DataClient` interface, `config.ts` (mode defaults `mock`). Gate met: plugin loads,
+  empty pages render.
+- **M2 Fixtures + mock — DONE.** `frontend/scripts/generate_fixtures.py` (pandas+pyarrow, reuses
+  `dataapi/export.py` helpers) generates `frontend/plugin/src/fixtures/*.json`: composite playback
+  tape bucketCount=152, deviceIds=70, incidents=28, predictions=69, faultTypes=21 (all covered),
+  topologyNodes=148, topologyLinks=361, windowBuckets=50 (trailing sliding window). Fabricated
+  predictions mirror real labelled faults + confidence ramp 0.6→0.95 + 1 seeded late call + 1
+  false-alarm, ordered calm→incidents→calm for a seamless loop. `MockDataClient.ts` implements
+  `DataClient` over the fixtures, cursor-aware (`setCursor(n)`); `DataClientContext.tsx` selects it
+  when `appConfig.mode==='mock'`. Global demo clock (`state/AppContext.tsx`, `state/reducer.ts`):
+  autoplay + loop, TICK/PLAY/PAUSE/SEEK/SET_SPEED/SET_BOUNDS, no `Date.now` (deterministic).
+  `PlaybackControls.tsx`, `AppShell.tsx`, `MetricCard.tsx` built; `SourceBadge.tsx` exists but
+  intentionally not rendered (no visible demo markers). OverviewPage live: 6 MetricCards + incident
+  list recompute every clock tick. Plugin builds green (webpack prod, dist/module.js 2.24 MiB),
+  `tsc --noEmit` clean, plugin.json version 1.0.2, serves in Grafana 11.1.0 at
+  `/a/mplslab-noccopilot-app`. **Gate met:** rerun of `generate_fixtures.py` is byte-identical
+  (sha256 match); synced fabric animates (degraded devices + active incidents vary per bucket
+  across 90/152 buckets).
+- **M3 Operator UI + topology/node-details — next.** Overview, expandable Topology (cytoscape+clustering),
   Node Details page + `node-detail.json`, Telemetry, Incidents, filters/state,
   loading/empty/error/stale-not-green. **Gate: click node → node detail w/ preserved range; add a
   fixture node → appears with no code change.**

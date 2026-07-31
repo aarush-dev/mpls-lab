@@ -1,0 +1,3121 @@
+{
+  "nodes": [
+    {
+      "id": "p1",
+      "role": "p",
+      "pop": "pop1"
+    },
+    {
+      "id": "p2",
+      "role": "p",
+      "pop": "pop1"
+    },
+    {
+      "id": "p3",
+      "role": "p",
+      "pop": "pop1"
+    },
+    {
+      "id": "p4",
+      "role": "p",
+      "pop": "pop1"
+    },
+    {
+      "id": "p5",
+      "role": "p",
+      "pop": "pop2"
+    },
+    {
+      "id": "p6",
+      "role": "p",
+      "pop": "pop2"
+    },
+    {
+      "id": "p7",
+      "role": "p",
+      "pop": "pop2"
+    },
+    {
+      "id": "p8",
+      "role": "p",
+      "pop": "pop2"
+    },
+    {
+      "id": "p9",
+      "role": "p",
+      "pop": "pop3"
+    },
+    {
+      "id": "p10",
+      "role": "p",
+      "pop": "pop3"
+    },
+    {
+      "id": "p11",
+      "role": "p",
+      "pop": "pop3"
+    },
+    {
+      "id": "p12",
+      "role": "p",
+      "pop": "pop3"
+    },
+    {
+      "id": "p13",
+      "role": "p",
+      "pop": "pop4"
+    },
+    {
+      "id": "p14",
+      "role": "p",
+      "pop": "pop4"
+    },
+    {
+      "id": "p15",
+      "role": "p",
+      "pop": "pop4"
+    },
+    {
+      "id": "p16",
+      "role": "p",
+      "pop": "pop4"
+    },
+    {
+      "id": "p17",
+      "role": "p",
+      "pop": "pop5"
+    },
+    {
+      "id": "p18",
+      "role": "p",
+      "pop": "pop5"
+    },
+    {
+      "id": "p19",
+      "role": "p",
+      "pop": "pop5"
+    },
+    {
+      "id": "p20",
+      "role": "p",
+      "pop": "pop5"
+    },
+    {
+      "id": "p21",
+      "role": "p",
+      "pop": "pop6"
+    },
+    {
+      "id": "p22",
+      "role": "p",
+      "pop": "pop6"
+    },
+    {
+      "id": "p23",
+      "role": "p",
+      "pop": "pop6"
+    },
+    {
+      "id": "p24",
+      "role": "p",
+      "pop": "pop6"
+    },
+    {
+      "id": "pe1",
+      "role": "pe",
+      "pop": "pop1"
+    },
+    {
+      "id": "pe2",
+      "role": "pe",
+      "pop": "pop1"
+    },
+    {
+      "id": "pe3",
+      "role": "pe",
+      "pop": "pop2"
+    },
+    {
+      "id": "pe4",
+      "role": "pe",
+      "pop": "pop2"
+    },
+    {
+      "id": "pe5",
+      "role": "pe",
+      "pop": "pop3"
+    },
+    {
+      "id": "pe6",
+      "role": "pe",
+      "pop": "pop3"
+    },
+    {
+      "id": "pe7",
+      "role": "pe",
+      "pop": "pop4"
+    },
+    {
+      "id": "pe8",
+      "role": "pe",
+      "pop": "pop4"
+    },
+    {
+      "id": "pe9",
+      "role": "pe",
+      "pop": "pop5"
+    },
+    {
+      "id": "pe10",
+      "role": "pe",
+      "pop": "pop5"
+    },
+    {
+      "id": "pe11",
+      "role": "pe",
+      "pop": "pop6"
+    },
+    {
+      "id": "pe12",
+      "role": "pe",
+      "pop": "pop6"
+    },
+    {
+      "id": "ce_branch1",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop1",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch1_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch1",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch1_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch1",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch2",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop1",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch2_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch2",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch2_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch2",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch3",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop2",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch3_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch3",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch3_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch3",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch4",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop2",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch4_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch4",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch4_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch4",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch5",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop3",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch5_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch5",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch5_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch5",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch6",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop3",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch6_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch6",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch6_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch6",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch7",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop4",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch7_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch7",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch7_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch7",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch8",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop4",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch8_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch8",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch8_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch8",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch9",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop5",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch9_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch9",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch9_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch9",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch10",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop5",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch10_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch10",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch10_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch10",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch11",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop6",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch11_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch11",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch11_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch11",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch12",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop6",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch12_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch12",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch12_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch12",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch13",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop1",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch13_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch13",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch13_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch13",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch14",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop1",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch14_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch14",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch14_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop1",
+      "parent": "ce_branch14",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch15",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop2",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch15_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch15",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch15_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch15",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch16",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop2",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch16_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch16",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch16_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop2",
+      "parent": "ce_branch16",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch17",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop3",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch17_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch17",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch17_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch17",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch18",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop3",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch18_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch18",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch18_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop3",
+      "parent": "ce_branch18",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch19",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop4",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch19_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch19",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch19_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch19",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch20",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop4",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch20_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch20",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch20_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop4",
+      "parent": "ce_branch20",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch21",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop5",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch21_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch21",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch21_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch21",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch22",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop5",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch22_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch22",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch22_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop5",
+      "parent": "ce_branch22",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch23",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop6",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch23_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch23",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch23_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch23",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_branch24",
+      "role": "ce_branch",
+      "siteType": "branch",
+      "pop": "pop6",
+      "vrfs": [
+        "CORP",
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_branch24_corp",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch24",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_branch24_voice",
+      "role": "host",
+      "siteType": "branch",
+      "pop": "pop6",
+      "parent": "ce_branch24",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "ce_hub1",
+      "role": "ce_hub",
+      "siteType": "hub",
+      "pop": "pop1",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_hub1_corp",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop1",
+      "parent": "ce_hub1",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_hub1_voice",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop1",
+      "parent": "ce_hub1",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_hub1_guest",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop1",
+      "parent": "ce_hub1",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_hub2",
+      "role": "ce_hub",
+      "siteType": "hub",
+      "pop": "pop1",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_hub2_corp",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop1",
+      "parent": "ce_hub2",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_hub2_voice",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop1",
+      "parent": "ce_hub2",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_hub2_guest",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop1",
+      "parent": "ce_hub2",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_hub3",
+      "role": "ce_hub",
+      "siteType": "hub",
+      "pop": "pop2",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_hub3_corp",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop2",
+      "parent": "ce_hub3",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_hub3_voice",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop2",
+      "parent": "ce_hub3",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_hub3_guest",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop2",
+      "parent": "ce_hub3",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_hub4",
+      "role": "ce_hub",
+      "siteType": "hub",
+      "pop": "pop2",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_hub4_corp",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop2",
+      "parent": "ce_hub4",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_hub4_voice",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop2",
+      "parent": "ce_hub4",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_hub4_guest",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop2",
+      "parent": "ce_hub4",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_hub5",
+      "role": "ce_hub",
+      "siteType": "hub",
+      "pop": "pop3",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_hub5_corp",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop3",
+      "parent": "ce_hub5",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_hub5_voice",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop3",
+      "parent": "ce_hub5",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_hub5_guest",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop3",
+      "parent": "ce_hub5",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_hub6",
+      "role": "ce_hub",
+      "siteType": "hub",
+      "pop": "pop3",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_hub6_corp",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop3",
+      "parent": "ce_hub6",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_hub6_voice",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop3",
+      "parent": "ce_hub6",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_hub6_guest",
+      "role": "host",
+      "siteType": "hub",
+      "pop": "pop3",
+      "parent": "ce_hub6",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_dc1",
+      "role": "ce_dc",
+      "siteType": "dc",
+      "pop": "pop4",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_dc1_corp",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop4",
+      "parent": "ce_dc1",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_dc1_voice",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop4",
+      "parent": "ce_dc1",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_dc1_guest",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop4",
+      "parent": "ce_dc1",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_dc2",
+      "role": "ce_dc",
+      "siteType": "dc",
+      "pop": "pop4",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_dc2_corp",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop4",
+      "parent": "ce_dc2",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_dc2_voice",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop4",
+      "parent": "ce_dc2",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_dc2_guest",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop4",
+      "parent": "ce_dc2",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_dc3",
+      "role": "ce_dc",
+      "siteType": "dc",
+      "pop": "pop5",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_dc3_corp",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop5",
+      "parent": "ce_dc3",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_dc3_voice",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop5",
+      "parent": "ce_dc3",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_dc3_guest",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop5",
+      "parent": "ce_dc3",
+      "vrfs": [
+        "GUEST"
+      ]
+    },
+    {
+      "id": "ce_dc4",
+      "role": "ce_dc",
+      "siteType": "dc",
+      "pop": "pop5",
+      "vrfs": [
+        "CORP",
+        "VOICE",
+        "GUEST"
+      ]
+    },
+    {
+      "id": "h_dc4_corp",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop5",
+      "parent": "ce_dc4",
+      "vrfs": [
+        "CORP"
+      ]
+    },
+    {
+      "id": "h_dc4_voice",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop5",
+      "parent": "ce_dc4",
+      "vrfs": [
+        "VOICE"
+      ]
+    },
+    {
+      "id": "h_dc4_guest",
+      "role": "host",
+      "siteType": "dc",
+      "pop": "pop5",
+      "parent": "ce_dc4",
+      "vrfs": [
+        "GUEST"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "source": "p1",
+      "target": "p2",
+      "kind": "physical"
+    },
+    {
+      "source": "p1",
+      "target": "p3",
+      "kind": "physical"
+    },
+    {
+      "source": "p1",
+      "target": "p4",
+      "kind": "physical"
+    },
+    {
+      "source": "p2",
+      "target": "p3",
+      "kind": "physical"
+    },
+    {
+      "source": "p2",
+      "target": "p4",
+      "kind": "physical"
+    },
+    {
+      "source": "p3",
+      "target": "p4",
+      "kind": "physical"
+    },
+    {
+      "source": "p5",
+      "target": "p6",
+      "kind": "physical"
+    },
+    {
+      "source": "p5",
+      "target": "p7",
+      "kind": "physical"
+    },
+    {
+      "source": "p5",
+      "target": "p8",
+      "kind": "physical"
+    },
+    {
+      "source": "p6",
+      "target": "p7",
+      "kind": "physical"
+    },
+    {
+      "source": "p6",
+      "target": "p8",
+      "kind": "physical"
+    },
+    {
+      "source": "p7",
+      "target": "p8",
+      "kind": "physical"
+    },
+    {
+      "source": "p9",
+      "target": "p10",
+      "kind": "physical"
+    },
+    {
+      "source": "p9",
+      "target": "p11",
+      "kind": "physical"
+    },
+    {
+      "source": "p9",
+      "target": "p12",
+      "kind": "physical"
+    },
+    {
+      "source": "p10",
+      "target": "p11",
+      "kind": "physical"
+    },
+    {
+      "source": "p10",
+      "target": "p12",
+      "kind": "physical"
+    },
+    {
+      "source": "p11",
+      "target": "p12",
+      "kind": "physical"
+    },
+    {
+      "source": "p13",
+      "target": "p14",
+      "kind": "physical"
+    },
+    {
+      "source": "p13",
+      "target": "p15",
+      "kind": "physical"
+    },
+    {
+      "source": "p13",
+      "target": "p16",
+      "kind": "physical"
+    },
+    {
+      "source": "p14",
+      "target": "p15",
+      "kind": "physical"
+    },
+    {
+      "source": "p14",
+      "target": "p16",
+      "kind": "physical"
+    },
+    {
+      "source": "p15",
+      "target": "p16",
+      "kind": "physical"
+    },
+    {
+      "source": "p17",
+      "target": "p18",
+      "kind": "physical"
+    },
+    {
+      "source": "p17",
+      "target": "p19",
+      "kind": "physical"
+    },
+    {
+      "source": "p17",
+      "target": "p20",
+      "kind": "physical"
+    },
+    {
+      "source": "p18",
+      "target": "p19",
+      "kind": "physical"
+    },
+    {
+      "source": "p18",
+      "target": "p20",
+      "kind": "physical"
+    },
+    {
+      "source": "p19",
+      "target": "p20",
+      "kind": "physical"
+    },
+    {
+      "source": "p21",
+      "target": "p22",
+      "kind": "physical"
+    },
+    {
+      "source": "p21",
+      "target": "p23",
+      "kind": "physical"
+    },
+    {
+      "source": "p21",
+      "target": "p24",
+      "kind": "physical"
+    },
+    {
+      "source": "p22",
+      "target": "p23",
+      "kind": "physical"
+    },
+    {
+      "source": "p22",
+      "target": "p24",
+      "kind": "physical"
+    },
+    {
+      "source": "p23",
+      "target": "p24",
+      "kind": "physical"
+    },
+    {
+      "source": "p1",
+      "target": "p5",
+      "kind": "physical"
+    },
+    {
+      "source": "p2",
+      "target": "p6",
+      "kind": "physical"
+    },
+    {
+      "source": "p1",
+      "target": "p13",
+      "kind": "physical"
+    },
+    {
+      "source": "p2",
+      "target": "p14",
+      "kind": "physical"
+    },
+    {
+      "source": "p1",
+      "target": "p21",
+      "kind": "physical"
+    },
+    {
+      "source": "p2",
+      "target": "p22",
+      "kind": "physical"
+    },
+    {
+      "source": "p5",
+      "target": "p9",
+      "kind": "physical"
+    },
+    {
+      "source": "p6",
+      "target": "p10",
+      "kind": "physical"
+    },
+    {
+      "source": "p5",
+      "target": "p17",
+      "kind": "physical"
+    },
+    {
+      "source": "p6",
+      "target": "p18",
+      "kind": "physical"
+    },
+    {
+      "source": "p9",
+      "target": "p13",
+      "kind": "physical"
+    },
+    {
+      "source": "p10",
+      "target": "p14",
+      "kind": "physical"
+    },
+    {
+      "source": "p9",
+      "target": "p21",
+      "kind": "physical"
+    },
+    {
+      "source": "p10",
+      "target": "p22",
+      "kind": "physical"
+    },
+    {
+      "source": "p13",
+      "target": "p17",
+      "kind": "physical"
+    },
+    {
+      "source": "p14",
+      "target": "p18",
+      "kind": "physical"
+    },
+    {
+      "source": "p17",
+      "target": "p21",
+      "kind": "physical"
+    },
+    {
+      "source": "p18",
+      "target": "p22",
+      "kind": "physical"
+    },
+    {
+      "source": "pe1",
+      "target": "p3",
+      "kind": "physical"
+    },
+    {
+      "source": "pe1",
+      "target": "p4",
+      "kind": "physical"
+    },
+    {
+      "source": "pe2",
+      "target": "p4",
+      "kind": "physical"
+    },
+    {
+      "source": "pe2",
+      "target": "p3",
+      "kind": "physical"
+    },
+    {
+      "source": "pe3",
+      "target": "p7",
+      "kind": "physical"
+    },
+    {
+      "source": "pe3",
+      "target": "p8",
+      "kind": "physical"
+    },
+    {
+      "source": "pe4",
+      "target": "p8",
+      "kind": "physical"
+    },
+    {
+      "source": "pe4",
+      "target": "p7",
+      "kind": "physical"
+    },
+    {
+      "source": "pe5",
+      "target": "p11",
+      "kind": "physical"
+    },
+    {
+      "source": "pe5",
+      "target": "p12",
+      "kind": "physical"
+    },
+    {
+      "source": "pe6",
+      "target": "p12",
+      "kind": "physical"
+    },
+    {
+      "source": "pe6",
+      "target": "p11",
+      "kind": "physical"
+    },
+    {
+      "source": "pe7",
+      "target": "p15",
+      "kind": "physical"
+    },
+    {
+      "source": "pe7",
+      "target": "p16",
+      "kind": "physical"
+    },
+    {
+      "source": "pe8",
+      "target": "p16",
+      "kind": "physical"
+    },
+    {
+      "source": "pe8",
+      "target": "p15",
+      "kind": "physical"
+    },
+    {
+      "source": "pe9",
+      "target": "p19",
+      "kind": "physical"
+    },
+    {
+      "source": "pe9",
+      "target": "p20",
+      "kind": "physical"
+    },
+    {
+      "source": "pe10",
+      "target": "p20",
+      "kind": "physical"
+    },
+    {
+      "source": "pe10",
+      "target": "p19",
+      "kind": "physical"
+    },
+    {
+      "source": "pe11",
+      "target": "p23",
+      "kind": "physical"
+    },
+    {
+      "source": "pe11",
+      "target": "p24",
+      "kind": "physical"
+    },
+    {
+      "source": "pe12",
+      "target": "p24",
+      "kind": "physical"
+    },
+    {
+      "source": "pe12",
+      "target": "p23",
+      "kind": "physical"
+    },
+    {
+      "source": "pe1",
+      "target": "ce_branch1",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "h_branch1_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "h_branch1_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe2",
+      "target": "ce_branch2",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "h_branch2_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "h_branch2_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe3",
+      "target": "ce_branch3",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "h_branch3_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "h_branch3_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe4",
+      "target": "ce_branch4",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "h_branch4_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "h_branch4_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe5",
+      "target": "ce_branch5",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "h_branch5_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "h_branch5_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe6",
+      "target": "ce_branch6",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "h_branch6_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "h_branch6_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe7",
+      "target": "ce_branch7",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "h_branch7_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "h_branch7_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe8",
+      "target": "ce_branch8",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "h_branch8_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "h_branch8_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe9",
+      "target": "ce_branch9",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "h_branch9_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "h_branch9_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe10",
+      "target": "ce_branch10",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "h_branch10_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "h_branch10_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe11",
+      "target": "ce_branch11",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "h_branch11_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "h_branch11_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe12",
+      "target": "ce_branch12",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "h_branch12_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "h_branch12_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe1",
+      "target": "ce_branch13",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "h_branch13_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "h_branch13_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe2",
+      "target": "ce_branch14",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "h_branch14_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "h_branch14_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe3",
+      "target": "ce_branch15",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "h_branch15_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "h_branch15_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe4",
+      "target": "ce_branch16",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "h_branch16_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "h_branch16_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe5",
+      "target": "ce_branch17",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "h_branch17_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "h_branch17_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe6",
+      "target": "ce_branch18",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "h_branch18_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "h_branch18_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe7",
+      "target": "ce_branch19",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "h_branch19_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "h_branch19_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe8",
+      "target": "ce_branch20",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "h_branch20_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "h_branch20_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe9",
+      "target": "ce_branch21",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "h_branch21_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "h_branch21_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe10",
+      "target": "ce_branch22",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "h_branch22_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "h_branch22_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe11",
+      "target": "ce_branch23",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "h_branch23_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "h_branch23_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe12",
+      "target": "ce_branch24",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "h_branch24_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "h_branch24_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "pe1",
+      "target": "ce_hub1",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub1",
+      "target": "h_hub1_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub1",
+      "target": "h_hub1_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub1",
+      "target": "h_hub1_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe2",
+      "target": "ce_hub2",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub2",
+      "target": "h_hub2_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub2",
+      "target": "h_hub2_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub2",
+      "target": "h_hub2_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe3",
+      "target": "ce_hub3",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub3",
+      "target": "h_hub3_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub3",
+      "target": "h_hub3_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub3",
+      "target": "h_hub3_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe4",
+      "target": "ce_hub4",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub4",
+      "target": "h_hub4_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub4",
+      "target": "h_hub4_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub4",
+      "target": "h_hub4_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe5",
+      "target": "ce_hub5",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub5",
+      "target": "h_hub5_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub5",
+      "target": "h_hub5_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub5",
+      "target": "h_hub5_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe6",
+      "target": "ce_hub6",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub6",
+      "target": "h_hub6_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub6",
+      "target": "h_hub6_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_hub6",
+      "target": "h_hub6_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe7",
+      "target": "ce_dc1",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "h_dc1_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "h_dc1_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "h_dc1_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe8",
+      "target": "ce_dc2",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "h_dc2_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "h_dc2_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "h_dc2_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe9",
+      "target": "ce_dc3",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "h_dc3_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "h_dc3_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "h_dc3_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "pe10",
+      "target": "ce_dc4",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "h_dc4_corp",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "h_dc4_voice",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "h_dc4_guest",
+      "kind": "physical"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch1",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch2",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch3",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch4",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch5",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch6",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch7",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch8",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch9",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch10",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch11",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch12",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch13",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch14",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch15",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch16",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch17",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch18",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch19",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch20",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch21",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch22",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch23",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_branch24",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc1",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc2",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc3",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "ce_hub1",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "ce_hub3",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "ce_hub5",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_dc4",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_hub1",
+      "target": "ce_hub2",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_hub3",
+      "target": "ce_hub4",
+      "kind": "tunnel"
+    },
+    {
+      "source": "ce_hub5",
+      "target": "ce_hub6",
+      "kind": "tunnel"
+    }
+  ]
+}
