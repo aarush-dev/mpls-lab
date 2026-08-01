@@ -360,6 +360,14 @@ The frontend's monotonic display clock (`AppState.absTick`, `src/state/reducer.t
 
 **Tunnel overlay edges** — the ~171 `kind="tunnel"` links (of 361 total) render near-invisible (`line-opacity: 0.12`) by default so they don't tangle the 190 physical links on screen. Hovering a node lights up all its `connectedEdges()` (adds an `edge-hl` class), revealing that node's full link set including faint tunnels.
 
+**Fault phase / lifecycle** — an injected fault (`src/state/reducer.ts`) walks `pending → predicted → down`. `pending`: healthy-looking grace period, no alert. `predicted`: node reads amber, fires `NodeDownPredicted`. `down`: node reads red, folds into `NodeDown`. Escalation runs on wall-clock `setTimeout`s in `App.tsx` (pending→predicted at +5s, predicted→down at +`leadSec`s), not the demo-tick clock.
+
+**leadSec** — 30, 60, or 90 seconds; how long a fault stays `predicted` before going `down`. Picked deterministically by `pickLeadSec(node, faultType)` (sum of char codes mod 3) — no `Math.random`, same node+fault always gets the same lead time. Surfaces in the `NodeDownPredicted` alert text ("predicted `<faultType>` in `<leadSec>`s") and as the predictor-series ramp duration.
+
+**Fault predictor series** — a synthetic `<deviceId>:predictor` metric series (`MockDataClient.predictorSeries()`) added to `getTelemetry()` output only for a device with an active injected fault. Ramps toward "now" with amplitude by phase (pending 20 / predicted 55 / down 90). Crash-type faults (`node_failure`, `core_partition`, `pop_isolation`, `srlg_cut`) drive a "Health score" % down; other (traffic) faults drive a "Traffic pressure" % up. `groupSeries()` puts it in its own "Fault predictor" panel, shown first.
+
+**NodeHoverCard** — mini node-inspector (`TopologyPage.tsx`) shown near the cursor on topology node hover, no click needed. Shows id, role, POP, site, a derived status (Down/Predicted fault/Precursor/Healthy from injected phase or replayed state), and latest predictor/CPU/memory values from a lazily-fetched telemetry snapshot.
+
 **Air-gap verification** ensures the pipeline is truly offline:
 - All Docker images are pre-saved to `.tar.xz` files.
 - At deploy time, `load-offline.sh` loads images from local storage (no registry pull).

@@ -67,8 +67,10 @@ export function FaultInjectionPage() {
     <PluginPage>
       <h1>Fault Injection</h1>
       <p className={styles.help}>
-        Fire a fault at a node. It turns <span className={styles.red}>red</span> across every page and
-        raises a NodeDown alert (Grafana Alerting + toast). Clear it to restore the node.
+        Fire a fault at a node. It stays healthy for ~5s, then a prediction fires (
+        <span className={styles.amber}>amber</span>, 30/60/90s lead — Grafana Alerting + toast), then the
+        node goes <span className={styles.red}>red</span> across every page with a NodeDown alert. The
+        node page shows a fault-predictor curve building the whole time. Clear it to restore the node.
       </p>
 
       <div className={styles.controls}>
@@ -105,11 +107,21 @@ export function FaultInjectionPage() {
         <ul className={styles.list}>
           {injectedFaults.map((f) => (
             <li key={f.node} className={styles.row}>
-              <Icon name="exclamation-circle" className={styles.red} />
+              <Icon
+                name={f.phase === 'down' ? 'exclamation-circle' : f.phase === 'predicted' ? 'exclamation-triangle' : 'clock-nine'}
+                className={f.phase === 'predicted' ? styles.amber : f.phase === 'pending' ? styles.pending : styles.red}
+              />
               <a className={styles.node} href={nodeDetailPath(f.node)}>
                 {f.node}
               </a>
-              <span className={styles.fault}>{f.faultType}</span>
+              <span className={styles.fault}>
+                {f.faultType} ·{' '}
+                {f.phase === 'pending'
+                  ? 'arming…'
+                  : f.phase === 'predicted'
+                  ? `predicted in ${f.leadSec}s`
+                  : 'down'}
+              </span>
               <Button
                 size="sm"
                 variant="secondary"
@@ -133,6 +145,12 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   red: css`
     color: ${theme.colors.error.text};
+  `,
+  amber: css`
+    color: ${theme.colors.warning.text};
+  `,
+  pending: css`
+    color: ${theme.colors.text.secondary};
   `,
   controls: css`
     display: flex;

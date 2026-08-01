@@ -18,7 +18,7 @@ export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const history = useHistory();
   const styles = useStyles2(getStyles);
-  const { cursor } = useAppState();
+  const { cursor, injectedFaults } = useAppState();
   const dataClient = useDataClient();
 
   const [telemetry, setTelemetry] = useState<MetricSeries[] | null>(null);
@@ -62,7 +62,9 @@ export function NodeDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, id, attempt]);
+    // injectedFaults: re-fetch when a fault escalates (pending->predicted->down) so the charts +
+    // status update live between demo ticks.
+  }, [dataClient, cursor, id, attempt, injectedFaults]);
 
   const node = topology?.nodes.find((n) => n.id === id);
   const neighborIds = useMemo(() => {

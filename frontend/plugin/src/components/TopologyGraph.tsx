@@ -13,6 +13,8 @@ interface Props {
   nodes: TopologyNodeLive[];
   links: TopologyLink[];
   onSelectNode: (id: string) => void;
+  /** Hover a device -> id + rendered position (relative to the graph container); null on mouse-out. */
+  onHoverNode?: (id: string | null, pos: { x: number; y: number } | null) => void;
 }
 
 const POP_PREFIX = 'pop::';
@@ -63,13 +65,15 @@ function nodeSetKey(nodes: TopologyNodeLive[], links: TopologyLink[]): string {
   return `${nodes.map((n) => n.id).join(',')}|${links.map((l) => `${l.source}-${l.target}`).join(',')}`;
 }
 
-export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
+export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props) {
   const styles = useStyles2(getStyles);
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const setKeyRef = useRef<string>('');
   const onSelectRef = useRef(onSelectNode);
   onSelectRef.current = onSelectNode;
+  const onHoverRef = useRef(onHoverNode);
+  onHoverRef.current = onHoverNode;
 
   // Init cytoscape once.
   useEffect(() => {
@@ -158,12 +162,16 @@ export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
       }
     });
 
-    // Hover a device -> light up its links (incl. otherwise-faint tunnels); clear on mouseout.
+    // Hover a device -> light up its links (incl. otherwise-faint tunnels) + surface a mini card
+    // (via onHoverNode) so it can be inspected without navigating. Clear on mouseout.
     cy.on('mouseover', 'node[!isPop]', (evt) => {
       evt.target.connectedEdges().addClass('edge-hl');
+      const rp = evt.target.renderedPosition();
+      onHoverRef.current?.(evt.target.id(), { x: rp.x, y: rp.y });
     });
     cy.on('mouseout', 'node[!isPop]', (evt) => {
       evt.target.connectedEdges().removeClass('edge-hl');
+      onHoverRef.current?.(null, null);
     });
 
     cyRef.current = cy;

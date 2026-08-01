@@ -68,16 +68,56 @@ function AppInner(_props: AppRootProps) {
     }
   }, [dataClient, absTick]);
 
-  // Push manually injected faults (Fault Injection page) into the data client so a node reads red
-  // and fires an alert regardless of the cursor. Runs before the alert effect below.
+  // Push manually injected faults (Fault Injection page) into the data client so nodes read their
+  // current phase (amber when predicted, red when down) and fire alerts. Runs before the alert effect.
   useEffect(() => {
     const injectAware = dataClient as unknown as {
-      setInjectedFaults?: (f: Array<{ node: string; faultType: string }>) => void;
+      setInjectedFaults?: (f: Array<{ node: string; faultType: string; phase: string; leadSec: number }>) => void;
     };
     if (typeof injectAware.setInjectedFaults === 'function') {
       injectAware.setInjectedFaults(injectedFaults);
     }
   }, [dataClient, injectedFaults]);
+
+  // Fault escalation timers: an injected fault stays healthy ~5s, then goes 'predicted' (amber +
+  // T-minus alert), then 'down' (red) after its leadSec. Wall-clock timers here (a live demo action,
+  // not the deterministic replay tape). Scheduled once per node; cleared when the fault is cleared.
+  const faultTimers = useRef<Map<string, number[]>>(new Map());
+  useEffect(() => {
+    const timers = faultTimers.current;
+    const live = new Set(injectedFaults.map((f) => f.node));
+
+    // Clear timers for faults that were cleared.
+    for (const [node, ids] of timers) {
+      if (!live.has(node)) {
+        ids.forEach((id) => window.clearTimeout(id));
+        timers.delete(node);
+      }
+    }
+    // Schedule escalation for freshly-injected (pending, not yet scheduled) faults.
+    for (const f of injectedFaults) {
+      if (f.phase === 'pending' && !timers.has(f.node)) {
+        const node = f.node;
+        const toPredicted = window.setTimeout(() => dispatch({ type: 'ADVANCE_FAULT', payload: { node, phase: 'predicted' } }), 5000);
+        const toDown = window.setTimeout(
+          () => dispatch({ type: 'ADVANCE_FAULT', payload: { node, phase: 'down' } }),
+          5000 + f.leadSec * 1000
+        );
+        timers.set(node, [toPredicted, toDown]);
+      }
+    }
+  }, [injectedFaults, dispatch]);
+
+  // Clear every pending timer on unmount.
+  useEffect(() => {
+    const timers = faultTimers.current;
+    return () => {
+      for (const ids of timers.values()) {
+        ids.forEach((id) => window.clearTimeout(id));
+      }
+      timers.clear();
+    };
+  }, []);
 
   // Push the current firing set (node-down + T-5min predictions + injected faults) into Alertmanager
   // so they show in the native Grafana Alerting tab, AND toast any newly-appeared alert. Only POST /

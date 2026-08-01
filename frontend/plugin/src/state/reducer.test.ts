@@ -138,23 +138,34 @@ describe('appReducer', () => {
   });
 
   describe('injected faults', () => {
-    it('INJECT_FAULT adds a fault, replacing any prior fault on the same node', () => {
+    it('INJECT_FAULT adds a pending fault with a 30/60/90 lead, replacing any prior fault on the same node', () => {
       let s = appReducer(initialAppState, { type: 'INJECT_FAULT', payload: { node: 'pe1', faultType: 'node_failure' } });
-      expect(s.injectedFaults).toEqual([{ node: 'pe1', faultType: 'node_failure' }]);
+      expect(s.injectedFaults).toHaveLength(1);
+      expect(s.injectedFaults[0]).toMatchObject({ node: 'pe1', faultType: 'node_failure', phase: 'pending' });
+      expect([30, 60, 90]).toContain(s.injectedFaults[0].leadSec);
       s = appReducer(s, { type: 'INJECT_FAULT', payload: { node: 'pe1', faultType: 'congestion' } });
-      expect(s.injectedFaults).toEqual([{ node: 'pe1', faultType: 'congestion' }]);
+      expect(s.injectedFaults).toHaveLength(1);
+      expect(s.injectedFaults[0]).toMatchObject({ node: 'pe1', faultType: 'congestion', phase: 'pending' });
+    });
+
+    it('ADVANCE_FAULT escalates the phase of one node', () => {
+      let s = appReducer(initialAppState, { type: 'INJECT_FAULT', payload: { node: 'pe1', faultType: 'congestion' } });
+      s = appReducer(s, { type: 'ADVANCE_FAULT', payload: { node: 'pe1', phase: 'predicted' } });
+      expect(s.injectedFaults[0].phase).toBe('predicted');
+      s = appReducer(s, { type: 'ADVANCE_FAULT', payload: { node: 'pe1', phase: 'down' } });
+      expect(s.injectedFaults[0].phase).toBe('down');
     });
 
     it('CLEAR_FAULT removes one node, CLEAR_INJECTED empties all', () => {
       let s: AppState = {
         ...initialAppState,
         injectedFaults: [
-          { node: 'pe1', faultType: 'node_failure' },
-          { node: 'ce_branch2', faultType: 'congestion' },
+          { node: 'pe1', faultType: 'node_failure', phase: 'down', leadSec: 60 },
+          { node: 'ce_branch2', faultType: 'congestion', phase: 'predicted', leadSec: 30 },
         ],
       };
       s = appReducer(s, { type: 'CLEAR_FAULT', payload: { node: 'pe1' } });
-      expect(s.injectedFaults).toEqual([{ node: 'ce_branch2', faultType: 'congestion' }]);
+      expect(s.injectedFaults).toEqual([{ node: 'ce_branch2', faultType: 'congestion', phase: 'predicted', leadSec: 30 }]);
       s = appReducer(s, { type: 'CLEAR_INJECTED' });
       expect(s.injectedFaults).toEqual([]);
     });

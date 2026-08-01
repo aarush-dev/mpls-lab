@@ -127,27 +127,65 @@ describe('MockDataClient', () => {
     expect(kinds.has('NodeDownPredicted')).toBe(true);
   });
 
-  it('injected faults force a node red in topology and raise a NodeDown alert', async () => {
+  it('injected faults escalate by phase: predicted->amber+prediction alert, down->red+NodeDown', async () => {
     const client = new MockDataClient();
     client.setCursor(0);
-    // pe1 is healthy at cursor 0 in the fixture; inject a fault.
-    (client as unknown as { setInjectedFaults: (f: Array<{ node: string; faultType: string }>) => void }).setInjectedFaults([
-      { node: 'pe1', faultType: 'node_failure' },
-    ]);
+    const setFaults = (client as unknown as {
+      setInjectedFaults: (f: Array<{ node: string; faultType: string; phase: string; leadSec: number }>) => void;
+    }).setInjectedFaults.bind(client);
 
-    const { nodes } = await client.getTopology({});
-    expect((nodes as TopologyNodeLive[]).find((n) => n.id === 'pe1')?.state).toBe('red');
+    // Predicted phase: node reads amber and raises a T-minus prediction alert (not down yet).
+    setFaults([{ node: 'pe1', faultType: 'congestion', phase: 'predicted', leadSec: 60 }]);
+    let g = await client.getTopology({});
+    expect((g.nodes as TopologyNodeLive[]).find((n) => n.id === 'pe1')?.state).toBe('amber');
+    let alerts = client.getActiveAlerts();
+    const pred = alerts.find((a) => a.node === 'pe1' && a.alertname === 'NodeDownPredicted');
+    expect(pred).toBeDefined();
+    expect(pred!.severity).toBe('warning');
+    expect(pred!.summary).toContain('60s');
+    expect(alerts.find((a) => a.node === 'pe1' && a.alertname === 'NodeDown')).toBeUndefined();
 
-    const alerts = client.getActiveAlerts();
-    const injected = alerts.find((a) => a.node === 'pe1' && a.alertname === 'NodeDown');
-    expect(injected).toBeDefined();
-    expect(injected!.severity).toBe('critical');
-    expect(injected!.summary).toContain('node_failure');
+    // Down phase: node goes red and raises a critical NodeDown carrying the fault type.
+    setFaults([{ node: 'pe1', faultType: 'congestion', phase: 'down', leadSec: 60 }]);
+    g = await client.getTopology({});
+    expect((g.nodes as TopologyNodeLive[]).find((n) => n.id === 'pe1')?.state).toBe('red');
+    alerts = client.getActiveAlerts();
+    const down = alerts.find((a) => a.node === 'pe1' && a.alertname === 'NodeDown');
+    expect(down).toBeDefined();
+    expect(down!.severity).toBe('critical');
+    expect(down!.summary).toContain('congestion');
 
-    // Clearing it restores the node.
-    (client as unknown as { setInjectedFaults: (f: Array<{ node: string; faultType: string }>) => void }).setInjectedFaults([]);
+    // Clearing restores the node.
+    setFaults([]);
     const after = await client.getTopology({});
     expect((after.nodes as TopologyNodeLive[]).find((n) => n.id === 'pe1')?.state).not.toBe('red');
+  });
+
+  it('adds a fault-predictor series to an injected node, climbing as the phase escalates', async () => {
+    const client = new MockDataClient();
+    client.setCursor(10);
+    const setFaults = (client as unknown as {
+      setInjectedFaults: (f: Array<{ node: string; faultType: string; phase: string; leadSec: number }>) => void;
+    }).setInjectedFaults.bind(client);
+    const predOf = async () => {
+      const s = await client.getTelemetry({ deviceId: 'pe1' });
+      return s.find((m) => m.key === 'pe1:predictor');
+    };
+
+    // No fault -> no predictor series.
+    expect(await predOf()).toBeUndefined();
+
+    // Predicted -> predictor present and trending up toward "now" (traffic fault = rising pressure).
+    setFaults([{ node: 'pe1', faultType: 'congestion', phase: 'predicted', leadSec: 60 }]);
+    const predicted = await predOf();
+    expect(predicted).toBeDefined();
+    const pts = predicted!.points;
+    expect(pts[pts.length - 1].value!).toBeGreaterThan(pts[0].value!);
+
+    // Down amplitude exceeds predicted amplitude (curve is steeper closer to impact).
+    setFaults([{ node: 'pe1', faultType: 'congestion', phase: 'down', leadSec: 60 }]);
+    const down = await predOf();
+    expect(down!.points[down!.points.length - 1].value!).toBeGreaterThan(pts[pts.length - 1].value!);
   });
 
   it('rewrites chart timestamps to a monotonic timeline that never rewinds on loop', async () => {

@@ -378,9 +378,9 @@ export class MockDataClient implements DataClient {
   // events/predictions/incidents gating stays on cursor-based curTsMs() below.
   private absTick = 0;
   private convCounter = 0;
-  // Manually injected faults (node -> faultType). Overlays the replayed node states: an injected
-  // node reads red and fires a NodeDown alert regardless of the cursor. Demo control.
-  private injectedFaults = new Map<string, string>();
+  // Manually injected faults (node -> {faultType, phase, leadSec}). Overlays the replayed node
+  // states: 'predicted' reads amber (+ T-minus alert), 'down' reads red (+ NodeDown). Demo control.
+  private injectedFaults = new Map<string, { faultType: string; phase: string; leadSec: number }>();
 
   /** Called by App.tsx on every demo-clock tick. HttpDataClient will not implement this. */
   setCursor(n: number): void {
@@ -393,8 +393,10 @@ export class MockDataClient implements DataClient {
   }
 
   /** Manually injected faults from App.tsx (state.injectedFaults). Mock-only demo control. */
-  setInjectedFaults(faults: Array<{ node: string; faultType: string }>): void {
-    this.injectedFaults = new Map(faults.map((f) => [f.node, f.faultType]));
+  setInjectedFaults(faults: Array<{ node: string; faultType: string; phase?: string; leadSec?: number }>): void {
+    this.injectedFaults = new Map(
+      faults.map((f) => [f.node, { faultType: f.faultType, phase: f.phase ?? 'down', leadSec: f.leadSec ?? 60 }])
+    );
   }
 
   getCursor(): number {
@@ -420,9 +422,21 @@ export class MockDataClient implements DataClient {
         reds.set(device, undefined);
       }
     }
-    // Manually injected faults are red too (override), carrying their chosen fault type.
-    for (const [node, faultType] of this.injectedFaults) {
-      reds.set(node, faultType);
+    // Injected faults: 'down' overrides to red (NodeDown); 'predicted' emits a T-minus prediction
+    // alert; 'pending' (grace period) is silent.
+    for (const [node, inj] of this.injectedFaults) {
+      if (inj.phase === 'down') {
+        reds.set(node, inj.faultType);
+      } else if (inj.phase === 'predicted') {
+        out.push({
+          alertname: 'NodeDownPredicted',
+          node,
+          severity: 'warning',
+          pop: popOf(node),
+          summary: `${node} predicted ${inj.faultType} in ${inj.leadSec}s`,
+          description: `Injected fault escalating — ${inj.faultType} impact expected in ~${inj.leadSec}s.`,
+        });
+      }
     }
     for (const [device, faultType] of reds) {
       out.push({
@@ -458,8 +472,16 @@ export class MockDataClient implements DataClient {
   }
 
   private nodeStateAt(deviceId: string): 'red' | 'amber' | 'green' {
-    if (this.injectedFaults.has(deviceId)) {
-      return 'red'; // manual injection overrides the replayed state
+    const inj = this.injectedFaults.get(deviceId);
+    if (inj) {
+      // Injected fault overrides the replayed state, escalating with its phase.
+      if (inj.phase === 'down') {
+        return 'red';
+      }
+      if (inj.phase === 'predicted') {
+        return 'amber';
+      }
+      // 'pending' grace period: node still looks healthy.
     }
     const bucket = nodeStates[String(this.cursor)];
     const state = bucket?.[deviceId];
@@ -602,23 +624,51 @@ export class MockDataClient implements DataClient {
     const indices = windowIndices(window, meta.bucketCount);
     const n = indices.length;
 
-    return series
+    const tAt = (p: number) => bucketToTsMs(MOCK_BUCKET_META, this.absTick - (n - 1 - p));
+    const out: MetricSeries[] = series
       .filter((s) => !request.keys || request.keys.includes(s.key))
       .map((s) => {
         // Rewrite tMs onto the monotonic display timeline (Task A): position p (old->new) ends at
         // absTick, so the axis never rewinds on loop. Values still come from the cursor window.
         const points: MetricPoint[] = indices.map((index, p) => ({
-          tMs: bucketToTsMs(MOCK_BUCKET_META, this.absTick - (n - 1 - p)),
+          tMs: tAt(p),
           value: s.points[index]?.value ?? null,
         }));
-        return {
-          key: s.key,
-          label: s.label,
-          unit: s.unit,
-          source: s.source,
-          points,
-        };
+        return { key: s.key, label: s.label, unit: s.unit, source: s.source, points };
       });
+
+    // Fault-predictor series: when this device has an injected fault, add a leading-indicator curve
+    // that ramps as the fault escalates (pending -> predicted -> down). Traffic faults trend a
+    // "pressure" metric UP; crash faults trend a "health score" DOWN — either way the last points
+    // climb toward impact, so the node page visibly forecasts the fault instead of just going red.
+    const inj = request.deviceId ? this.injectedFaults.get(request.deviceId) : undefined;
+    if (inj && (!request.keys || request.keys.includes(`${request.deviceId}:predictor`))) {
+      out.push(this.predictorSeries(request.deviceId!, inj, n, tAt));
+    }
+    return out;
+  }
+
+  private predictorSeries(
+    deviceId: string,
+    inj: { faultType: string; phase: string },
+    n: number,
+    tAt: (p: number) => number
+  ): MetricSeries {
+    const CRASH = new Set(['node_failure', 'core_partition', 'pop_isolation', 'srlg_cut']);
+    const crash = CRASH.has(inj.faultType);
+    const amp = inj.phase === 'down' ? 90 : inj.phase === 'predicted' ? 55 : 20;
+    const label = crash
+      ? `Health score — fault predictor (${inj.faultType})`
+      : `Traffic pressure — fault predictor (${inj.faultType})`;
+    const points: MetricPoint[] = [];
+    for (let p = 0; p < n; p++) {
+      const frac = n > 1 ? p / (n - 1) : 1;
+      const jitter = 2 * Math.sin(p * 0.7);
+      const ramp = 10 + frac * amp + jitter; // rises toward "now"
+      const value = Math.max(0, Math.min(100, crash ? 100 - ramp : ramp));
+      points.push({ tMs: tAt(p), value: Math.round(value * 10) / 10 });
+    }
+    return { key: `${deviceId}:predictor`, label, unit: '%', source: 'modelled', points };
   }
 
   async getEvents(filters: Filters): Promise<NetworkEvent[]> {

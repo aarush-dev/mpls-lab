@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.6.0. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.7.0. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -22,12 +22,12 @@ Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 8 pages, all under `frontend/plugin/src/pages/`:
 
 - **Overview** (`OverviewPage.tsx`, `/`) — fleet health summary: reporting/expected devices, degraded tunnels, active incidents, highest-risk device.
-- **Topology** (`TopologyPage.tsx`, `/topology`) — cytoscape map of the network graph, node health coloring. Layout is a deterministic **preset** (not force-directed): `src/utils/topologyLayout.ts` `computePositions()` gives each node a fixed slot — pops laid on a 3×2 cluster grid, role tiers stacked top-down (p core → pe → ce → host leaves), so nodes never overlap and the map is stable across ticks. Node shape/size differ by role (`src/data/topologyStyles.ts`, keyed on the lowercase fixture roles). The ~171 tunnel (overlay) links are drawn faint by default; hovering a node lights up its incident links.
+- **Topology** (`TopologyPage.tsx`, `/topology`) — cytoscape map of the network graph, node health coloring. Layout is a deterministic **preset** (not force-directed): `src/utils/topologyLayout.ts` `computePositions()` gives each node a fixed slot — pops laid on a 3×2 cluster grid, role tiers stacked top-down (p core → pe → ce → host leaves), so nodes never overlap and the map is stable across ticks. Node shape/size differ by role (`src/data/topologyStyles.ts`, keyed on the lowercase fixture roles). The ~171 tunnel (overlay) links are drawn faint by default; hovering a node lights up its incident links **and shows a mini node card** (`NodeHoverCard` in `TopologyPage.tsx`) — identity, live state, and a few headline metrics — so nodes can be inspected without clicking into each one.
 - **Node Detail** (`NodeDetailPage.tsx`, `/node/:id`) — single-device view with a device picker dropdown.
 - **Telemetry** (`TelemetryPage.tsx`, `/telemetry`) — time-series metric panels.
 - **Incidents** (`IncidentsPage.tsx`, `/incidents`) — incident and prediction list, evidence, root-cause hypotheses, recommended actions.
 - **Copilot** (`CopilotPage.tsx`, `/copilot`) — chat-style assistant over incidents/telemetry.
-- **Fault Injection** (`FaultInjectionPage.tsx`, `/inject`) — demo control: pick a node + fault type and fire it. The node turns red on every page (`state.injectedFaults` overlays the replayed node states in `MockDataClient.nodeStateAt`) and raises a `NodeDown` alert (Grafana Alerting + toast). Clear per-node or all.
+- **Fault Injection** (`FaultInjectionPage.tsx`, `/inject`) — demo control: pick a node + fault type and fire it. The fault **escalates on a timer** instead of dropping red instantly (`InjectedFault.phase` in `src/state/reducer.ts`, timers in `App.tsx`): `pending` (~5s, still healthy) → `predicted` (amber + a `NodeDownPredicted` alert with a deterministic 30/60/90s lead) → `down` (red + `NodeDown`). `MockDataClient.nodeStateAt` maps phase→color; `getActiveAlerts` emits the phase's alert. While a fault is live, the node's detail page grows a **Fault predictor** panel — a leading-indicator curve (`MockDataClient.predictorSeries`) that climbs toward impact (traffic faults trend "pressure" up, crash faults trend a "health score" down). Topology / Overview / Node Detail re-fetch on `injectedFaults` change so the color + charts update live between demo ticks. Clear per-node or all.
 - **Status** (`StatusPage.tsx`, `/status`) — "Data & Integration Status": shows data source/capabilities state.
 
 Every alert (node-down, T-5min prediction, or injected fault) also pops a top-right toast that auto-fades after 5s, shown on **every** page — `src/components/AlertToaster.tsx` (`AlertToasterProvider` wraps the whole app; `App.tsx` calls `notify()` for each newly-firing alert).

@@ -17,6 +17,8 @@ export function groupSeries(series: MetricSeries[]): Array<{ title: string; unit
     }
   };
 
+  // Injected-fault leading indicator — shown first so the forecast is the headline panel.
+  bucket('Fault predictor', (suf) => suf === 'predictor');
   bucket('Host CPU / memory', (suf) => suf === 'cpu_pct' || suf === 'mem_pct');
   bucket('Interface throughput', (suf) => /if_(in|out)_(octets|bytes|bps)/.test(suf));
   bucket('Interface errors', (suf) => ['if_in_errors', 'if_in_discards', 'if_out_errors'].includes(suf));

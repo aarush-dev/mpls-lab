@@ -5,10 +5,23 @@
 
 import type { Filters } from '../data/types';
 
-/** A manually injected fault (demo control): forces a node red + fires an alert. */
+/** Lifecycle of an injected fault: healthy grace period -> predicted (amber + T-minus alert) -> down (red). */
+export type FaultPhase = 'pending' | 'predicted' | 'down';
+
+/** A manually injected fault (demo control). Escalates on a timer (see App.tsx) instead of dropping red instantly. */
 export interface InjectedFault {
   node: string;
   faultType: string;
+  phase: FaultPhase;
+  /** Predicted lead time in seconds (30 | 60 | 90) — how long from the prediction until the node goes down. */
+  leadSec: number;
+}
+
+const FAULT_LEADS = [30, 60, 90];
+/** Deterministic 30/60/90 pick from node+faultType (no Math.random, keeps replay determinism). */
+function pickLeadSec(node: string, faultType: string): number {
+  const sum = [...`${node}${faultType}`].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return FAULT_LEADS[sum % FAULT_LEADS.length];
 }
 
 export interface AppState {
@@ -48,7 +61,8 @@ export type AppAction =
   | { type: 'SET_BOUNDS'; payload: { bucketCount: number; windowBuckets: number } }
   | { type: 'SET_FILTER'; payload: { key: StringFilterKey; value: string | undefined } }
   | { type: 'CLEAR_FILTERS' }
-  | { type: 'INJECT_FAULT'; payload: InjectedFault }
+  | { type: 'INJECT_FAULT'; payload: { node: string; faultType: string } }
+  | { type: 'ADVANCE_FAULT'; payload: { node: string; phase: FaultPhase } }
   | { type: 'CLEAR_FAULT'; payload: { node: string } }
   | { type: 'CLEAR_INJECTED' };
 
@@ -94,10 +108,24 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'CLEAR_FILTERS':
       return { ...state, filters: {} };
     case 'INJECT_FAULT': {
-      // Re-injecting the same node replaces its fault type (idempotent by node).
+      // Re-injecting the same node replaces its fault (idempotent by node). Starts in 'pending':
+      // App.tsx schedules the escalation to 'predicted' then 'down'.
       const rest = state.injectedFaults.filter((f) => f.node !== action.payload.node);
-      return { ...state, injectedFaults: [...rest, action.payload] };
+      const fault: InjectedFault = {
+        node: action.payload.node,
+        faultType: action.payload.faultType,
+        phase: 'pending',
+        leadSec: pickLeadSec(action.payload.node, action.payload.faultType),
+      };
+      return { ...state, injectedFaults: [...rest, fault] };
     }
+    case 'ADVANCE_FAULT':
+      return {
+        ...state,
+        injectedFaults: state.injectedFaults.map((f) =>
+          f.node === action.payload.node ? { ...f, phase: action.payload.phase } : f
+        ),
+      };
     case 'CLEAR_FAULT':
       return { ...state, injectedFaults: state.injectedFaults.filter((f) => f.node !== action.payload.node) };
     case 'CLEAR_INJECTED':

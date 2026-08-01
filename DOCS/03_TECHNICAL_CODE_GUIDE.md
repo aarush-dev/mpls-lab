@@ -1200,6 +1200,20 @@ Tunnel edges (`edge[kind="tunnel"]`, ~171 of the 361 links) render at `line-opac
 
 Fixture scale (`frontend/plugin/src/fixtures/topology.json`): 148 nodes (78 host, 24 p, 24 ce_branch, 12 pe, 6 ce_hub, 4 ce_dc), 361 links (190 physical, 171 tunnel), 6 pops.
 
+## 13. Frontend — Injected Fault Lifecycle, Predictor Series, Node Hover Card
+
+**Fault phases.** `InjectedFault.phase: 'pending' | 'predicted' | 'down'` (`frontend/plugin/src/state/reducer.ts:9,12-18`). `INJECT_FAULT` always starts a fault at `pending` (`reducer.ts:110-121`) with a deterministic `leadSec` from `pickLeadSec(node, faultType)` — sums char codes of `node+faultType` mod 3, picking 30/60/90 (`reducer.ts:20-25`); no `Math.random`, so replay stays deterministic. `ADVANCE_FAULT` (`reducer.ts:65,122-128`) moves a single node's fault to the next phase.
+
+**Escalation timers.** `App.tsx:82-120` runs wall-clock (`window.setTimeout`, not the demo-tick clock) escalation per pending fault: `pending → predicted` at +5s, `predicted → down` at +5s+`leadSec`s (`App.tsx:101-105`). Timer ids are kept in a `useRef<Map<node, number[]>>` (`App.tsx:85`); the effect clears timers for faults no longer present and skips scheduling for faults already tracked (`App.tsx:90-108`), and a separate cleanup effect clears everything on unmount (`App.tsx:112-120`).
+
+**Mock client overlay.** `MockDataClient.setInjectedFaults()` stores `{faultType, phase, leadSec}` per node (`MockDataClient.ts:396-400`). `nodeStateAt()`: `down`→red, `predicted`→amber, `pending`→falls through to the replayed state, i.e. still healthy-looking (`MockDataClient.ts:474-489`). `getActiveAlerts()`: `down` folds into the existing `NodeDown` critical alert; `predicted` emits `NodeDownPredicted` (warning) with summary `"<node> predicted <faultType> in <leadSec>s"`; `pending` emits nothing (`MockDataClient.ts:425-449`).
+
+**Predictor series.** `getTelemetry()` appends a synthetic `<deviceId>:predictor` series whenever the requested device has an injected fault (`MockDataClient.ts:640-649`), built by `predictorSeries()` (`MockDataClient.ts:651-672`). Amplitude by phase: pending 20, predicted 55, down 90 (`:659`). Crash fault types (`node_failure`, `core_partition`, `pop_isolation`, `srlg_cut`) trend a "Health score" % **down**; everything else (traffic-type faults) trends "Traffic pressure" % **up** (`:657-662,668`) — both cases the curve ramps toward "now" as `frac = p/(n-1)` climbs (`:664-669`). `groupSeries()` buckets any `*:predictor` key into a "Fault predictor" panel and lists it first (`frontend/plugin/src/utils/metricGroups.ts:21`).
+
+**Live updates between ticks.** `TopologyPage.tsx:75`, `NodeDetailPage.tsx:67`, and `OverviewPage.tsx:40` all add `injectedFaults` to their data-fetch effect deps, so a phase change from the wall-clock timers (not the 30s demo tick) re-fetches and re-renders immediately instead of waiting for the next tick.
+
+**Node hover card.** `TopologyGraph.tsx` node hover now also calls `onHoverNode(id, pos)` (prop at `TopologyGraph.tsx:17`, wired via `onHoverRef` at `:75-76`). `TopologyPage.tsx:29,32-48` tracks hover state, lazily fetches `getTelemetry({deviceId: hoverId})` per hover, and renders `NodeHoverCard` (`TopologyPage.tsx:127-135,161-206`) near the cursor: identity (id, role, POP, site), a `Status` derived from injected `phase` else `node.state` (Down/Predicted fault/Precursor/Healthy, `:166-174`), and headline metrics pulled from the fetched snapshot (`Predictor`, `CPU`, `Memory` latest values, `:181-185`).
+
 ## Appendix: File Map
 
 | File | Role |
