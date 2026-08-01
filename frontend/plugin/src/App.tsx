@@ -30,7 +30,7 @@ export function App(props: AppRootProps) {
 function AppInner(_props: AppRootProps) {
   // Base path/url where Grafana mounted this app (/a/mplslab-noccopilot-app).
   const { path } = useRouteMatch();
-  const { cursor } = useAppState();
+  const { cursor, absTick } = useAppState();
   const dispatch = useAppDispatch();
   const dataClient = useDataClient();
 
@@ -52,6 +52,15 @@ function AppInner(_props: AppRootProps) {
       cursorAware.setCursor(cursor);
     }
   }, [dataClient, cursor]);
+
+  // Same soft feature-detect for the monotonic display clock (absTick). getTelemetry uses it to
+  // rewrite point timestamps so the chart time axis never rewinds on loop.
+  useEffect(() => {
+    const clockAware = dataClient as unknown as { setAbsTick?: (n: number) => void };
+    if (typeof clockAware.setAbsTick === 'function') {
+      clockAware.setAbsTick(absTick);
+    }
+  }, [dataClient, absTick]);
 
   return (
     <AppShell meta={MOCK_BUCKET_META}>

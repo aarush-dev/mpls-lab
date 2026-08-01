@@ -12,30 +12,7 @@ import { nodeDetailPath } from '../constants';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { Incident, MetricSeries, Prediction, TopologyGraph } from '../data/types';
-
-// Groups a flat metric list into a few panels by key prefix (cpu/mem together, then one panel
-// per remaining prefix e.g. `if_*`, `tunnel_*`). Keeps this a pure function of the fetched series.
-function groupSeries(series: MetricSeries[]): Array<{ title: string; series: MetricSeries[] }> {
-  const hostKeys = ['cpu_pct', 'mem_pct'];
-  const host = series.filter((s) => hostKeys.includes(s.key));
-  const rest = series.filter((s) => !hostKeys.includes(s.key));
-
-  const groups: Array<{ title: string; series: MetricSeries[] }> = [];
-  if (host.length) {
-    groups.push({ title: 'Host', series: host });
-  }
-  const byPrefix = new Map<string, MetricSeries[]>();
-  for (const s of rest) {
-    const prefix = s.key.split('_')[0];
-    const list = byPrefix.get(prefix) ?? [];
-    list.push(s);
-    byPrefix.set(prefix, list);
-  }
-  for (const [prefix, list] of byPrefix) {
-    groups.push({ title: prefix, series: list });
-  }
-  return groups;
-}
+import { groupSeries } from '../utils/metricGroups';
 
 export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();

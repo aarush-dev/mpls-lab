@@ -10,33 +10,12 @@ import { ErrorState } from '../components/ErrorState';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { MetricSeries, TopologyNode } from '../data/types';
-
-const ERROR_COUNTER_KEYS = ['interface_if_in_errors', 'if_in_discards', 'if_out_errors'];
-
-// Group series into a few charts by metric family so related lines share an axis.
-function groupSeries(series: MetricSeries[]): Array<{ title: string; unit?: string; series: MetricSeries[] }> {
-  const groups: Array<{ title: string; unit?: string; series: MetricSeries[] }> = [];
-  const bucket = (title: string, test: (s: MetricSeries) => boolean) => {
-    const matched = series.filter(test);
-    if (matched.length) {
-      groups.push({ title, unit: matched[0].unit, series: matched });
-    }
-  };
-  bucket('CPU / memory', (s) => /cpu|mem/i.test(s.key));
-  bucket('Interface throughput', (s) => /if_(in|out)_(octets|bps|bytes)/i.test(s.key));
-  bucket('Interface errors', (s) => ERROR_COUNTER_KEYS.includes(s.key));
-  bucket('Tunnel latency / jitter / loss', (s) => /tunnel|latency|jitter|loss/i.test(s.key));
-  const known = new Set(groups.flatMap((g) => g.series));
-  const rest = series.filter((s) => !known.has(s));
-  if (rest.length) {
-    groups.push({ title: 'Other metrics', unit: rest[0].unit, series: rest });
-  }
-  return groups;
-}
+import { groupSeries } from '../utils/metricGroups';
+import { MOCK_BUCKET_META } from '../data/MockDataClient';
 
 export function TelemetryPage() {
   const styles = useStyles2(getStyles);
-  const { cursor, filters } = useAppState();
+  const { cursor, absTick, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [nodes, setNodes] = useState<TopologyNode[]>([]);
@@ -85,12 +64,15 @@ export function TelemetryPage() {
       if (cancelled) {
         return;
       }
+      // ponytail: shift bands by the loop offset so fixed-fixture incident times track the monotonic axis.
+      const loopOffsetMs = (absTick - cursor) * MOCK_BUCKET_META.bucketMs;
       const bands: FaultOverlay[] = incidents
         .filter((i) => i.deviceIds.includes(selectedDevice))
         .map((i) => {
-          const fromMs = Date.parse(i.startedAt);
-          const toMs = Date.parse(i.endedAt ?? i.impactAt ?? i.startedAt);
-          return { fromMs, toMs: Number.isNaN(toMs) ? fromMs : toMs, label: i.faultType };
+          const fromMs = Date.parse(i.startedAt) + loopOffsetMs;
+          const rawTo = Date.parse(i.endedAt ?? i.impactAt ?? i.startedAt);
+          const toMs = Number.isNaN(rawTo) ? fromMs : rawTo + loopOffsetMs;
+          return { fromMs, toMs, label: i.faultType };
         })
         .filter((b) => !Number.isNaN(b.fromMs));
       setOverlays(bands);
@@ -99,7 +81,7 @@ export function TelemetryPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, filters, selectedDevice, selectedKeys, retryTick]);
+  }, [dataClient, cursor, absTick, filters, selectedDevice, selectedKeys, retryTick]);
 
   const deviceOptions: Array<SelectableValue<string>> = useMemo(
     () => nodes.map((n) => ({ label: n.id, value: n.id })),
@@ -112,7 +94,6 @@ export function TelemetryPage() {
   );
 
   const groups = useMemo(() => groupSeries(series ?? []), [series]);
-  const hasErrorCounter = (series ?? []).some((s) => ERROR_COUNTER_KEYS.includes(s.key));
 
   return (
     <PluginPage>
@@ -147,7 +128,6 @@ export function TelemetryPage() {
       )}
       {selectedDevice && !error && groups.length > 0 && (
         <div className={styles.chartCol}>
-          {hasErrorCounter && <p className={styles.caption}>Interface error counters are 0 (virtual links).</p>}
           {groups.map((g) => (
             <TimeSeriesPanel key={g.title} title={g.title} series={g.series} unit={g.unit} overlays={overlays} />
           ))}
@@ -167,10 +147,5 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     flex-direction: column;
     gap: ${theme.spacing(2)};
-  `,
-  caption: css`
-    color: ${theme.colors.text.secondary};
-    font-size: ${theme.typography.bodySmall.fontSize};
-    margin: 0;
   `,
 });

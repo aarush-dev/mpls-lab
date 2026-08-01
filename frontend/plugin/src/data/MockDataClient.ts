@@ -49,6 +49,7 @@ import type {
   DataSourceKind,
 } from './types';
 import { BucketMeta, bucketToTsMs, secondsToMs, slidingWindow, windowIndices, formatUtc } from '../utils/time';
+import { synthSeries } from './telemetrySynth';
 
 // ---------------------------------------------------------------------------------------------
 // Raw fixture shapes. JSON module imports widen string-literal fields (e.g. `kind: 'physical'`)
@@ -332,6 +333,37 @@ function predictionOf(raw: RawPrediction): Prediction {
   };
 }
 
+// Error-counter metric kinds that the fixture leaves flat-0 on covered devices — treat all-zero
+// as "dead" so they get replaced with lively synthetic blips.
+const ERROR_KINDS = new Set(['if_in_errors', 'if_in_discards', 'if_out_errors', 'if_out_discards']);
+
+/** Last colon-segment of a series key, e.g. `pe1:CORP:xcvr_temp_c` -> `xcvr_temp_c`. */
+function metricKind(key: string): string {
+  const parts = key.split(':');
+  return parts[parts.length - 1];
+}
+
+/** A real series is "dead" if every point is null, or it's an all-zero error counter. */
+function isDeadRaw(s: RawMetricSeries): boolean {
+  const vals = s.points.map((p) => p.value);
+  if (vals.every((v) => v === null)) {
+    return true;
+  }
+  // ponytail: metricKind collides if a device ever has two interfaces sharing a kind; the fixture
+  // has one interface entity per device, so kind is unique enough here.
+  return ERROR_KINDS.has(metricKind(s.key)) && vals.every((v) => v === 0 || v === null);
+}
+
+function rawToSeries(s: RawMetricSeries): MetricSeries {
+  return {
+    key: s.key,
+    label: s.label,
+    unit: s.unit,
+    source: s.source as DataSourceKind,
+    points: s.points.map((p) => ({ tMs: p.tMs, value: p.value })),
+  };
+}
+
 function matchesDeviceFilter(deviceIds: string[], filters: Filters): boolean {
   if (!filters.device) {
     return true;
@@ -341,11 +373,19 @@ function matchesDeviceFilter(deviceIds: string[], filters: Filters): boolean {
 
 export class MockDataClient implements DataClient {
   private cursor = 0;
+  // Ever-increasing display clock (never wraps). Drives only the telemetry time axis (Task A);
+  // events/predictions/incidents gating stays on cursor-based curTsMs() below.
+  private absTick = 0;
   private convCounter = 0;
 
   /** Called by App.tsx on every demo-clock tick. HttpDataClient will not implement this. */
   setCursor(n: number): void {
     this.cursor = Math.max(0, Math.min(n, Math.max(0, meta.bucketCount - 1)));
+  }
+
+  /** Monotonic display clock from App.tsx (state.absTick). HttpDataClient will not implement this. */
+  setAbsTick(n: number): void {
+    this.absTick = Math.max(0, n);
   }
 
   getCursor(): number {
@@ -453,24 +493,65 @@ export class MockDataClient implements DataClient {
     return { nodes, links };
   }
 
+  /**
+   * Full telemetry series for a device: real fixture series where present, with dead series
+   * (all-null, or all-zero error counters) swapped for lively synthetic values and any role-
+   * expected metric kinds that are missing filled in. Wholly-uncovered devices are synthesized.
+   */
+  private telemetryFor(deviceId: string): MetricSeries[] {
+    const role = topology.nodes.find((n) => n.id === deviceId)?.role ?? 'host';
+    const real = telemetry[deviceId] ?? [];
+    const synth = synthSeries(deviceId, role, meta.bucketCount);
+    if (real.length === 0) {
+      return synth;
+    }
+    const synthByKey = new Map(synth.map((s) => [s.key, s]));
+    const synthByKind = new Map(synth.map((s) => [metricKind(s.key), s]));
+    const realKinds = new Set(real.map((s) => metricKind(s.key)));
+    const out: MetricSeries[] = real.map((s) => {
+      if (isDeadRaw(s)) {
+        const repl = synthByKey.get(s.key) ?? synthByKind.get(metricKind(s.key));
+        if (repl) {
+          // Keep the real series identity (key/label/unit/source), take synth's lively values.
+          return { key: s.key, label: s.label, unit: s.unit, source: s.source as DataSourceKind, points: repl.points };
+        }
+      }
+      return rawToSeries(s);
+    });
+    // Add role-expected series whose kind is absent from real (matched by kind so PE's VRF-named
+    // interface isn't duplicated under an eth0 synth key).
+    for (const s of synth) {
+      if (!realKinds.has(metricKind(s.key))) {
+        out.push(s);
+      }
+    }
+    return out;
+  }
+
   async getTelemetry(request: TelemetryRequest): Promise<MetricSeries[]> {
     await sleep(120);
     if (!request.deviceId) {
       return [];
     }
-    const series = telemetry[request.deviceId] ?? [];
+    const series = this.telemetryFor(request.deviceId);
     const window = slidingWindow(this.cursor, meta.windowBuckets, meta.bucketCount);
     const indices = windowIndices(window, meta.bucketCount);
+    const n = indices.length;
 
     return series
       .filter((s) => !request.keys || request.keys.includes(s.key))
       .map((s) => {
-        const points: MetricPoint[] = indices.map((i) => s.points[i] ?? { tMs: bucketToTsMs(MOCK_BUCKET_META, i), value: null });
+        // Rewrite tMs onto the monotonic display timeline (Task A): position p (old->new) ends at
+        // absTick, so the axis never rewinds on loop. Values still come from the cursor window.
+        const points: MetricPoint[] = indices.map((index, p) => ({
+          tMs: bucketToTsMs(MOCK_BUCKET_META, this.absTick - (n - 1 - p)),
+          value: s.points[index]?.value ?? null,
+        }));
         return {
           key: s.key,
           label: s.label,
           unit: s.unit,
-          source: s.source as DataSourceKind,
+          source: s.source,
           points,
         };
       });

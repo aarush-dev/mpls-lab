@@ -37,7 +37,7 @@ function topIncident(incidents: Incident[]): Incident | null {
 
 export function CopilotPage() {
   const styles = useStyles2(getStyles);
-  const { cursor } = useAppState();
+  const { cursor, absTick } = useAppState();
   const dataClient = useDataClient();
 
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -60,7 +60,7 @@ export function CopilotPage() {
     };
   }, [dataClient, cursor]);
 
-  const nowIso = () => formatUtc(bucketToTsMs(MOCK_BUCKET_META, cursor));
+  const nowIso = () => formatUtc(bucketToTsMs(MOCK_BUCKET_META, absTick));
 
   // Runs the send state machine for one user turn. `existing` is set when retrying a failed turn
   // (reuse its id so the thread doesn't duplicate — client-generated ids, no dup on retry).

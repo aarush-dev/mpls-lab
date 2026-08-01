@@ -28,7 +28,7 @@ cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
 
 ## 0.1 Frontend Grafana App Plugin (`mplslab-noccopilot-app`, mock mode)
 
-Separate from the lab above — `frontend/` is a self-contained folder, mock data only, no lab/backend needed. M1–M3 DONE (M4 copilot still a stub). Run: `cd frontend && docker compose up -d`, open Grafana at the URLs below.
+Separate from the lab above — `frontend/` is a self-contained folder, mock data only, no lab/backend needed. M1–M3 DONE (M4 copilot still a stub). Run: `cd frontend && docker compose up -d`, open Grafana at the URLs below. Plugin version 1.2.0: telemetry now covers all 148 selectable nodes (real fixture series filled out with synthetic per-device series, `frontend/plugin/src/data/telemetrySynth.ts`), and the demo clock (`absTick`) counts up monotonically across loops instead of wrapping — see `frontend/README.md`.
 
 | Page | URL |
 |------|-----|

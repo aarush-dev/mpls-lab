@@ -7,6 +7,9 @@ import type { Filters } from '../data/types';
 
 export interface AppState {
   cursor: number;
+  // Ever-increasing display clock (never wraps). cursor drives DATA reads (wraps on loop); absTick
+  // drives the DISPLAY time axis so the chart clock never rewinds when the tape loops (151->0).
+  absTick: number;
   playing: boolean;
   speed: number;
   loop: boolean;
@@ -18,6 +21,7 @@ export interface AppState {
 
 export const initialAppState: AppState = {
   cursor: 0,
+  absTick: 0,
   playing: true,
   speed: 1,
   loop: true,
@@ -48,7 +52,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const next = state.loop
         ? (state.cursor + 1) % state.bucketCount
         : Math.min(state.cursor + 1, state.bucketCount - 1);
-      return { ...state, cursor: next };
+      return { ...state, cursor: next, absTick: state.absTick + 1 };
     }
     case 'PLAY':
       return { ...state, playing: true };
@@ -59,7 +63,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         return { ...state, cursor: Math.max(0, action.payload.cursor) };
       }
       const clamped = Math.max(0, Math.min(action.payload.cursor, state.bucketCount - 1));
-      return { ...state, cursor: clamped };
+      // Phase-align absTick to the scrubbed cursor within the current loop so the display clock
+      // tracks the slider without rewinding across earlier loops.
+      const absTick = Math.floor(state.absTick / state.bucketCount) * state.bucketCount + clamped;
+      return { ...state, cursor: clamped, absTick };
     }
     case 'SET_SPEED':
       return { ...state, speed: action.payload.speed };

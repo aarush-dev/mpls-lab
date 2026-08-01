@@ -136,4 +136,24 @@ describe('appReducer', () => {
       expect(appReducer(state, { type: 'CLEAR_FILTERS' }).filters).toEqual({});
     });
   });
+
+  describe('absTick (monotonic display clock)', () => {
+    it('starts at 0', () => {
+      expect(initialAppState.absTick).toBe(0);
+    });
+
+    it('keeps increasing even when the data cursor wraps on loop', () => {
+      const state: AppState = { ...initialAppState, bucketCount: 5, cursor: 4, absTick: 4, loop: true };
+      const next = appReducer(state, { type: 'TICK' });
+      expect(next.cursor).toBe(0); // data wraps
+      expect(next.absTick).toBe(5); // display time does not
+    });
+
+    it('SEEK phase-aligns absTick to the scrubbed bucket within the current loop', () => {
+      const state: AppState = { ...initialAppState, bucketCount: 5, cursor: 0, absTick: 12 };
+      const next = appReducer(state, { type: 'SEEK', payload: { cursor: 3 } });
+      expect(next.cursor).toBe(3);
+      expect(next.absTick).toBe(13); // floor(12/5)*5 + 3
+    });
+  });
 });

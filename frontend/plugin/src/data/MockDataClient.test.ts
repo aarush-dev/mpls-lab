@@ -1,4 +1,4 @@
-import { MockDataClient, MOCK_WINDOW_BUCKETS, TopologyNodeLive } from './MockDataClient';
+import { MockDataClient, MOCK_WINDOW_BUCKETS, MOCK_BUCKET_META, TopologyNodeLive } from './MockDataClient';
 
 describe('MockDataClient', () => {
   it('getTopology({}) returns 148 nodes and 361 links with valid states', async () => {
@@ -67,7 +67,7 @@ describe('MockDataClient', () => {
     expect(Object.keys(caps.sources).length).toBeGreaterThan(0);
   });
 
-  it('getTelemetry returns windowed series for a known device, empty for unknown/missing', async () => {
+  it('getTelemetry returns windowed series for any device; empty only when no deviceId given', async () => {
     const client = new MockDataClient();
     const series = await client.getTelemetry({ deviceId: 'ce_branch1' });
     expect(series.length).toBeGreaterThan(0);
@@ -75,8 +75,61 @@ describe('MockDataClient', () => {
       expect(s.points).toHaveLength(MOCK_WINDOW_BUCKETS);
     }
 
-    expect(await client.getTelemetry({ deviceId: 'does_not_exist' })).toEqual([]);
+    // Every selectable device is now filled (real or deterministic synth) — never an empty page.
+    const synth = await client.getTelemetry({ deviceId: 'does_not_exist' });
+    expect(synth.length).toBeGreaterThan(0);
+    // No deviceId at all is still an empty request.
     expect(await client.getTelemetry({})).toEqual([]);
+  });
+
+  it('every topology node yields at least one series with real values (all charts filled)', async () => {
+    const client = new MockDataClient();
+    const { nodes } = await client.getTopology({});
+    // Sample one of each role so the test stays fast but covers host + core + edge.
+    const sample = ['host', 'p', 'pe', 'ce_hub', 'ce_branch', 'ce_dc'].map(
+      (role) => nodes.find((n) => n.role === role)?.id
+    );
+    for (const id of sample) {
+      expect(id).toBeTruthy();
+      const series = await client.getTelemetry({ deviceId: id! });
+      expect(series.length).toBeGreaterThan(0);
+      expect(series.some((s) => s.points.some((p) => p.value != null))).toBe(true);
+    }
+  });
+
+  it('fabricates the dead series: PE transceiver is non-null and error counters are non-zero', async () => {
+    const client = new MockDataClient();
+    const series = await client.getTelemetry({ deviceId: 'pe1' });
+    const xcvr = series.filter((s) => s.key.includes('xcvr_'));
+    expect(xcvr.length).toBeGreaterThan(0);
+    expect(xcvr.some((s) => s.points.some((p) => p.value != null))).toBe(true);
+    const errs = series.filter((s) => /if_(in|out)_errors|if_in_discards/.test(s.key));
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs.some((s) => s.points.some((p) => (p.value ?? 0) > 0))).toBe(true);
+  });
+
+  it('rewrites chart timestamps to a monotonic timeline that never rewinds on loop', async () => {
+    const client = new MockDataClient();
+    const bucketCount = MOCK_BUCKET_META.bucketCount;
+
+    // Near the end of the tape.
+    client.setCursor(bucketCount - 1);
+    client.setAbsTick(bucketCount - 1);
+    const before = await client.getTelemetry({ deviceId: 'ce_branch1' });
+    const lastBefore = before[0].points[before[0].points.length - 1].tMs;
+    // Points are strictly increasing within the window.
+    for (const s of before) {
+      for (let i = 1; i < s.points.length; i++) {
+        expect(s.points[i].tMs).toBeGreaterThan(s.points[i - 1].tMs);
+      }
+    }
+
+    // Loop: data cursor wraps to 0 but absTick keeps climbing.
+    client.setCursor(0);
+    client.setAbsTick(bucketCount + 4);
+    const after = await client.getTelemetry({ deviceId: 'ce_branch1' });
+    const lastAfter = after[0].points[after[0].points.length - 1].tMs;
+    expect(lastAfter).toBeGreaterThan(lastBefore); // no backward jump across the seam
   });
 
   it('sendMessage succeeds against a real incident context', async () => {

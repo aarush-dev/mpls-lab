@@ -338,6 +338,16 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 - **Time-series forecasting:** LSTM/Transformer to predict fault impact N seconds in advance (maximize lead time).
 - **Interpretability:** LIME/SHAP to explain which metrics triggered the prediction; RAG to supplement with topology/runbooks.
 
+---
+
+## Group 10: Frontend Mock Playback (`frontend/plugin`)
+
+**absTick**  
+The frontend's monotonic display clock (`AppState.absTick`, `src/state/reducer.ts`), distinct from `cursor`. `cursor` is the data index into the 152-bucket fixture tape and wraps every loop; `absTick` never wraps, it just keeps incrementing. The chart x-axis, playback clock label, and Copilot message timestamps read `absTick` so time counts up across loops instead of jumping backward ~76 minutes when `cursor` wraps. Values still come from the wrapped `cursor` window — only the displayed timestamp is monotonic.
+
+**Synthetic telemetry fill**  
+`src/data/telemetrySynth.ts` generates a deterministic, role-aware series for any device/metric the bundled fixtures don't cover, so every one of the 148 selectable topology nodes has something to chart (previously only 27 had real series; the rest showed "No telemetry"). Deterministic means seeded by `deviceId`, not `Date.now()`/`Math.random()` — same device always renders the same synthetic shape. Also used to replace previously flat/null series (interface error counters, PE transceiver metrics) with lively synthetic values, since a flat line reads as broken on a demo screen.
+
 **Air-gap verification** ensures the pipeline is truly offline:
 - All Docker images are pre-saved to `.tar.xz` files.
 - At deploy time, `load-offline.sh` loads images from local storage (no registry pull).

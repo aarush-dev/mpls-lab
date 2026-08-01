@@ -827,3 +827,28 @@ per-`kind` lock and a same-device, different-kind cascade.
 Schema went 40 → 49 columns. The shipped real capture was re-joined in place by
 `dataapi/reschema.py` (labels re-derived from `faults/labels/labels.jsonl`, metric
 columns untouched), which is why its fault rows went 327 → 391.
+
+## Frontend mock playback: monotonic clock + full telemetry fill (plugin v1.2.0)
+
+Loop clock must not rewind. The fixture tape is 152 buckets; on loop, `cursor`
+(the data index) wraps back to 0. Displaying `cursor` directly made the chart
+x-axis and playback clock jump ~76 minutes backward every loop — reads as broken
+on a demo screen. Fix: `AppState` gained `absTick`, an ever-increasing tick pushed
+from `App.tsx`, used for every DISPLAYED timestamp (chart x-axis, playback clock,
+Copilot message times). `cursor` still drives which data values are read (values
+must wrap, since the tape is finite) and still gates event/prediction/incident
+timing against fixture timestamps (`curTsMs()` stays `cursor`-based) — only the
+displayed time is monotonic.
+
+Telemetry filled for all nodes, and flat/blank series fabricated, per user request
+for the hackathon demo. Dropdowns listed all 148 topology nodes but only 27 had
+real fixture series; the other 121 showed "No telemetry" — an obvious tell that
+this is a demo, not a live system. `src/data/telemetrySynth.ts` synthesizes a
+deterministic, role-aware series per device (seeded by deviceId, no
+`Date.now`/`Math.random`) for any missing device/metric. Same fix applied to
+series that were present but flat: interface error counters (0 on veth links) and
+PE-router transceiver metrics (null on pe1/pe2/pe10/pe11) now get synthetic
+non-flat values too. This drops the old "Interface error counters are 0 (virtual
+links)" honesty caption on the Telemetry page — it's no longer true, and for this
+project's stated goal (frontend must look live, no visible demo markers) a flat
+line reading as broken outweighs a caption explaining it's accurate.

@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.0.5. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.2.0. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -31,7 +31,11 @@ Route list is the source of truth in `frontend/plugin/src/plugin.json` (`include
 
 ## Mock mode
 
-`appConfig.mode` in `frontend/plugin/src/config.ts` defaults to `'mock'`. `MockDataClient` (`frontend/plugin/src/data/MockDataClient.ts`) reads bundled JSON fixtures under `frontend/plugin/src/fixtures/` and replays them against a shared demo clock (`cursor`) driven by `App.tsx`. Data is a recorded sample capture, not live telemetry. Predictions and Copilot responses are fabricated to look live; the UI shows no demo markers (`showDemoBadge: false`).
+`appConfig.mode` in `frontend/plugin/src/config.ts` defaults to `'mock'`. `MockDataClient` (`frontend/plugin/src/data/MockDataClient.ts`) reads bundled JSON fixtures under `frontend/plugin/src/fixtures/` and replays them against a shared demo clock driven by `App.tsx`. Data is a recorded sample capture, not live telemetry. Predictions and Copilot responses are fabricated to look live; the UI shows no demo markers (`showDemoBadge: false`).
+
+Two clock values, both in `AppState` (`src/state/reducer.ts`): `cursor` is the wrapped data index into the 152-bucket tape (wraps every loop); `absTick` is an ever-increasing tick that never wraps. Display (chart x-axis, `PlaybackControls` clock label, `CopilotPage` timestamps) uses `absTick` so time keeps counting up across loops instead of jumping ~76 min backward. `MockDataClient.getTelemetry` rewrites each point's `tMs` from `absTick` (monotonic) but still reads values from the wrapped `cursor` window. `curTsMs()` stays `cursor`-based — event/prediction/incident gating must not run past fixture timestamps on a loop.
+
+Telemetry covers all 148 selectable topology nodes, not just the ones with real fixture series. `src/data/telemetrySynth.ts` (`synthSeries(deviceId, role, bucketCount)`) generates deterministic, role-aware synthetic series (seeded by deviceId, no `Date.now`/`Math.random`) for any device or metric missing real data — including interface error counters and PE-router transceiver metrics, previously flat/null. `MockDataClient.telemetryFor(deviceId)` keeps real series where present and fills the rest with synth. `src/utils/metricGroups.ts` (`groupSeries()`, used by `TelemetryPage.tsx` and `NodeDetailPage.tsx`) groups panels by metric suffix so unrelated units (octets vs errors vs latency) don't share one axis.
 
 Live mode (`'api'`) exists as a config value but has no implementation — see `INTEGRATION_GUIDE.md`.
 

@@ -45,7 +45,7 @@ const speedGroupStyle = css({
 export function PlaybackControls({ meta }: Props) {
   const styles = useStyles2(getStyles);
   const label = useStyles2(labelStyle);
-  const { cursor, playing, speed, bucketCount } = useAppState();
+  const { cursor, absTick, playing, speed, bucketCount } = useAppState();
   const dispatch = useAppDispatch();
 
   const togglePlaying = useCallback(() => {
@@ -60,7 +60,7 @@ export function PlaybackControls({ meta }: Props) {
   );
 
   const maxIndex = Math.max(0, bucketCount - 1);
-  const timeLabel = meta ? formatUtc(bucketToTsMs(meta, cursor)) : `bucket ${cursor}`;
+  const timeLabel = meta ? formatUtc(bucketToTsMs(meta, absTick)) : `bucket ${cursor}`;
 
   return (
     <div className={styles}>
