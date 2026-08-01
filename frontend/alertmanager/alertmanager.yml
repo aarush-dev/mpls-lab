@@ -1,0 +1,12 @@
+# Alertmanager for the NOC Copilot demo. Air-gapped: the only receiver is a
+# blackhole (no email/webhook/slack), so alerts are received and shown in the
+# Grafana Alerting UI but never leave the stack. The plugin pushes synthetic
+# alerts (node-down + T-5min predictions) via Grafana's datasource proxy.
+route:
+  receiver: blackhole
+  group_by: ['alertname', 'node']
+  group_wait: 1s
+  group_interval: 5s
+  repeat_interval: 1h
+receivers:
+  - name: blackhole

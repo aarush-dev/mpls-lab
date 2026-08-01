@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.2.0. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.3.0. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -11,7 +11,9 @@ cd frontend
 docker compose up -d
 ```
 
-Compose file: `frontend/docker-compose.yml` (canonical). Brings up `grafana/grafana:11.1.0` on `http://localhost:3000`, anonymous admin, unsigned-plugin loading, analytics/update-checks off (air-gapped). Mounts: `./plugin/dist` → `/var/lib/grafana/plugins/mplslab-noccopilot-app`, `./grafana/provisioning` → `/etc/grafana/provisioning`, `./grafana/dashboards` → `/var/lib/grafana/dashboards`. (`frontend/plugin/docker-compose.yaml` is the create-plugin scaffold and is not used.)
+Compose file: `frontend/docker-compose.yml` (canonical). Brings up `grafana/grafana:11.1.0` on `http://localhost:3000` and `prom/alertmanager:v0.27.0` on `http://localhost:9093`, anonymous admin, unsigned-plugin loading, analytics/update-checks off (air-gapped). Mounts: `./plugin/dist` → `/var/lib/grafana/plugins/mplslab-noccopilot-app`, `./grafana/provisioning` → `/etc/grafana/provisioning`, `./grafana/dashboards` → `/var/lib/grafana/dashboards`. (`frontend/plugin/docker-compose.yaml` is the create-plugin scaffold and is not used.)
+
+First run after upgrading to v1.3.0: `docker compose up -d` then restart the `grafana` container once so it picks up the new Alertmanager datasource.
 
 Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 
@@ -38,6 +40,19 @@ Two clock values, both in `AppState` (`src/state/reducer.ts`): `cursor` is the w
 Telemetry covers all 148 selectable topology nodes, not just the ones with real fixture series. `src/data/telemetrySynth.ts` (`synthSeries(deviceId, role, bucketCount)`) generates deterministic, role-aware synthetic series (seeded by deviceId, no `Date.now`/`Math.random`) for any device or metric missing real data — including interface error counters and PE-router transceiver metrics, previously flat/null. `MockDataClient.telemetryFor(deviceId)` keeps real series where present and fills the rest with synth. `src/utils/metricGroups.ts` (`groupSeries()`, used by `TelemetryPage.tsx` and `NodeDetailPage.tsx`) groups panels by metric suffix so unrelated units (octets vs errors vs latency) don't share one axis.
 
 Live mode (`'api'`) exists as a config value but has no implementation — see `INTEGRATION_GUIDE.md`.
+
+## Alerting
+
+Synthetic alerts land in Grafana's native Alerting tab, backed by a real Alertmanager container (not Grafana-managed alert rules). Two kinds, recomputed every demo-clock tick from `MockDataClient.getActiveAlerts()`:
+
+- `NodeDown` (critical) — a node whose live state is red at the current bucket.
+- `NodeDownPredicted` (warning) — an active fabricated prediction within 300s of its predicted impact.
+
+Labels: `alertname`, `node`, `severity`, `source=noc-copilot`, `pop`. Annotations: `summary` (+ `description` with confidence for predictions). `generatorURL` deep-links to the node-detail page.
+
+Write path: the plugin POSTs directly to Alertmanager's native API (`http://<host>:9093/api/v2/alerts`), not through Grafana's datasource proxy — Grafana's AM proxy only supports reading, and returns HTTP 400 on a posted AM-native array (it expects `definitions.PostableAlerts`). Read path: Grafana reads the alerts back via the provisioned `noc-alertmanager` datasource for its native Alerting UI. `startsAt` is omitted so Alertmanager stamps receive-time; alerts auto-resolve via `resolve_timeout` once the plugin stops re-posting them (firing set only re-sent on change, see `App.tsx`). Air-gapped: `frontend/alertmanager/alertmanager.yml` has a single blackhole receiver, nothing is ever sent anywhere.
+
+View: Grafana → Alerting → Alert groups, source = "Alertmanager". Code: `src/alerting/alertPublisher.ts` (`buildAmAlerts`, `publishAlerts`).
 
 See `API_CONTRACT.md` for the full `DataClient` interface, `INTEGRATION_GUIDE.md` for how to wire up a real backend.
 

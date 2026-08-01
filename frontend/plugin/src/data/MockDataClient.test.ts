@@ -108,6 +108,25 @@ describe('MockDataClient', () => {
     expect(errs.some((s) => s.points.some((p) => (p.value ?? 0) > 0))).toBe(true);
   });
 
+  it('getActiveAlerts derives NodeDown (red now) and NodeDownPredicted (<=5min to impact) across the tape', () => {
+    const client = new MockDataClient();
+    const kinds = new Set<string>();
+    for (let c = 0; c < MOCK_BUCKET_META.bucketCount; c++) {
+      client.setCursor(c);
+      for (const a of client.getActiveAlerts()) {
+        kinds.add(a.alertname);
+        expect(a.node).toBeTruthy();
+        expect(['critical', 'warning']).toContain(a.severity);
+        if (a.alertname === 'NodeDownPredicted') {
+          expect(a.severity).toBe('warning');
+          expect(a.summary).toMatch(/predicted .* in \d+s/);
+        }
+      }
+    }
+    expect(kinds.has('NodeDown')).toBe(true);
+    expect(kinds.has('NodeDownPredicted')).toBe(true);
+  });
+
   it('rewrites chart timestamps to a monotonic timeline that never rewinds on loop', async () => {
     const client = new MockDataClient();
     const bucketCount = MOCK_BUCKET_META.bucketCount;

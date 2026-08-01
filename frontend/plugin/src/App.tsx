@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 // Grafana 11.1 ships react-router-dom v5 (Switch/Route/useRouteMatch), NOT v6.
 // Use the v5 API — Routes/element do not exist on the host-provided module.
 import { Route, Switch, useRouteMatch } from 'react-router-dom';
@@ -16,6 +16,7 @@ import { AppShell } from './components/AppShell';
 import { AppProvider, useAppDispatch, useAppState } from './state/AppContext';
 import { DataClientProvider, useDataClient } from './data/DataClientContext';
 import { MOCK_BUCKET_META, MOCK_WINDOW_BUCKETS } from './data/MockDataClient';
+import { AlertDescriptor, publishAlerts } from './alerting/alertPublisher';
 
 export function App(props: AppRootProps) {
   return (
@@ -61,6 +62,26 @@ function AppInner(_props: AppRootProps) {
       clockAware.setAbsTick(absTick);
     }
   }, [dataClient, absTick]);
+
+  // Push the current firing set (node-down + T-5min predictions) into Alertmanager so they show in
+  // the native Grafana Alerting tab. Only POST when the set changes, so a stable alert isn't re-sent
+  // every tick. Runs after the setCursor effect above so getActiveAlerts reads the current bucket.
+  // ponytail: change-only push means a node red for >resolve_timeout auto-resolves in AM; the demo
+  // loops far faster than that, so no periodic re-post is needed.
+  const lastAlertSig = useRef<string>('');
+  useEffect(() => {
+    const alertAware = dataClient as unknown as { getActiveAlerts?: () => AlertDescriptor[] };
+    if (typeof alertAware.getActiveAlerts !== 'function') {
+      return;
+    }
+    const alerts = alertAware.getActiveAlerts();
+    const sig = alerts.map((a) => `${a.alertname}:${a.node}`).sort().join('|');
+    if (sig === lastAlertSig.current) {
+      return;
+    }
+    lastAlertSig.current = sig;
+    publishAlerts(alerts);
+  }, [dataClient, cursor]);
 
   return (
     <AppShell meta={MOCK_BUCKET_META}>

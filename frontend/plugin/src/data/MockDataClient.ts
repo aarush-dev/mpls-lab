@@ -49,6 +49,7 @@ import type {
   DataSourceKind,
 } from './types';
 import { BucketMeta, bucketToTsMs, secondsToMs, slidingWindow, windowIndices, formatUtc } from '../utils/time';
+import { AlertDescriptor } from '../alerting/alertPublisher';
 import { synthSeries } from './telemetrySynth';
 
 // ---------------------------------------------------------------------------------------------
@@ -390,6 +391,44 @@ export class MockDataClient implements DataClient {
 
   getCursor(): number {
     return this.cursor;
+  }
+
+  /**
+   * Firing alerts at the current cursor, for App.tsx to push into Alertmanager.
+   * Mock-only (HttpDataClient won't implement it). Two kinds:
+   *  - NodeDown (critical): a node whose state is red right now.
+   *  - NodeDownPredicted (warning): an active prediction within 5 min (300s) of its
+   *    predicted impact — the "5 minutes before a node is predicted to go down" signal.
+   */
+  getActiveAlerts(): AlertDescriptor[] {
+    const curTs = this.curTsMs();
+    const popOf = (id: string) => topology.nodes.find((n) => n.id === id)?.pop;
+    const out: AlertDescriptor[] = [];
+
+    const bucket = nodeStates[String(this.cursor)] ?? {};
+    for (const [device, state] of Object.entries(bucket)) {
+      if (state === 'red') {
+        out.push({ alertname: 'NodeDown', node: device, severity: 'critical', pop: popOf(device), summary: `${device} is down` });
+      }
+    }
+
+    for (const p of predictions) {
+      if (!isPredictionActive(p, curTs)) {
+        continue;
+      }
+      const remainingSec = (p.issuedAtMs + secondsToMs(p.timeToImpactSeconds) - curTs) / 1000;
+      if (remainingSec > 0 && remainingSec <= 300) {
+        out.push({
+          alertname: 'NodeDownPredicted',
+          node: p.deviceId,
+          severity: 'warning',
+          pop: popOf(p.deviceId),
+          summary: `${p.deviceId} predicted ${p.faultType} in ${Math.round(remainingSec)}s`,
+          description: `Confidence ${(p.confidence * 100).toFixed(0)}%. Predicted fault: ${p.faultType}.`,
+        });
+      }
+    }
+    return out;
   }
 
   private curTsMs(): number {

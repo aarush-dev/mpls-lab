@@ -28,7 +28,7 @@ cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
 
 ## 0.1 Frontend Grafana App Plugin (`mplslab-noccopilot-app`, mock mode)
 
-Separate from the lab above — `frontend/` is a self-contained folder, mock data only, no lab/backend needed. M1–M3 DONE (M4 copilot still a stub). Run: `cd frontend && docker compose up -d`, open Grafana at the URLs below. Plugin version 1.2.0: telemetry now covers all 148 selectable nodes (real fixture series filled out with synthetic per-device series, `frontend/plugin/src/data/telemetrySynth.ts`), and the demo clock (`absTick`) counts up monotonically across loops instead of wrapping — see `frontend/README.md`.
+Separate from the lab above — `frontend/` is a self-contained folder, mock data only, no lab/backend needed. M1–M3 DONE (M4 copilot still a stub). Run: `cd frontend && docker compose up -d`, open Grafana at the URLs below. Plugin version 1.3.0: telemetry covers all 148 selectable nodes (real fixture series filled out with synthetic per-device series, `frontend/plugin/src/data/telemetrySynth.ts`), the demo clock (`absTick`) counts up monotonically across loops instead of wrapping, and synthetic alerts now show up in Grafana's native Alerting tab — see `frontend/README.md`.
 
 | Page | URL |
 |------|-----|
@@ -39,8 +39,9 @@ Separate from the lab above — `frontend/` is a self-contained folder, mock dat
 | Incidents & Predictions | `/a/mplslab-noccopilot-app/incidents` |
 | Copilot (M4 — stub) | `/a/mplslab-noccopilot-app/copilot` |
 | Data & Integration Status | `/a/mplslab-noccopilot-app/status` |
+| Alerting (Grafana native) | `/alerting/list` → source "Alertmanager" |
 
-Details: `frontend/IMPLEMENTATION_PLAN.md` and repo-root `HANDOFF.md`.
+Alertmanager container: `http://localhost:9093` (127.0.0.1-bound). Tunneling a remote demo: forward 9093 alongside 3000, the browser POSTs alerts to `<host>:9093` directly. Details: `frontend/README.md` "Alerting" section, `frontend/IMPLEMENTATION_PLAN.md`, repo-root `HANDOFF.md`.
 
 ---
 

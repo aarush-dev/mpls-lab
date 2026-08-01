@@ -852,3 +852,31 @@ non-flat values too. This drops the old "Interface error counters are 0 (virtual
 links)" honesty caption on the Telemetry page — it's no longer true, and for this
 project's stated goal (frontend must look live, no visible demo markers) a flat
 line reading as broken outweighs a caption explaining it's accurate.
+
+## Frontend synthetic alerts in native Alerting tab (plugin v1.3.0)
+
+User request: show alerts in Grafana's built-in Alerting UI instead of a custom
+incidents-only view, so the demo reads as a real Grafana install with alerting
+wired up. That UI only shows alerts sourced from a real Alertmanager (or Grafana-
+managed alert rules evaluating real queries, which the mock data doesn't support)
+— so a real `prom/alertmanager:v0.27.0` container was added to the stack rather
+than faking the UI. Config `frontend/alertmanager/alertmanager.yml` uses a single
+blackhole receiver: alerts are visible but never routed anywhere, keeping the lab
+air-gapped.
+
+Write path goes directly from the browser plugin to Alertmanager
+(`POST http://<host>:9093/api/v2/alerts`), not through Grafana's AM-datasource
+proxy. Tried the proxy first — it 400s on a posted alert because it expects
+Grafana's `definitions.PostableAlerts` object, not Alertmanager's native v2 array;
+the proxy is read-only for alerts by design. Alertmanager v0.27 returns permissive
+CORS headers, so the direct cross-port browser POST works without a backend relay.
+Read path is the provisioned `noc-alertmanager` Grafana datasource (uid
+`noc-alertmanager`), which is what makes the posted alerts appear in Alerting →
+Alert groups.
+
+Two alert kinds recomputed every demo-clock tick from the current cursor
+(`MockDataClient.getActiveAlerts()`): `NodeDown` (critical, live state red) and
+`NodeDownPredicted` (warning, active prediction within 300s of impact). The
+plugin only re-POSTs when the firing set changes (`App.tsx` effect), not every
+tick, so a stable alert doesn't hammer Alertmanager; `resolve_timeout` clears it
+once it stops being re-sent.

@@ -1,9 +1,10 @@
 # Local Grafana runtime for the mplslab-noccopilot-app plugin.
 #
-# MOCK MODE, AIR-GAPPED: this stack runs Grafana alone, with no lab
-# network, no backend service, and no datasource. The app plugin is
-# expected to generate its own mock data client-side. Nothing here
-# reaches out to the network.
+# MOCK MODE, AIR-GAPPED: Grafana + a local Alertmanager, no lab network and no
+# metrics/log backend. The app plugin generates its own mock data client-side
+# and pushes synthetic alerts (node-down + T-5min predictions) into Alertmanager
+# via Grafana's datasource proxy, so they surface in the native Grafana Alerting
+# UI. Alertmanager's only receiver is a blackhole — nothing leaves the stack.
 #
 # The plugin is unsigned, so it is allow-listed explicitly via
 # GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS and bind-mounted in from
@@ -14,6 +15,8 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    depends_on:
+      - alertmanager
     environment:
       GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: mplslab-noccopilot-app
       GF_DEFAULT_APP_MODE: development
@@ -28,3 +31,18 @@ services:
       - ./plugin/dist:/var/lib/grafana/plugins/mplslab-noccopilot-app
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    # Bound to localhost only (air-gap). The browser plugin POSTs synthetic
+    # alerts here directly — Alertmanager v0.27 sends permissive CORS headers,
+    # and Grafana's proxy write path does not accept externally-posted alerts.
+    # Grafana READS these alerts back through the Alertmanager datasource for the
+    # native Alerting UI. Same host as Grafana; tunnel :9093 alongside :3000.
+    ports:
+      - "127.0.0.1:9093:9093"
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
