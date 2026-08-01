@@ -37,7 +37,7 @@
     {
       "type": "page",
       "name": "Node Detail",
-      "path": "/a/%PLUGIN_ID%/node/1",
+      "path": "/a/%PLUGIN_ID%/node/pe1",
       "role": "Viewer",
       "addToNav": true,
       "defaultNav": false

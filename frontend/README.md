@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.3.0. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.4.0. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -11,11 +11,15 @@ cd frontend
 docker compose up -d
 ```
 
-Compose file: `frontend/docker-compose.yml` (canonical). Brings up `grafana/grafana:11.1.0` on `http://localhost:3000` and `prom/alertmanager:v0.27.0` on `http://localhost:9093`, anonymous admin, unsigned-plugin loading, analytics/update-checks off (air-gapped). Mounts: `./plugin/dist` → `/var/lib/grafana/plugins/mplslab-noccopilot-app`, `./grafana/provisioning` → `/etc/grafana/provisioning`, `./grafana/dashboards` → `/var/lib/grafana/dashboards`. (`frontend/plugin/docker-compose.yaml` is the create-plugin scaffold and is not used.)
+Compose file: `frontend/docker-compose.yml` (canonical). Brings up `grafana/grafana:11.1.0` on `http://localhost:3000` and `prom/alertmanager:v0.27.0` on `http://localhost:9093`, anonymous admin, unsigned-plugin loading, analytics/update-checks off (air-gapped). Mounts: `./plugin/dist` → `/var/lib/grafana/plugins/mplslab-noccopilot-app`, `./grafana/provisioning` → `/etc/grafana/provisioning`, `./grafana/grafana.ini` → `/etc/grafana/grafana.ini`. (`frontend/plugin/docker-compose.yaml` is the create-plugin scaffold and is not used.)
 
-First run after upgrading to v1.3.0: `docker compose up -d` then restart the `grafana` container once so it picks up the new Alertmanager datasource.
+First run after upgrading: `docker compose up -d` then restart the `grafana` container once so it picks up the Alertmanager datasource and nav config.
 
 Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
+
+## Navigation
+
+The 7 pages are hoisted to the top level of Grafana's left nav (alongside Starred / Dashboards), out of the "Apps" section, via `[navigation.app_standalone_pages]` in `frontend/grafana/grafana.ini` (each key is a plugin page path from `plugin.json` `includes`). There is no separate Grafana dashboard — the old `noc-overview.json` reference dashboard was removed because its panels query a `victoriametrics` datasource that does not exist in this mock stack (it only ever rendered empty). The plugin pages are the whole UI.
 
 ## Pages
 

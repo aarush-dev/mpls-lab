@@ -30,7 +30,7 @@ services:
     volumes:
       - ./plugin/dist:/var/lib/grafana/plugins/mplslab-noccopilot-app
       - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
