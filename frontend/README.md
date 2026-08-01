@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.7.0. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.7.1. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 

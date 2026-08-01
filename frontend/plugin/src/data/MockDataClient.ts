@@ -645,6 +645,22 @@ export class MockDataClient implements DataClient {
     if (inj && (!request.keys || request.keys.includes(`${request.deviceId}:predictor`))) {
       out.push(this.predictorSeries(request.deviceId!, inj, n, tAt));
     }
+    // Down phase: ramp CPU/mem to 0 by the last point so the node visibly dies on its charts.
+    if (inj && inj.phase === 'down') {
+      for (const s of out) {
+        const suffix = s.key.slice(s.key.lastIndexOf(':') + 1);
+        if (suffix !== 'cpu_pct' && suffix !== 'mem_pct') {
+          continue;
+        }
+        s.points = s.points.map((pt, p) => {
+          if (pt.value == null) {
+            return pt;
+          }
+          const frac = n > 1 ? p / (n - 1) : 1;
+          return { ...pt, value: Math.round(pt.value * (1 - frac) * 10) / 10 };
+        });
+      }
+    }
     return out;
   }
 

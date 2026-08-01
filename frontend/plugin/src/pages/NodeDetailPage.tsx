@@ -84,6 +84,7 @@ export function NodeDetailPage() {
 
   const activeIncident = incidents.find((i) => i.status === 'open' || i.status === 'active');
   const activePrediction = predictions[0];
+  const injected = injectedFaults.find((f) => f.node === id);
   const panels = telemetry ? groupSeries(telemetry) : [];
 
   const loading = telemetry === null && !error;
@@ -118,8 +119,22 @@ export function NodeDetailPage() {
         <>
           <div className={styles.header}>
             <span>{node ? `${node.role}${node.pop ? ` · ${node.pop}` : ''}${node.siteType ? ` · ${node.siteType}` : ''}` : 'Unknown device'}</span>
-            <span className={activeIncident || activePrediction ? styles.unhealthy : styles.healthy}>
-              {activeIncident
+            <span
+              className={
+                injected?.phase === 'down'
+                  ? styles.down
+                  : injected || activeIncident || activePrediction
+                  ? styles.unhealthy
+                  : styles.healthy
+              }
+            >
+              {injected?.phase === 'down'
+                ? `Down — ${injected.faultType} (injected)`
+                : injected?.phase === 'predicted'
+                ? `Predicted ${injected.faultType} in ${injected.leadSec}s`
+                : injected?.phase === 'pending'
+                ? `Fault arming — ${injected.faultType}`
+                : activeIncident
                 ? activeIncident.summary
                 : activePrediction
                 ? `Predicted ${activePrediction.faultType} (${(activePrediction.confidence * 100).toFixed(0)}%)`
@@ -178,6 +193,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   unhealthy: css`
     color: ${theme.colors.warning.text};
+  `,
+  down: css`
+    color: ${theme.colors.error.text};
   `,
   sectionTitle: css`
     margin-top: ${theme.spacing(3)};
