@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2, useTheme2 } from '@grafana/ui';
+import { useStyles2 } from '@grafana/ui';
 
 import { MetricSeries } from '../data/types';
 import { formatUtc } from '../utils/time';
+import { brand } from '../brand';
 
 // ponytail: native SVG line chart, no charting dep. Multi-series, null-gap aware, with optional
 // fault-overlay bands. Deterministic (pure function of props) so it plays cleanly under the clock.
@@ -22,12 +23,11 @@ interface Props {
   unit?: string;
 }
 
-const PALETTE = ['#73bf69', '#f2cc0c', '#ff780a', '#5794f2', '#b877d9', '#ff9830', '#8ab8ff'];
+const PALETTE = [brand.accent, '#f2cc0c', '#8ab8ff', '#b877d9', '#73bf69', '#ff9830', '#5794f2'];
 const PAD = { top: 12, right: 16, bottom: 22, left: 44 };
 
 export function TimeSeriesPanel({ title, series, overlays = [], height = 200, unit }: Props) {
   const styles = useStyles2(getStyles);
-  const theme = useTheme2();
   const width = 640;
 
   const model = useMemo(() => {
@@ -98,24 +98,24 @@ export function TimeSeriesPanel({ title, series, overlays = [], height = 200, un
               y={PAD.top}
               width={Math.max(2, Math.abs(x1 - x0))}
               height={height - PAD.top - PAD.bottom}
-              fill={theme.colors.error.main}
+              fill={brand.accent}
               opacity={0.12}
             />
           );
         })}
         {/* y axis min/max ticks */}
-        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={height - PAD.bottom} stroke={theme.colors.border.weak} />
-        <line x1={PAD.left} y1={height - PAD.bottom} x2={width - PAD.right} y2={height - PAD.bottom} stroke={theme.colors.border.weak} />
-        <text x={4} y={PAD.top + 4} className={styles.axis} fill={theme.colors.text.secondary}>
+        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={height - PAD.bottom} stroke={brand.border} />
+        <line x1={PAD.left} y1={height - PAD.bottom} x2={width - PAD.right} y2={height - PAD.bottom} stroke={brand.border} />
+        <text x={4} y={PAD.top + 4} className={styles.axis} fill={brand.textDim}>
           {yMax.toFixed(0)}{unit ?? ''}
         </text>
-        <text x={4} y={height - PAD.bottom} className={styles.axis} fill={theme.colors.text.secondary}>
+        <text x={4} y={height - PAD.bottom} className={styles.axis} fill={brand.textDim}>
           {yMin.toFixed(0)}{unit ?? ''}
         </text>
-        <text x={PAD.left} y={height - 6} className={styles.axis} fill={theme.colors.text.secondary}>
+        <text x={PAD.left} y={height - 6} className={styles.axis} fill={brand.textDim}>
           {formatUtc(model.xMin)}
         </text>
-        <text x={width - PAD.right} y={height - 6} textAnchor="end" className={styles.axis} fill={theme.colors.text.secondary}>
+        <text x={width - PAD.right} y={height - 6} textAnchor="end" className={styles.axis} fill={brand.textDim}>
           {formatUtc(model.xMax)}
         </text>
         {/* series lines */}
@@ -137,8 +137,8 @@ export function TimeSeriesPanel({ title, series, overlays = [], height = 200, un
 
 const getStyles = (theme: GrafanaTheme2) => ({
   wrap: css`
-    background: ${theme.colors.background.secondary};
-    border: 1px solid ${theme.colors.border.weak};
+    background: ${brand.bg2};
+    border: 1px solid ${brand.border};
     border-radius: ${theme.shape.radius.default};
     padding: ${theme.spacing(1.5)};
   `,
@@ -152,7 +152,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: block;
   `,
   empty: css`
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
     padding: ${theme.spacing(3)};
     text-align: center;
   `,
@@ -165,7 +165,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: ${theme.spacing(1.5)};
     margin-top: ${theme.spacing(1)};
     font-size: ${theme.typography.bodySmall.fontSize};
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
   `,
   legendItem: css`
     display: inline-flex;

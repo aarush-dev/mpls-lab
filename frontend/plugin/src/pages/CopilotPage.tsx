@@ -10,6 +10,7 @@ import { useDataClient } from '../data/DataClientContext';
 import { Incident, CopilotMessage } from '../data/types';
 import { MOCK_BUCKET_META } from '../data/MockDataClient';
 import { bucketToTsMs, formatUtc } from '../utils/time';
+import { brand } from '../brand';
 
 const CONV_ID = 'conv-live';
 const SUGGESTIONS = [
@@ -186,7 +187,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin: ${theme.spacing(1)} 0 ${theme.spacing(2)};
     padding: ${theme.spacing(1)} ${theme.spacing(1.5)};
     border-left: 3px solid ${theme.colors.warning.border};
-    background: ${theme.colors.background.secondary};
+    background: ${brand.bg2};
     color: ${theme.colors.warning.text};
     border-radius: ${theme.shape.radius.default};
   `,
@@ -194,8 +195,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin: ${theme.spacing(1)} 0 ${theme.spacing(2)};
     padding: ${theme.spacing(1)} ${theme.spacing(1.5)};
     border-left: 3px solid ${theme.colors.success.border};
-    background: ${theme.colors.background.secondary};
-    color: ${theme.colors.text.secondary};
+    background: ${brand.bg2};
+    color: ${brand.textDim};
     border-radius: ${theme.shape.radius.default};
   `,
   suggest: css`
@@ -210,7 +211,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin-top: ${theme.spacing(2)};
     position: sticky;
     bottom: 0;
-    background: ${theme.colors.background.primary};
+    background: ${brand.bg0};
     padding: ${theme.spacing(1)} 0;
   `,
 });

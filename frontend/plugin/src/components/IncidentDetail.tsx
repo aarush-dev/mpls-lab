@@ -5,6 +5,7 @@ import { useStyles2, Drawer, Link } from '@grafana/ui';
 
 import { nodeDetailPath } from '../constants';
 import { Incident } from '../data/types';
+import { brand } from '../brand';
 
 interface Props {
   incident: Incident;
@@ -76,7 +77,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin-top: ${theme.spacing(2)};
   `,
   empty: css`
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
   `,
   list: css`
     margin: 0;

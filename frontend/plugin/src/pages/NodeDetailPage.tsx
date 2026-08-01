@@ -12,6 +12,7 @@ import { nodeDetailPath } from '../constants';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { Incident, MetricSeries, Prediction, TopologyGraph } from '../data/types';
+import { brand } from '../brand';
 
 // Groups a flat metric list into a few panels by key prefix (cpu/mem together, then one panel
 // per remaining prefix e.g. `if_*`, `tunnel_*`). Keeps this a pure function of the fetched series.
@@ -217,6 +218,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     font-family: ${theme.typography.fontFamilyMonospace};
   `,
   empty: css`
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
   `,
 });

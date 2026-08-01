@@ -7,6 +7,7 @@ import { nodeDetailPath } from '../constants';
 import { formatUtc } from '../utils/time';
 import { secondsToEta } from '../utils/format';
 import { Incident, Prediction } from '../data/types';
+import { brand } from '../brand';
 
 interface Props {
   incidents: Incident[];
@@ -122,8 +123,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: ${theme.spacing(1.5)};
     align-items: center;
     padding: ${theme.spacing(1)};
-    background: ${theme.colors.background.secondary};
-    border: 1px solid ${theme.colors.border.weak};
+    background: ${brand.bg2};
+    border: 1px solid ${brand.border};
     border-radius: ${theme.shape.radius.default};
     font-size: ${theme.typography.bodySmall.fontSize};
   `,
@@ -134,24 +135,24 @@ const getStyles = (theme: GrafanaTheme2) => ({
     th {
       text-align: left;
       padding: ${theme.spacing(1)};
-      color: ${theme.colors.text.secondary};
-      border-bottom: 1px solid ${theme.colors.border.weak};
+      color: ${brand.textDim};
+      border-bottom: 1px solid ${brand.border};
       font-weight: ${theme.typography.fontWeightMedium};
     }
     td {
       padding: ${theme.spacing(1)};
-      border-bottom: 1px solid ${theme.colors.border.weak};
+      border-bottom: 1px solid ${brand.border};
     }
   `,
   row: css`
     cursor: pointer;
     &:hover {
-      background: ${theme.colors.background.secondary};
+      background: ${brand.bg3};
     }
   `,
   rowSelected: css`
     cursor: pointer;
-    background: ${theme.colors.background.secondary};
+    background: ${brand.bg3};
   `,
   deviceLink: css`
     font-family: ${theme.typography.fontFamilyMonospace};

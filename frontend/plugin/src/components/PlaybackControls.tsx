@@ -4,6 +4,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { Button, Icon, Slider, useStyles2 } from '@grafana/ui';
 import { useAppDispatch, useAppState } from '../state/AppContext';
 import { BucketMeta, bucketToTsMs, formatUtc } from '../utils/time';
+import { brand } from '../brand';
 
 const SPEEDS = [0.5, 1, 2, 4];
 
@@ -18,7 +19,7 @@ const getStyles = (theme: GrafanaTheme2) =>
     alignItems: 'center',
     gap: theme.spacing(1),
     padding: theme.spacing(1),
-    background: theme.colors.background.secondary,
+    background: brand.bg2,
     borderRadius: theme.shape.radius.default,
   });
 
@@ -33,7 +34,7 @@ const labelStyle = (theme: GrafanaTheme2) =>
     whiteSpace: 'nowrap',
     fontFamily: theme.typography.fontFamilyMonospace,
     fontSize: theme.typography.bodySmall.fontSize,
-    color: theme.colors.text.secondary,
+    color: brand.textDim,
     minWidth: 190,
   });
 

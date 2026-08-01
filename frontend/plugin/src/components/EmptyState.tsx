@@ -2,6 +2,7 @@ import React from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2, Icon } from '@grafana/ui';
+import { brand } from '../brand';
 
 // Neutral "nothing to show" state. Not an error — used when a filter/cursor yields no rows.
 export function EmptyState({ message = 'No data for the current view.' }: { message?: string }) {
@@ -21,6 +22,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     align-items: center;
     gap: ${theme.spacing(1)};
     padding: ${theme.spacing(4)};
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
   `,
 });

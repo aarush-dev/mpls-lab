@@ -10,6 +10,7 @@ import { ErrorState } from '../components/ErrorState';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { MetricSeries, TopologyNode } from '../data/types';
+import { brand } from '../brand';
 
 const ERROR_COUNTER_KEYS = ['interface_if_in_errors', 'if_in_discards', 'if_out_errors'];
 
@@ -169,7 +170,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: ${theme.spacing(2)};
   `,
   caption: css`
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
     font-size: ${theme.typography.bodySmall.fontSize};
     margin: 0;
   `,

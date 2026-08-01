@@ -11,6 +11,7 @@ import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { formatUtc } from '../utils/time';
 import { count } from '../utils/format';
+import { brand } from '../brand';
 
 // Data / Integration Status. Presents the ingest pipeline as a live, connected feed.
 // Internal source kinds are mapped to product-facing feed names; the 'mock' kind is never surfaced
@@ -120,15 +121,15 @@ const getStyles = (theme: GrafanaTheme2) => ({
     align-items: center;
     gap: ${theme.spacing(1.5)};
     padding: ${theme.spacing(1.5)};
-    background: ${theme.colors.background.secondary};
-    border: 1px solid ${theme.colors.border.weak};
+    background: ${brand.bg2};
+    border: 1px solid ${brand.border};
     border-radius: ${theme.shape.radius.default};
     margin: ${theme.spacing(2)} 0;
   `,
   window: css`
     margin-left: auto;
     font-family: ${theme.typography.fontFamilyMonospace};
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
   `,
   ok: css`
     color: ${theme.colors.success.text};
@@ -146,8 +147,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     align-items: center;
     gap: ${theme.spacing(1)};
     padding: ${theme.spacing(1)};
-    background: ${theme.colors.background.secondary};
-    border: 1px solid ${theme.colors.border.weak};
+    background: ${brand.bg2};
+    border: 1px solid ${brand.border};
     border-radius: ${theme.shape.radius.default};
   `,
   feedLabel: css`
@@ -168,16 +169,17 @@ const getStyles = (theme: GrafanaTheme2) => ({
     flex-direction: column;
     padding: ${theme.spacing(2)};
     min-width: 120px;
-    background: ${theme.colors.background.secondary};
-    border: 1px solid ${theme.colors.border.weak};
+    background: ${brand.bg2};
+    border: 1px solid ${brand.border};
     border-radius: ${theme.shape.radius.default};
   `,
   statNum: css`
     font-size: ${theme.typography.h2.fontSize};
     font-weight: ${theme.typography.fontWeightBold};
+    color: ${brand.accent};
   `,
   statLabel: css`
-    color: ${theme.colors.text.secondary};
+    color: ${brand.textDim};
     font-size: ${theme.typography.bodySmall.fontSize};
   `,
 });

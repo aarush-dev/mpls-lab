@@ -35,6 +35,10 @@ Route list is the source of truth in `frontend/plugin/src/plugin.json` (`include
 
 Live mode (`'api'`) exists as a config value but has no implementation — see `INTEGRATION_GUIDE.md`.
 
+## Theming
+
+Custom "MPLS Copilot" brand skin: monotone plum (`#261a2d`) + off-white (`#e1d7de`) + red accent (`#dd423e`). Palette and the instance-wide stylesheet live in `frontend/plugin/src/brand.ts` (`brand` constants + `applyBrand()`). `plugin.json` sets `"preload": true`, so `module.tsx` injects the brand CSS into `<head>` on every Grafana page — the whole instance (nav, chrome, our app) is reskinned, not just the plugin pages. App components reference the `brand` constants directly for exact surfaces; deep Grafana widgets inherit the plum base via the injected stylesheet.
+
 See `API_CONTRACT.md` for the full `DataClient` interface, `INTEGRATION_GUIDE.md` for how to wire up a real backend.
 
 ## Build / test / typecheck
