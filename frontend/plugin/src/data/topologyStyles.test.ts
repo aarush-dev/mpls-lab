@@ -2,8 +2,8 @@ import { styleForRole, defaultRoleStyle, roleStyles, stateColors, colorForState,
 
 describe('styleForRole', () => {
   it('returns the registered style for a known role', () => {
-    expect(styleForRole('P')).toEqual(roleStyles['P']);
-    expect(styleForRole('P')).toEqual({ shape: 'diamond', color: '#5794f2', size: 42 });
+    expect(styleForRole('p')).toEqual(roleStyles['p']);
+    expect(styleForRole('p')).toEqual({ shape: 'diamond', color: '#5794f2', size: 42 });
   });
 
   it('falls back to defaultRoleStyle for an unknown role (new-node guarantee)', () => {

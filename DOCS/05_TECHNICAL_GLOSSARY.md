@@ -354,6 +354,12 @@ The frontend's monotonic display clock (`AppState.absTick`, `src/state/reducer.t
 
 **Direct-to-AM write path** — the plugin POSTs alerts straight to Alertmanager's native API (`POST http://<host>:9093/api/v2/alerts`, bare AM v2 array), bypassing Grafana's datasource proxy. Grafana's AM-proxy only supports reading alerts; POSTing to it returns HTTP 400 because it expects Grafana's `definitions.PostableAlerts` shape, not AM's native array. Alertmanager v0.27's permissive CORS headers make the cross-port browser POST work. `startsAt` is omitted (AM stamps receive-time); alerts auto-resolve via `resolve_timeout` once the plugin stops re-posting them. Code: `src/alerting/alertPublisher.ts`.
 
+**Preset layout / `computePositions`** — `src/utils/topologyLayout.ts` assigns every topology node a fixed `{x,y}`, pure function of the node list (no `Date.now`/`Math.random`). Cytoscape runs this as a `preset` layout (`TopologyGraph.tsx`), replacing the old force-directed `cose` layout that drifted and overlapped nodes across re-renders. Guarantees zero node overlap by construction.
+
+**Role tiers** — inside each pop's cluster cell, `computePositions` stacks nodes top-down by role: tier 0 `p` (core) → tier 1 `pe` → tier 2 `ce_hub`/`ce_dc`/`ce_branch` → tier 3 `host`. Wide tiers (the 78 `host` leaves) wrap into sub-rows past 12 nodes. Pops themselves sit on a 3-wide cluster grid (6 pops = 3x2).
+
+**Tunnel overlay edges** — the ~171 `kind="tunnel"` links (of 361 total) render near-invisible (`line-opacity: 0.12`) by default so they don't tangle the 190 physical links on screen. Hovering a node lights up all its `connectedEdges()` (adds an `edge-hl` class), revealing that node's full link set including faint tunnels.
+
 **Air-gap verification** ensures the pipeline is truly offline:
 - All Docker images are pre-saved to `.tar.xz` files.
 - At deploy time, `load-offline.sh` loads images from local storage (no registry pull).

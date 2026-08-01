@@ -1184,6 +1184,22 @@ In the live orchestrator, the hardest scenarios to predict early are `bgp_flap` 
 
 ---
 
+## 12. Frontend Plugin — Topology Map Layout
+
+`frontend/plugin/src/components/TopologyGraph.tsx` renders the 148-node topology in cytoscape. Layout is `preset` (`TopologyGraph.tsx:190`), fed by `computePositions()` in `frontend/plugin/src/utils/topologyLayout.ts` — not the old force-directed `cose` layout, which drifted and overlapped nodes across re-renders.
+
+`computePositions(nodes)` returns a `Map<id, {x,y}>`, pure function of the node list (no `Date.now`/`Math.random`, deterministic and stable across ticks — `topologyLayout.ts:1-3`):
+- Nodes grouped by `pop`, pops sorted and placed on a 3-wide cluster grid (`CLUSTER_COLS = 3` → 6 pops = 3x2 grid, `topologyLayout.ts:17,57-59`).
+- Inside each pop cluster, nodes stack in role tiers top-down: tier 0 `p` (core) → tier 1 `pe` → tier 2 `ce_hub`/`ce_dc`/`ce_branch` → tier 3 `host` (`topologyLayout.ts:24-31`).
+- Each tier is evenly spread across the cluster width; tiers wider than `MAX_PER_ROW = 12` (i.e. the 78 `host` leaves) wrap into sub-rows (`topologyLayout.ts:21,68-83`).
+- Every node gets a distinct slot, so there's zero node overlap by construction.
+
+`topologyStyles.ts` role→shape/color/size map is keyed on the real lowercase fixture roles (`p`, `pe`, `ce_hub`, `ce_dc`, `ce_branch`, `host` — `frontend/plugin/src/data/topologyStyles.ts:11-18`). Previously the keys were uppercase (`P`/`PE`/`CE`), which never matched the lowercase roles in `topology.json`, so every device fell through to `defaultRoleStyle` and rendered as one uniform ellipse — fixed. Node shape in cytoscape now reads `data(shape)` (`TopologyGraph.tsx:99`), driven by this map, instead of a hardcoded ellipse.
+
+Tunnel edges (`edge[kind="tunnel"]`, ~171 of the 361 links) render at `line-opacity: 0.12` so they don't visually tangle the 190 physical links (`TopologyGraph.tsx:119-123`). On node hover (`mouseover`/`mouseout` on `node[!isPop]`), the node's `connectedEdges()` get an `edge-hl` class that pushes opacity to 1 and width to 2.5, revealing that node's full incident link set including its faint tunnels (`TopologyGraph.tsx:126-129,162-167`).
+
+Fixture scale (`frontend/plugin/src/fixtures/topology.json`): 148 nodes (78 host, 24 p, 24 ce_branch, 12 pe, 6 ce_hub, 4 ce_dc), 361 links (190 physical, 171 tunnel), 6 pops.
+
 ## Appendix: File Map
 
 | File | Role |

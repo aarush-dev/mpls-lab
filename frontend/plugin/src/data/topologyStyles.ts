@@ -7,10 +7,13 @@ export interface RoleStyle {
   size: number;
 }
 
+// Keys are the fixture role strings (lowercase). Core > edge > leaf, distinguished by shape + size.
 export const roleStyles: Record<string, RoleStyle> = {
-  P: { shape: 'diamond', color: '#5794f2', size: 42 },
-  PE: { shape: 'round-rectangle', color: '#8ab8ff', size: 36 },
-  CE: { shape: 'hexagon', color: '#b877d9', size: 30 },
+  p: { shape: 'diamond', color: '#5794f2', size: 42 },
+  pe: { shape: 'round-rectangle', color: '#8ab8ff', size: 36 },
+  ce_hub: { shape: 'hexagon', color: '#b877d9', size: 32 },
+  ce_dc: { shape: 'hexagon', color: '#d98cc9', size: 34 },
+  ce_branch: { shape: 'hexagon', color: '#b877d9', size: 26 },
   host: { shape: 'ellipse', color: '#8e9297', size: 16 },
 };
 

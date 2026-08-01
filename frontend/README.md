@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.5.1. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.6.0. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -22,7 +22,7 @@ Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 8 pages, all under `frontend/plugin/src/pages/`:
 
 - **Overview** (`OverviewPage.tsx`, `/`) — fleet health summary: reporting/expected devices, degraded tunnels, active incidents, highest-risk device.
-- **Topology** (`TopologyPage.tsx`, `/topology`) — live cytoscape map of the network graph, node health coloring.
+- **Topology** (`TopologyPage.tsx`, `/topology`) — cytoscape map of the network graph, node health coloring. Layout is a deterministic **preset** (not force-directed): `src/utils/topologyLayout.ts` `computePositions()` gives each node a fixed slot — pops laid on a 3×2 cluster grid, role tiers stacked top-down (p core → pe → ce → host leaves), so nodes never overlap and the map is stable across ticks. Node shape/size differ by role (`src/data/topologyStyles.ts`, keyed on the lowercase fixture roles). The ~171 tunnel (overlay) links are drawn faint by default; hovering a node lights up its incident links.
 - **Node Detail** (`NodeDetailPage.tsx`, `/node/:id`) — single-device view with a device picker dropdown.
 - **Telemetry** (`TelemetryPage.tsx`, `/telemetry`) — time-series metric panels.
 - **Incidents** (`IncidentsPage.tsx`, `/incidents`) — incident and prediction list, evidence, root-cause hypotheses, recommended actions.

@@ -7,6 +7,7 @@ import { useStyles2 } from '@grafana/ui';
 import { TopologyLink } from '../data/types';
 import { TopologyNodeLive } from '../data/MockDataClient';
 import { styleForRole, colorForState } from '../data/topologyStyles';
+import { computePositions } from '../utils/topologyLayout';
 
 interface Props {
   nodes: TopologyNodeLive[];
@@ -28,6 +29,7 @@ function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[]): Elemen
     data: { id: POP_PREFIX + pop, label: pop, isPop: true },
   }));
 
+  const positions = computePositions(nodes);
   const realNodes: ElementDefinition[] = nodes.map((n) => {
     const style = styleForRole(n.role);
     return {
@@ -41,6 +43,7 @@ function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[]): Elemen
         size: style.size,
         parent: n.pop ? POP_PREFIX + n.pop : undefined,
       },
+      position: positions.get(n.id),
     };
   });
 
@@ -92,7 +95,8 @@ export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
         {
           selector: 'node[!isPop]',
           style: {
-            shape: 'ellipse',
+            // cytoscape supports data() mappers for shape at runtime; its TS types don't model it.
+            shape: 'data(shape)' as cytoscape.Css.Node['shape'],
             width: 'data(size)',
             height: 'data(size)',
             'background-color': 'data(baseColor)',
@@ -113,8 +117,15 @@ export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
           },
         },
         {
+          // Tunnels are overlay links (~171 of them) — keep them faint so they don't tangle the map.
+          // Revealed on node hover via the edge-hl class below.
           selector: 'edge[kind = "tunnel"]',
-          style: { 'line-style': 'dashed' },
+          style: { 'line-style': 'dashed', 'line-opacity': 0.12, width: 1 },
+        },
+        {
+          // Edges incident to a hovered node: fully visible, on top.
+          selector: 'edge.edge-hl',
+          style: { 'line-opacity': 1, width: 2.5, 'z-index': 10 },
         },
         {
           selector: 'node[state = "red"]',
@@ -147,6 +158,14 @@ export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
       }
     });
 
+    // Hover a device -> light up its links (incl. otherwise-faint tunnels); clear on mouseout.
+    cy.on('mouseover', 'node[!isPop]', (evt) => {
+      evt.target.connectedEdges().addClass('edge-hl');
+    });
+    cy.on('mouseout', 'node[!isPop]', (evt) => {
+      evt.target.connectedEdges().removeClass('edge-hl');
+    });
+
     cyRef.current = cy;
     return () => {
       cy.destroy();
@@ -166,7 +185,9 @@ export function TopologyGraph({ nodes, links, onSelectNode }: Props) {
     if (setChanged) {
       cy.elements().remove();
       cy.add(buildElements(nodes, links));
-      const layout = cy.layout({ name: 'cose', animate: false, fit: true } as cytoscape.LayoutOptions);
+      // Preset: use the deterministic positions baked into each node (computePositions). No physics,
+      // so nodes never overlap and the map is stable across ticks.
+      const layout = cy.layout({ name: 'preset', fit: true } as cytoscape.LayoutOptions);
       layout.run();
       cy.fit(undefined, 30);
       setKeyRef.current = key;
