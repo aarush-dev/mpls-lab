@@ -136,7 +136,7 @@ describe('MockDataClient', () => {
     ]);
 
     const { nodes } = await client.getTopology({});
-    expect(nodes.find((n) => n.id === 'pe1')?.state).toBe('red');
+    expect((nodes as TopologyNodeLive[]).find((n) => n.id === 'pe1')?.state).toBe('red');
 
     const alerts = client.getActiveAlerts();
     const injected = alerts.find((a) => a.node === 'pe1' && a.alertname === 'NodeDown');
@@ -147,7 +147,7 @@ describe('MockDataClient', () => {
     // Clearing it restores the node.
     (client as unknown as { setInjectedFaults: (f: Array<{ node: string; faultType: string }>) => void }).setInjectedFaults([]);
     const after = await client.getTopology({});
-    expect(after.nodes.find((n) => n.id === 'pe1')?.state).not.toBe('red');
+    expect((after.nodes as TopologyNodeLive[]).find((n) => n.id === 'pe1')?.state).not.toBe('red');
   });
 
   it('rewrites chart timestamps to a monotonic timeline that never rewinds on loop', async () => {

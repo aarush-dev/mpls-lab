@@ -1,5 +1,6 @@
 import React, { createContext, Dispatch, PropsWithChildren, useContext, useEffect, useReducer } from 'react';
 import { AppAction, AppState, appReducer, initialAppState } from './reducer';
+import { MOCK_BUCKET_META } from '../data/MockDataClient';
 
 interface AppContextValue {
   state: AppState;
@@ -20,7 +21,9 @@ export function AppProvider({ children }: PropsWithChildren<{}>) {
     if (!playing || bucketCount <= 0) {
       return undefined;
     }
-    const intervalMs = 1000 / Math.max(speed, 0.01);
+    // Real-time playback: one bucket of data takes one bucket's wall-clock time (30s/bucket).
+    // speed stays a multiplier (2x -> 15s/bucket).
+    const intervalMs = MOCK_BUCKET_META.bucketMs / Math.max(speed, 0.01);
     const id = setInterval(() => dispatch({ type: 'TICK' }), intervalMs);
     return () => clearInterval(id);
   }, [playing, speed, bucketCount]);

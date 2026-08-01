@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.5.0. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.5.1. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -37,6 +37,8 @@ Route list is the source of truth in `frontend/plugin/src/plugin.json` (`include
 ## Mock mode
 
 `appConfig.mode` in `frontend/plugin/src/config.ts` defaults to `'mock'`. `MockDataClient` (`frontend/plugin/src/data/MockDataClient.ts`) reads bundled JSON fixtures under `frontend/plugin/src/fixtures/` and replays them against a shared demo clock driven by `App.tsx`. Data is a recorded sample capture, not live telemetry. Predictions and Copilot responses are fabricated to look live; the UI shows no demo markers (`showDemoBadge: false`).
+
+Playback runs in real time: `AppProvider` (`src/state/AppContext.tsx`) paces one bucket per bucket's wall-clock width (`MOCK_BUCKET_META.bucketMs`, 30s), so 30s of data takes 30s. `speed` is a multiplier on that (`intervalMs = bucketMs / speed`): 2x → 15s/bucket, 0.5x → 60s/bucket.
 
 Two clock values, both in `AppState` (`src/state/reducer.ts`): `cursor` is the wrapped data index into the 152-bucket tape (wraps every loop); `absTick` is an ever-increasing tick that never wraps. Display (chart x-axis, `PlaybackControls` clock label, `CopilotPage` timestamps) uses `absTick` so time keeps counting up across loops instead of jumping ~76 min backward. `MockDataClient.getTelemetry` rewrites each point's `tMs` from `absTick` (monotonic) but still reads values from the wrapped `cursor` window. `curTsMs()` stays `cursor`-based — event/prediction/incident gating must not run past fixture timestamps on a loop.
 
