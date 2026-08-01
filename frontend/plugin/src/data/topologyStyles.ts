@@ -1,8 +1,6 @@
 // Data-driven role -> visual style registry for the topology graph.
 // Adding a new node role later needs no code change: unknown roles fall back to `defaultRoleStyle`.
 
-import { brand } from '../brand';
-
 export interface RoleStyle {
   shape: 'ellipse' | 'round-rectangle' | 'diamond' | 'triangle' | 'hexagon';
   color: string;
@@ -16,7 +14,7 @@ export const roleStyles: Record<string, RoleStyle> = {
   host: { shape: 'ellipse', color: '#8e9297', size: 16 },
 };
 
-export const defaultRoleStyle: RoleStyle = { shape: 'ellipse', color: brand.textDim, size: 28 };
+export const defaultRoleStyle: RoleStyle = { shape: 'ellipse', color: '#8ab8ff', size: 28 };
 
 export function styleForRole(role: string): RoleStyle {
   return roleStyles[role] ?? defaultRoleStyle;
@@ -24,12 +22,12 @@ export function styleForRole(role: string): RoleStyle {
 
 // Health-state colors. red = down, amber = precursor, green = healthy.
 export const stateColors: Record<'red' | 'amber' | 'green', string> = {
-  red: brand.accent,
+  red: '#e02f44',
   amber: '#ff9830',
   green: '#56a64b',
 };
 
-export const neutralColor = brand.textFaint;
+export const neutralColor = '#8e9297';
 
 export function colorForState(state?: 'red' | 'amber' | 'green'): string {
   return state ? stateColors[state] : neutralColor;

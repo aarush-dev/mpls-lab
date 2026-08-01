@@ -14,7 +14,6 @@ import { TopologyLink } from '../data/types';
 import { TopologyNodeLive } from '../data/MockDataClient';
 import { nodeDetailPath } from '../constants';
 import { stateColors } from '../data/topologyStyles';
-import { brand } from '../brand';
 
 export function TopologyPage() {
   const styles = useStyles2(getStyles);
@@ -118,7 +117,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
   legend: css`
     display: flex;
     gap: ${theme.spacing(2)};
-    color: ${brand.textDim};
+    color: ${theme.colors.text.secondary};
     font-size: ${theme.typography.bodySmall.fontSize};
   `,
   legendItem: css`

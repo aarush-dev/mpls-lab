@@ -9,7 +9,6 @@ import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { Incident, Overview } from '../data/types';
 import { count, secondsToEta } from '../utils/format';
-import { brand } from '../brand';
 
 export function OverviewPage() {
   const styles = useStyles2(getStyles);
@@ -110,7 +109,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin-top: ${theme.spacing(3)};
   `,
   empty: css`
-    color: ${brand.textDim};
+    color: ${theme.colors.text.secondary};
   `,
   incidentList: css`
     list-style: none;
@@ -124,8 +123,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     gap: ${theme.spacing(1.5)};
     padding: ${theme.spacing(1)};
-    background: ${brand.bg2};
-    border: 1px solid ${brand.border};
+    background: ${theme.colors.background.secondary};
+    border: 1px solid ${theme.colors.border.weak};
     border-radius: ${theme.shape.radius.default};
   `,
   incidentStatus: css`
@@ -137,7 +136,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   incidentDevices: css`
     font-family: ${theme.typography.fontFamilyMonospace};
-    color: ${brand.textDim};
+    color: ${theme.colors.text.secondary};
     min-width: 120px;
   `,
 });

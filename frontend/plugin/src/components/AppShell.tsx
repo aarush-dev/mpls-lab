@@ -8,7 +8,6 @@ import { useStyles2 } from '@grafana/ui';
 import { PlaybackControls } from './PlaybackControls';
 import { FilterBar } from './FilterBar';
 import { BucketMeta } from '../utils/time';
-import { brand } from '../brand';
 
 const NAV_LINKS = [
   { to: '', label: 'Overview', exact: true },
@@ -33,13 +32,7 @@ export function AppShell({ meta, children }: PropsWithChildren<Props>) {
   return (
     <div className={styles.root}>
       <div className={styles.topBar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark} />
-          <span className={styles.brandName}>
-            MPLS<span className={styles.brandAccent}>Copilot</span>
-          </span>
-          <span className={styles.brandTag}>predictive NOC</span>
-        </div>
+        <h2 className={styles.title}>NOC Copilot</h2>
         <div className={styles.playback}>
           <PlaybackControls meta={meta} />
         </div>
@@ -69,9 +62,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
   root: css`
     display: flex;
     flex-direction: column;
-    background: ${brand.bg1};
-    color: ${brand.text};
-    min-height: 100%;
   `,
   topBar: css`
     display: flex;
@@ -79,40 +69,11 @@ const getStyles = (theme: GrafanaTheme2) => ({
     justify-content: space-between;
     gap: ${theme.spacing(2)};
     flex-wrap: wrap;
-    padding: ${theme.spacing(1.5)} ${theme.spacing(2)};
-    background: ${brand.bg0};
-    border-bottom: 2px solid ${brand.accent};
+    padding-bottom: ${theme.spacing(1)};
   `,
-  brand: css`
-    display: flex;
-    align-items: center;
-    gap: ${theme.spacing(1.25)};
+  title: css`
+    margin: 0;
     white-space: nowrap;
-  `,
-  brandMark: css`
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
-    background: ${brand.accent};
-    box-shadow: 0 0 10px ${brand.accent};
-  `,
-  brandName: css`
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    color: ${brand.text};
-  `,
-  brandAccent: css`
-    color: ${brand.accent};
-    margin-left: 2px;
-  `,
-  brandTag: css`
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    color: ${brand.textFaint};
-    border-left: 1px solid ${brand.border};
-    padding-left: ${theme.spacing(1.25)};
   `,
   playback: css`
     flex: 1;
@@ -121,34 +82,24 @@ const getStyles = (theme: GrafanaTheme2) => ({
   nav: css`
     display: flex;
     align-items: center;
-    gap: ${theme.spacing(0.5)};
-    padding: ${theme.spacing(1)} ${theme.spacing(2)};
-    background: ${brand.bg0};
-    border-bottom: 1px solid ${brand.border};
+    gap: ${theme.spacing(2)};
+    padding: ${theme.spacing(1)} 0;
+    border-bottom: 1px solid ${theme.colors.border.weak};
     margin-bottom: ${theme.spacing(2)};
   `,
   filters: css`
     margin-left: auto;
   `,
   navLink: css`
-    color: ${brand.textDim};
+    color: ${theme.colors.text.secondary};
     text-decoration: none;
-    padding: ${theme.spacing(0.75)} ${theme.spacing(1.25)};
-    border-radius: ${theme.shape.radius.default};
-    border: 1px solid transparent;
-    &:hover {
-      color: ${brand.text};
-      background: ${brand.bg2};
-    }
+    padding: ${theme.spacing(0.5)} ${theme.spacing(1)};
   `,
   navLinkActive: css`
-    color: ${brand.text};
+    color: ${theme.colors.text.primary};
     font-weight: ${theme.typography.fontWeightMedium};
-    background: ${brand.accentDim};
-    border-color: ${brand.accent};
   `,
   content: css`
     flex: 1;
-    padding: 0 ${theme.spacing(2)} ${theme.spacing(2)};
   `,
 });

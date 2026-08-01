@@ -3,7 +3,6 @@
   "type": "app",
   "name": "NOC Copilot",
   "id": "mplslab-noccopilot-app",
-  "preload": true,
   "info": {
     "keywords": ["app", "noc", "copilot"],
     "description": "NOC Copilot",

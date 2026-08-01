@@ -2,7 +2,6 @@ import React from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
-import { brand } from '../brand';
 
 interface Props {
   label: string;
@@ -18,15 +17,15 @@ const getStyles = (theme: GrafanaTheme2) => ({
     flexDirection: 'column',
     gap: theme.spacing(0.5),
     padding: theme.spacing(2),
-    background: brand.bg2,
-    border: `1px solid ${brand.border}`,
+    background: theme.colors.background.secondary,
+    border: `1px solid ${theme.colors.border.weak}`,
     borderRadius: theme.shape.radius.default,
     minWidth: 160,
     flex: '1 1 160px',
   }),
   label: css({
     fontSize: theme.typography.bodySmall.fontSize,
-    color: brand.textDim,
+    color: theme.colors.text.secondary,
     textTransform: 'uppercase',
     letterSpacing: '0.02em',
   }),
@@ -43,7 +42,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
   }),
   sub: css({
     fontSize: theme.typography.bodySmall.fontSize,
-    color: brand.textDim,
+    color: theme.colors.text.secondary,
   }),
 });
 
