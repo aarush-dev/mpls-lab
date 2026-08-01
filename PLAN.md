@@ -184,9 +184,49 @@ integrated into the canonical lab:
   buckets cannot resolve a BGP reset and its reconvergence when both land inside one
   bucket. Telemetry compose grew from 10 to **11 services**.
 
+## Phase 7 — Grafana NOC frontend (React App Plugin)
+
+**Scope now: frontend + mock data only.** A modular **Grafana App Plugin**
+(`mplslab-noccopilot-app`, React+TS) over the committed sample data, shipped as the self-contained
+`frontend/` folder. Runs fully in **mock mode** (bundled deterministic fixtures, no lab/backend,
+air-gapped). Does NOT implement the ML model, copilot backend, lab, telemetry, or any live API —
+those are labelled mock behind stable frontend contracts. **Live `api` mode is future work, not
+built now** — kept cheap by the DataClient seam. Full plan: `frontend/IMPLEMENTATION_PLAN.md`.
+
+- **7 sections:** Network Overview, Interactive Topology, Node Details, Telemetry Explorer,
+  Incidents & Predictions, Copilot, Data & Integration Status.
+- **Data-driven expandable topology:** roles/nodes/links from data (cytoscape.js, POP clustering,
+  no hardcoded counts); adding nodes later needs only updated fixture data, no UI change.
+- **Node Details opens inside Grafana** on node click (app page `/node/:id` via DataClient — works
+  in mock mode with no datasource — plus a provisioned `$device` `node-detail.json` dashboard for
+  the future api mode).
+- **DataClient boundary:** `MockDataClient` (built, default). `HttpDataClient` is a future stub;
+  the query catalog (PromQL) is authored from verified metric names but not executed now. Every
+  fabricated prediction/chat reply is `source:'mock'` with a visible **Demo data** marker.
+- Milestones M1–M5 (foundation → fixtures → operator UI+topology/node-details → mock copilot →
+  QA/handoff), each user-gated. **M1–M5 all DONE — frontend feature-complete, draft PR opened.**
+  M2: deterministic
+  `frontend/scripts/generate_fixtures.py` (verified byte-identical rerun), fixtures
+  (bucketCount=152, deviceIds=70, incidents=28, predictions=69, faultTypes=21 all covered,
+  topologyNodes=148, topologyLinks=361), `MockDataClient`, global demo clock, live OverviewPage.
+  M3: Topology (live cytoscape, POP clustering, role→style registry, click→Node Detail), Node
+  Detail (`/node/:id`, preserves demo clock), Telemetry Explorer, Incidents & Predictions
+  (risk-ordered, error-not-empty), Data & Integration Status, global FilterBar (POP+device). Gate
+  met: click node → Node Detail w/ preserved clock; new fixture node needs no code change. Plugin
+  builds green, `tsc --noEmit` clean, plugin.json 1.0.3, serves in Grafana 11.1.0. M4: Copilot page
+  (`CopilotPage.tsx`+`CopilotChat.tsx`, message state machine, client-generated message ids, context
+  = live incident synced to the demo clock, seeded replies for all 21 fault types with
+  citations/evidence/root-cause/actions, citations restricted to the 4 existing `ragcorpus/*.md`
+  docs). All 7 pages now implemented. Build green, `tsc --noEmit` clean, plugin.json 1.0.5, serves
+  in Grafana 11.1.0. M5: Jest 86 tests/9 suites all pass, `tsc`/`eslint` clean, prod build green
+  (dist 1.0.6), docs (`README.md`/`API_CONTRACT.md`/`INTEGRATION_GUIDE.md`), air-gap verified
+  (mock mode client-side only). All 5 milestones DONE.
+
 ## Reuse-before-build (don't reinvent)
 Adapt: `martimy/clab_mpls_frr`, `frr01`, `upa/nante-wan`, `ntaka329` pmacct lab, `sflow/frr`;
 native `containerlab tools netem`; Telegraf SNMP plugin; VictoriaMetrics+Grafana; pmacct pipeline.
+Frontend: `@grafana/ui` + `@grafana/data`; cytoscape.js only where Grafana packages can't
+provide the interactive topology.
 
 ## Verification (on the full lab)
 1. `containerlab inspect` → all nodes healthy at full scale.

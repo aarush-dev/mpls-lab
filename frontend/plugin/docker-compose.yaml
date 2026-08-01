@@ -1,0 +1,15 @@
+
+services:
+  grafana:
+    container_name: 'mplslab-noccopilot-app'
+    platform: 'linux/amd64'
+    build:
+      context: ./.config
+      args:
+        grafana_image: ${GRAFANA_IMAGE:-grafana-enterprise}
+        grafana_version: ${GRAFANA_VERSION:-11.1.0}
+    ports:
+      - 3000:3000/tcp
+    volumes:
+      - ./dist:/var/lib/grafana/plugins/mplslab-noccopilot-app
+      - ./provisioning:/etc/grafana/provisioning

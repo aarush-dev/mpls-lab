@@ -827,3 +827,56 @@ per-`kind` lock and a same-device, different-kind cascade.
 Schema went 40 → 49 columns. The shipped real capture was re-joined in place by
 `dataapi/reschema.py` (labels re-derived from `faults/labels/labels.jsonl`, metric
 columns untouched), which is why its fault rows went 327 → 391.
+
+## Frontend mock playback: monotonic clock + full telemetry fill (plugin v1.2.0)
+
+Loop clock must not rewind. The fixture tape is 152 buckets; on loop, `cursor`
+(the data index) wraps back to 0. Displaying `cursor` directly made the chart
+x-axis and playback clock jump ~76 minutes backward every loop — reads as broken
+on a demo screen. Fix: `AppState` gained `absTick`, an ever-increasing tick pushed
+from `App.tsx`, used for every DISPLAYED timestamp (chart x-axis, playback clock,
+Copilot message times). `cursor` still drives which data values are read (values
+must wrap, since the tape is finite) and still gates event/prediction/incident
+timing against fixture timestamps (`curTsMs()` stays `cursor`-based) — only the
+displayed time is monotonic.
+
+Telemetry filled for all nodes, and flat/blank series fabricated, per user request
+for the hackathon demo. Dropdowns listed all 148 topology nodes but only 27 had
+real fixture series; the other 121 showed "No telemetry" — an obvious tell that
+this is a demo, not a live system. `src/data/telemetrySynth.ts` synthesizes a
+deterministic, role-aware series per device (seeded by deviceId, no
+`Date.now`/`Math.random`) for any missing device/metric. Same fix applied to
+series that were present but flat: interface error counters (0 on veth links) and
+PE-router transceiver metrics (null on pe1/pe2/pe10/pe11) now get synthetic
+non-flat values too. This drops the old "Interface error counters are 0 (virtual
+links)" honesty caption on the Telemetry page — it's no longer true, and for this
+project's stated goal (frontend must look live, no visible demo markers) a flat
+line reading as broken outweighs a caption explaining it's accurate.
+
+## Frontend synthetic alerts in native Alerting tab (plugin v1.3.0)
+
+User request: show alerts in Grafana's built-in Alerting UI instead of a custom
+incidents-only view, so the demo reads as a real Grafana install with alerting
+wired up. That UI only shows alerts sourced from a real Alertmanager (or Grafana-
+managed alert rules evaluating real queries, which the mock data doesn't support)
+— so a real `prom/alertmanager:v0.27.0` container was added to the stack rather
+than faking the UI. Config `frontend/alertmanager/alertmanager.yml` uses a single
+blackhole receiver: alerts are visible but never routed anywhere, keeping the lab
+air-gapped.
+
+Write path goes directly from the browser plugin to Alertmanager
+(`POST http://<host>:9093/api/v2/alerts`), not through Grafana's AM-datasource
+proxy. Tried the proxy first — it 400s on a posted alert because it expects
+Grafana's `definitions.PostableAlerts` object, not Alertmanager's native v2 array;
+the proxy is read-only for alerts by design. Alertmanager v0.27 returns permissive
+CORS headers, so the direct cross-port browser POST works without a backend relay.
+Read path is the provisioned `noc-alertmanager` Grafana datasource (uid
+`noc-alertmanager`), which is what makes the posted alerts appear in Alerting →
+Alert groups.
+
+Two alert kinds recomputed every demo-clock tick from the current cursor
+(`MockDataClient.getActiveAlerts()`): `NodeDown` (critical, live state red) and
+`NodeDownPredicted` (warning, active prediction within 300s of impact). The
+plugin only re-POSTs when the firing set changes (`App.tsx` effect), not every
+tick, so a stable alert doesn't hammer Alertmanager; `resolve_timeout` clears it
+once it stops being re-sent.

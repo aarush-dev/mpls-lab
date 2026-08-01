@@ -338,6 +338,36 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 - **Time-series forecasting:** LSTM/Transformer to predict fault impact N seconds in advance (maximize lead time).
 - **Interpretability:** LIME/SHAP to explain which metrics triggered the prediction; RAG to supplement with topology/runbooks.
 
+---
+
+## Group 10: Frontend Mock Playback (`frontend/plugin`)
+
+**absTick**  
+The frontend's monotonic display clock (`AppState.absTick`, `src/state/reducer.ts`), distinct from `cursor`. `cursor` is the data index into the 152-bucket fixture tape and wraps every loop; `absTick` never wraps, it just keeps incrementing. The chart x-axis, playback clock label, and Copilot message timestamps read `absTick` so time counts up across loops instead of jumping backward ~76 minutes when `cursor` wraps. Values still come from the wrapped `cursor` window — only the displayed timestamp is monotonic.
+
+**Synthetic telemetry fill**  
+`src/data/telemetrySynth.ts` generates a deterministic, role-aware series for any device/metric the bundled fixtures don't cover, so every one of the 148 selectable topology nodes has something to chart (previously only 27 had real series; the rest showed "No telemetry"). Deterministic means seeded by `deviceId`, not `Date.now()`/`Math.random()` — same device always renders the same synthetic shape. Also used to replace previously flat/null series (interface error counters, PE transceiver metrics) with lively synthetic values, since a flat line reads as broken on a demo screen.
+
+**Alertmanager (frontend stack)** — the `prom/alertmanager:v0.27.0` container in `frontend/docker-compose.yml`, bound to `127.0.0.1:9093`. Config `frontend/alertmanager/alertmanager.yml` has a single "blackhole" receiver: alerts are stored and shown but never routed anywhere (air-gapped, no email/webhook/Slack). It exists only to feed Grafana's native Alerting UI via the provisioned `noc-alertmanager` datasource — it is not the lab's fault-injection Alertmanager (there isn't one).
+
+**NodeDown vs NodeDownPredicted** — the two synthetic alert kinds the plugin pushes to Alertmanager, recomputed every demo-clock tick (`MockDataClient.getActiveAlerts()`). `NodeDown` (severity critical) fires when a node's live state is red at the current bucket. `NodeDownPredicted` (severity warning) fires for an active fabricated prediction within 300s of its predicted impact — i.e. "5 minutes before a node is predicted to go down." Both carry labels `alertname`, `node`, `severity`, `source=noc-copilot`, `pop`, and a `generatorURL` annotation deep-linking to the plugin's node-detail page.
+
+**Direct-to-AM write path** — the plugin POSTs alerts straight to Alertmanager's native API (`POST http://<host>:9093/api/v2/alerts`, bare AM v2 array), bypassing Grafana's datasource proxy. Grafana's AM-proxy only supports reading alerts; POSTing to it returns HTTP 400 because it expects Grafana's `definitions.PostableAlerts` shape, not AM's native array. Alertmanager v0.27's permissive CORS headers make the cross-port browser POST work. `startsAt` is omitted (AM stamps receive-time); alerts auto-resolve via `resolve_timeout` once the plugin stops re-posting them. Code: `src/alerting/alertPublisher.ts`.
+
+**Preset layout / `computePositions`** — `src/utils/topologyLayout.ts` assigns every topology node a fixed `{x,y}`, pure function of the node list (no `Date.now`/`Math.random`). Cytoscape runs this as a `preset` layout (`TopologyGraph.tsx`), replacing the old force-directed `cose` layout that drifted and overlapped nodes across re-renders. Guarantees zero node overlap by construction.
+
+**Role tiers** — inside each pop's cluster cell, `computePositions` stacks nodes top-down by role: tier 0 `p` (core) → tier 1 `pe` → tier 2 `ce_hub`/`ce_dc`/`ce_branch` → tier 3 `host`. Wide tiers (the 78 `host` leaves) wrap into sub-rows past 12 nodes. Pops themselves sit on a 3-wide cluster grid (6 pops = 3x2).
+
+**Tunnel overlay edges** — the ~171 `kind="tunnel"` links (of 361 total) render near-invisible (`line-opacity: 0.12`) by default so they don't tangle the 190 physical links on screen. Hovering a node lights up all its `connectedEdges()` (adds an `edge-hl` class), revealing that node's full link set including faint tunnels.
+
+**Fault phase / lifecycle** — an injected fault (`src/state/reducer.ts`) walks `pending → predicted → down`. `pending`: healthy-looking grace period, no alert. `predicted`: node reads amber, fires `NodeDownPredicted`. `down`: node reads red, folds into `NodeDown`. Escalation runs on wall-clock `setTimeout`s in `App.tsx` (pending→predicted at +5s, predicted→down at +`leadSec`s), not the demo-tick clock.
+
+**leadSec** — 30, 60, or 90 seconds; how long a fault stays `predicted` before going `down`. Picked deterministically by `pickLeadSec(node, faultType)` (sum of char codes mod 3) — no `Math.random`, same node+fault always gets the same lead time. Surfaces in the `NodeDownPredicted` alert text ("predicted `<faultType>` in `<leadSec>`s") and as the predictor-series ramp duration.
+
+**Fault predictor series** — a synthetic `<deviceId>:predictor` metric series (`MockDataClient.predictorSeries()`) added to `getTelemetry()` output only for a device with an active injected fault. Ramps toward "now" with amplitude by phase (pending 20 / predicted 55 / down 90). Crash-type faults (`node_failure`, `core_partition`, `pop_isolation`, `srlg_cut`) drive a "Health score" % down; other (traffic) faults drive a "Traffic pressure" % up. `groupSeries()` puts it in its own "Fault predictor" panel, shown first.
+
+**NodeHoverCard** — mini node-inspector (`TopologyPage.tsx`) shown near the cursor on topology node hover, no click needed. Shows id, role, POP, site, a derived status (Down/Predicted fault/Precursor/Healthy from injected phase or replayed state), and latest predictor/CPU/memory values from a lazily-fetched telemetry snapshot.
+
 **Air-gap verification** ensures the pipeline is truly offline:
 - All Docker images are pre-saved to `.tar.xz` files.
 - At deploy time, `load-offline.sh` loads images from local storage (no registry pull).

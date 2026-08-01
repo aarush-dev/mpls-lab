@@ -1,0 +1,1542 @@
+[
+  {
+    "id": "inc-congestion-ce_branch18-fc10a128",
+    "status": "unknown",
+    "faultType": "congestion",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch18"
+    ],
+    "startedAt": "2026-07-26T02:20:30Z",
+    "impactAt": "2026-07-26T02:21:30Z",
+    "endedAt": "2026-07-26T02:21:30Z",
+    "summary": "congestion detected on ce_branch18",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "congestion active on ce_branch18 across buckets 2-4 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=60.2s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch18:ce_branch18",
+      "ce_branch18:ce_branch18-ce_hub1",
+      "ce_branch18:ce_branch18-ce_hub2",
+      "ce_branch18:ce_branch18-ce_hub3",
+      "ce_branch18:ce_branch18-ce_hub4",
+      "ce_branch18:ce_branch18-ce_hub5",
+      "ce_branch18:ce_branch18-ce_hub6",
+      "ce_branch18:eth1"
+    ],
+    "rootCauseHypotheses": [
+      "Sustained traffic surge exceeding provisioned tunnel bandwidth",
+      "Possible mis-provisioned QoS class letting best-effort traffic starve VOICE/CORP"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check tunnel utilization",
+        "detail": "Compare sdwan_tunnel_loss_pct/latency_ms against the VRF's QoS class share."
+      },
+      {
+        "title": "Rebalance or upsize",
+        "detail": "Consider raising the CE uplink rate or re-weighting HTB classes."
+      }
+    ],
+    "startBucket": 2,
+    "impactBucket": 4,
+    "endBucket": 4
+  },
+  {
+    "id": "inc-node_failure-ce_branch15-b49777d1",
+    "status": "unknown",
+    "faultType": "node_failure",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch15"
+    ],
+    "startedAt": "2026-07-26T02:21:30Z",
+    "impactAt": "2026-07-26T02:21:30Z",
+    "endedAt": "2026-07-26T02:21:30Z",
+    "summary": "node failure detected on ce_branch15",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "node_failure active on ce_branch15 across buckets 4-4 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=1.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch15:ce_branch15",
+      "ce_branch15:ce_branch15-ce_hub1",
+      "ce_branch15:ce_branch15-ce_hub2",
+      "ce_branch15:ce_branch15-ce_hub3",
+      "ce_branch15:ce_branch15-ce_hub4",
+      "ce_branch15:ce_branch15-ce_hub5",
+      "ce_branch15:ce_branch15-ce_hub6",
+      "ce_branch15:eth0",
+      "ce_branch15:eth1",
+      "ce_branch15:eth2",
+      "ce_branch15:eth3",
+      "ce_branch15:eth4"
+    ],
+    "rootCauseHypotheses": [
+      "bgpd or the device process crashed and is awaiting watchfrr respawn",
+      "Hard device failure on the affected node"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Confirm process state",
+        "detail": "Check whether bgpd/watchfrr is respawning the failed process."
+      },
+      {
+        "title": "Escalate if hard down",
+        "detail": "If the node stays unreachable past the respawn window, treat as hardware failure."
+      }
+    ],
+    "startBucket": 4,
+    "impactBucket": 4,
+    "endBucket": 4
+  },
+  {
+    "id": "inc-rr_failure-pe1-4cd0f365",
+    "status": "unknown",
+    "faultType": "rr_failure",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "pe1"
+    ],
+    "startedAt": "2026-07-26T02:21:30Z",
+    "impactAt": "2026-07-26T02:21:30Z",
+    "endedAt": "2026-07-26T02:21:30Z",
+    "summary": "rr failure detected on pe1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "rr_failure active on pe1 across buckets 4-4 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=3.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "pe1:CORP",
+      "pe1:GUEST",
+      "pe1:VOICE",
+      "pe1:eth0",
+      "pe1:eth1",
+      "pe1:eth2",
+      "pe1:eth3",
+      "pe1:eth4",
+      "pe1:eth5",
+      "pe1:eth6",
+      "pe1:eth7",
+      "pe1:eth8"
+    ],
+    "rootCauseHypotheses": [
+      "Route-reflector (pe1/pe2) session loss collapsing iBGP for its clients",
+      "RR process restart or control-plane resource exhaustion"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check RR reachability",
+        "detail": "Verify pe1/pe2 loopback reachability from clients."
+      },
+      {
+        "title": "Fail over RR role",
+        "detail": "If one RR is down, confirm the other RR is still serving all clients."
+      }
+    ],
+    "startBucket": 4,
+    "impactBucket": 4,
+    "endBucket": 4
+  },
+  {
+    "id": "inc-congestion-ce_branch11-9bea9018",
+    "status": "unknown",
+    "faultType": "congestion",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch11"
+    ],
+    "startedAt": "2026-07-26T02:22:00Z",
+    "impactAt": "2026-07-26T02:23:30Z",
+    "endedAt": "2026-07-26T02:23:30Z",
+    "summary": "congestion detected on ce_branch11",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "congestion active on ce_branch11 across buckets 5-8 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=62.2s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch11:ce_branch11",
+      "ce_branch11:ce_branch11-ce_hub1",
+      "ce_branch11:ce_branch11-ce_hub2",
+      "ce_branch11:ce_branch11-ce_hub3",
+      "ce_branch11:ce_branch11-ce_hub4",
+      "ce_branch11:ce_branch11-ce_hub5",
+      "ce_branch11:ce_branch11-ce_hub6",
+      "ce_branch11:eth1"
+    ],
+    "rootCauseHypotheses": [
+      "Sustained traffic surge exceeding provisioned tunnel bandwidth",
+      "Possible mis-provisioned QoS class letting best-effort traffic starve VOICE/CORP"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check tunnel utilization",
+        "detail": "Compare sdwan_tunnel_loss_pct/latency_ms against the VRF's QoS class share."
+      },
+      {
+        "title": "Rebalance or upsize",
+        "detail": "Consider raising the CE uplink rate or re-weighting HTB classes."
+      }
+    ],
+    "startBucket": 5,
+    "impactBucket": 8,
+    "endBucket": 8
+  },
+  {
+    "id": "inc-rr_failure-pe2-48ec1641",
+    "status": "unknown",
+    "faultType": "rr_failure",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "pe2"
+    ],
+    "startedAt": "2026-07-26T02:22:00Z",
+    "impactAt": "2026-07-26T02:22:30Z",
+    "endedAt": "2026-07-26T02:22:30Z",
+    "summary": "rr failure detected on pe2",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "rr_failure active on pe2 across buckets 5-6 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=3.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "pe2:CORP",
+      "pe2:GUEST",
+      "pe2:VOICE",
+      "pe2:eth0",
+      "pe2:eth1",
+      "pe2:eth2",
+      "pe2:eth3",
+      "pe2:eth4",
+      "pe2:eth5",
+      "pe2:eth6",
+      "pe2:eth7",
+      "pe2:eth8"
+    ],
+    "rootCauseHypotheses": [
+      "Route-reflector (pe1/pe2) session loss collapsing iBGP for its clients",
+      "RR process restart or control-plane resource exhaustion"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check RR reachability",
+        "detail": "Verify pe1/pe2 loopback reachability from clients."
+      },
+      {
+        "title": "Fail over RR role",
+        "detail": "If one RR is down, confirm the other RR is still serving all clients."
+      }
+    ],
+    "startBucket": 5,
+    "impactBucket": 6,
+    "endBucket": 6
+  },
+  {
+    "id": "inc-node_failure-ce_branch23-12ba741a",
+    "status": "unknown",
+    "faultType": "node_failure",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch23"
+    ],
+    "startedAt": "2026-07-26T02:22:30Z",
+    "impactAt": "2026-07-26T02:22:30Z",
+    "endedAt": "2026-07-26T02:22:30Z",
+    "summary": "node failure detected on ce_branch23",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "node_failure active on ce_branch23 across buckets 6-6 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=1.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch23:ce_branch23",
+      "ce_branch23:ce_branch23-ce_hub1",
+      "ce_branch23:ce_branch23-ce_hub2",
+      "ce_branch23:ce_branch23-ce_hub3",
+      "ce_branch23:ce_branch23-ce_hub4",
+      "ce_branch23:ce_branch23-ce_hub5",
+      "ce_branch23:ce_branch23-ce_hub6",
+      "ce_branch23:eth0",
+      "ce_branch23:eth1",
+      "ce_branch23:eth2",
+      "ce_branch23:eth3",
+      "ce_branch23:eth4"
+    ],
+    "rootCauseHypotheses": [
+      "bgpd or the device process crashed and is awaiting watchfrr respawn",
+      "Hard device failure on the affected node"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Confirm process state",
+        "detail": "Check whether bgpd/watchfrr is respawning the failed process."
+      },
+      {
+        "title": "Escalate if hard down",
+        "detail": "If the node stays unreachable past the respawn window, treat as hardware failure."
+      }
+    ],
+    "startBucket": 6,
+    "impactBucket": 6,
+    "endBucket": 6
+  },
+  {
+    "id": "inc-rr_failure-pe1-afe01976",
+    "status": "unknown",
+    "faultType": "rr_failure",
+    "severity": "medium",
+    "source": "ground_truth",
+    "deviceIds": [
+      "pe1"
+    ],
+    "startedAt": "2026-07-26T02:23:30Z",
+    "impactAt": "2026-07-26T02:24:00Z",
+    "endedAt": "2026-07-26T02:24:00Z",
+    "summary": "rr failure detected on pe1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "rr_failure active on pe1 across buckets 8-9 (severity medium)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=3.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "pe1:CORP",
+      "pe1:GUEST",
+      "pe1:VOICE",
+      "pe1:eth0",
+      "pe1:eth1",
+      "pe1:eth2",
+      "pe1:eth3",
+      "pe1:eth4",
+      "pe1:eth5",
+      "pe1:eth6",
+      "pe1:eth7",
+      "pe1:eth8"
+    ],
+    "rootCauseHypotheses": [
+      "Route-reflector (pe1/pe2) session loss collapsing iBGP for its clients",
+      "RR process restart or control-plane resource exhaustion"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check RR reachability",
+        "detail": "Verify pe1/pe2 loopback reachability from clients."
+      },
+      {
+        "title": "Fail over RR role",
+        "detail": "If one RR is down, confirm the other RR is still serving all clients."
+      }
+    ],
+    "startBucket": 8,
+    "impactBucket": 9,
+    "endBucket": 9
+  },
+  {
+    "id": "inc-mpls_underlay_failure-p10-9d0b0ffc",
+    "status": "unknown",
+    "faultType": "mpls_underlay_failure",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "p10"
+    ],
+    "startedAt": "2026-07-26T02:24:00Z",
+    "impactAt": "2026-07-26T02:24:30Z",
+    "endedAt": "2026-07-26T02:24:30Z",
+    "summary": "mpls underlay failure detected on p10",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "mpls_underlay_failure active on p10 across buckets 9-10 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=2.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "p10:eth0",
+      "p10:eth1",
+      "p10:eth2",
+      "p10:eth3",
+      "p10:eth4",
+      "p10:eth5",
+      "p10:eth6",
+      "p10:lo",
+      "p10:p10"
+    ],
+    "rootCauseHypotheses": [
+      "LDP/label-switched path failure in the MPLS underlay",
+      "Underlay OSPF instability breaking label bindings"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check LDP/OSPF underlay",
+        "detail": "Confirm label bindings re-establish once OSPF converges."
+      },
+      {
+        "title": "Verify MPLS forwarding",
+        "detail": "Confirm LSPs are back before declaring resolved."
+      }
+    ],
+    "startBucket": 9,
+    "impactBucket": 10,
+    "endBucket": 10
+  },
+  {
+    "id": "inc-p_node_failure-p9-44844378",
+    "status": "unknown",
+    "faultType": "p_node_failure",
+    "severity": "medium",
+    "source": "ground_truth",
+    "deviceIds": [
+      "p9"
+    ],
+    "startedAt": "2026-07-26T02:25:30Z",
+    "impactAt": "2026-07-26T02:26:00Z",
+    "endedAt": "2026-07-26T02:26:00Z",
+    "summary": "p node failure detected on p9",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "p_node_failure active on p9 across buckets 12-13 (severity medium)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=2.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "p9:eth0",
+      "p9:eth1",
+      "p9:eth2",
+      "p9:eth3",
+      "p9:eth4",
+      "p9:eth5",
+      "p9:eth6",
+      "p9:lo",
+      "p9:p9"
+    ],
+    "rootCauseHypotheses": [
+      "Core P router failure removing LDP/OSPF transit capacity",
+      "Provider-core hardware or process fault"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Verify core redundancy",
+        "detail": "Confirm alternate P-P/P-PE paths are carrying rerouted traffic."
+      },
+      {
+        "title": "Escalate to hardware",
+        "detail": "Core node failures typically need on-site intervention."
+      }
+    ],
+    "startBucket": 12,
+    "impactBucket": 13,
+    "endBucket": 13
+  },
+  {
+    "id": "inc-asymmetric_loss-ce_branch20-281ae4a5",
+    "status": "unknown",
+    "faultType": "asymmetric_loss",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch20"
+    ],
+    "startedAt": "2026-07-26T02:26:30Z",
+    "impactAt": "2026-07-26T02:27:00Z",
+    "endedAt": "2026-07-26T02:27:00Z",
+    "summary": "asymmetric loss detected on ce_branch20",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "asymmetric_loss active on ce_branch20 across buckets 14-15 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=2.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch20:ce_branch20",
+      "ce_branch20:ce_branch20-ce_hub1",
+      "ce_branch20:ce_branch20-ce_hub2",
+      "ce_branch20:ce_branch20-ce_hub3",
+      "ce_branch20:ce_branch20-ce_hub4",
+      "ce_branch20:ce_branch20-ce_hub5",
+      "ce_branch20:ce_branch20-ce_hub6",
+      "ce_branch20:eth1"
+    ],
+    "rootCauseHypotheses": [
+      "Loss concentrated in one direction of the tunnel, suggesting a one-way path issue",
+      "Possible asymmetric routing or a half-duplex/negotiation mismatch upstream"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Isolate direction",
+        "detail": "Compare inbound vs outbound loss to localize which leg is impaired."
+      },
+      {
+        "title": "Check upstream link",
+        "detail": "Inspect the egress interface counters on the affected direction."
+      }
+    ],
+    "startBucket": 14,
+    "impactBucket": 15,
+    "endBucket": 15
+  },
+  {
+    "id": "inc-policy_drift-ce_branch15-f56d2a8c",
+    "status": "unknown",
+    "faultType": "policy_drift",
+    "severity": "medium",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch15"
+    ],
+    "startedAt": "2026-07-26T02:27:30Z",
+    "impactAt": "2026-07-26T02:28:00Z",
+    "endedAt": "2026-07-26T02:28:00Z",
+    "summary": "policy drift detected on ce_branch15",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "policy_drift active on ce_branch15 across buckets 16-17 (severity medium)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=3.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch15:ce_branch15",
+      "ce_branch15:ce_branch15-ce_hub1",
+      "ce_branch15:ce_branch15-ce_hub2",
+      "ce_branch15:ce_branch15-ce_hub3",
+      "ce_branch15:ce_branch15-ce_hub4",
+      "ce_branch15:ce_branch15-ce_hub5",
+      "ce_branch15:ce_branch15-ce_hub6",
+      "ce_branch15:eth0",
+      "ce_branch15:eth1",
+      "ce_branch15:eth2",
+      "ce_branch15:eth3",
+      "ce_branch15:eth4"
+    ],
+    "rootCauseHypotheses": [
+      "Deployed QoS/routing policy diverged from the intended controller policy",
+      "Manual or partial config change not reconciled with the controller"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Diff deployed vs intended policy",
+        "detail": "Compare the device's active config against the controller's intended state."
+      },
+      {
+        "title": "Re-push controller policy",
+        "detail": "Force reconciliation once the drift is confirmed."
+      }
+    ],
+    "startBucket": 16,
+    "impactBucket": 17,
+    "endBucket": 17
+  },
+  {
+    "id": "inc-rr_failure-pe1-110907b9",
+    "status": "unknown",
+    "faultType": "rr_failure",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "pe1"
+    ],
+    "startedAt": "2026-07-26T02:29:30Z",
+    "impactAt": "2026-07-26T02:30:00Z",
+    "endedAt": "2026-07-26T02:30:00Z",
+    "summary": "rr failure detected on pe1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "rr_failure active on pe1 across buckets 20-21 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=3.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "pe1:CORP",
+      "pe1:GUEST",
+      "pe1:VOICE",
+      "pe1:eth0",
+      "pe1:eth1",
+      "pe1:eth2",
+      "pe1:eth3",
+      "pe1:eth4",
+      "pe1:eth5",
+      "pe1:eth6",
+      "pe1:eth7",
+      "pe1:eth8"
+    ],
+    "rootCauseHypotheses": [
+      "Route-reflector (pe1/pe2) session loss collapsing iBGP for its clients",
+      "RR process restart or control-plane resource exhaustion"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check RR reachability",
+        "detail": "Verify pe1/pe2 loopback reachability from clients."
+      },
+      {
+        "title": "Fail over RR role",
+        "detail": "If one RR is down, confirm the other RR is still serving all clients."
+      }
+    ],
+    "startBucket": 20,
+    "impactBucket": 21,
+    "endBucket": 21
+  },
+  {
+    "id": "inc-tunnel_degrade-ce_branch8-60e4355c",
+    "status": "unknown",
+    "faultType": "tunnel_degrade",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch8"
+    ],
+    "startedAt": "2026-07-26T02:30:30Z",
+    "impactAt": "2026-07-26T02:32:00Z",
+    "endedAt": "2026-07-26T02:32:00Z",
+    "summary": "tunnel degrade detected on ce_branch8",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "tunnel_degrade active on ce_branch8 across buckets 22-25 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=65.2s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch8:ce_branch8",
+      "ce_branch8:ce_branch8-ce_hub1",
+      "ce_branch8:ce_branch8-ce_hub2",
+      "ce_branch8:ce_branch8-ce_hub3",
+      "ce_branch8:ce_branch8-ce_hub4",
+      "ce_branch8:ce_branch8-ce_hub5",
+      "ce_branch8:ce_branch8-ce_hub6",
+      "ce_branch8:eth1"
+    ],
+    "rootCauseHypotheses": [
+      "WireGuard tunnel path experiencing steady latency/jitter buildup",
+      "Underlying transport congestion or a marginal link on the tunnel's egress path"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Inspect wg0 path",
+        "detail": "Check tunnel_latency_ms/jitter_ms trend and rekey count for the affected tunnel."
+      },
+      {
+        "title": "Fail over to alternate hub",
+        "detail": "If a second hub is reachable, prefer it while the primary path recovers."
+      }
+    ],
+    "startBucket": 22,
+    "impactBucket": 25,
+    "endBucket": 25
+  },
+  {
+    "id": "inc-asymmetric_loss-ce_branch7-e42ce207",
+    "status": "unknown",
+    "faultType": "asymmetric_loss",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch7"
+    ],
+    "startedAt": "2026-07-26T02:31:00Z",
+    "impactAt": "2026-07-26T02:32:00Z",
+    "endedAt": "2026-07-26T02:32:00Z",
+    "summary": "asymmetric loss detected on ce_branch7",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "asymmetric_loss active on ce_branch7 across buckets 23-25 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=42.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch7:ce_branch7",
+      "ce_branch7:ce_branch7-ce_hub1",
+      "ce_branch7:ce_branch7-ce_hub2",
+      "ce_branch7:ce_branch7-ce_hub3",
+      "ce_branch7:ce_branch7-ce_hub4",
+      "ce_branch7:ce_branch7-ce_hub5",
+      "ce_branch7:ce_branch7-ce_hub6",
+      "ce_branch7:eth1"
+    ],
+    "rootCauseHypotheses": [
+      "Loss concentrated in one direction of the tunnel, suggesting a one-way path issue",
+      "Possible asymmetric routing or a half-duplex/negotiation mismatch upstream"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Isolate direction",
+        "detail": "Compare inbound vs outbound loss to localize which leg is impaired."
+      },
+      {
+        "title": "Check upstream link",
+        "detail": "Inspect the egress interface counters on the affected direction."
+      }
+    ],
+    "startBucket": 23,
+    "impactBucket": 25,
+    "endBucket": 25
+  },
+  {
+    "id": "inc-mpls_underlay_failure-p19-f54cba8c",
+    "status": "unknown",
+    "faultType": "mpls_underlay_failure",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "p19"
+    ],
+    "startedAt": "2026-07-26T02:31:30Z",
+    "impactAt": "2026-07-26T02:32:00Z",
+    "endedAt": "2026-07-26T02:32:00Z",
+    "summary": "mpls underlay failure detected on p19",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "mpls_underlay_failure active on p19 across buckets 24-25 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=2.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "p19:eth0",
+      "p19:eth1",
+      "p19:eth2",
+      "p19:eth3",
+      "p19:eth4",
+      "p19:eth5",
+      "p19:lo",
+      "p19:p19"
+    ],
+    "rootCauseHypotheses": [
+      "LDP/label-switched path failure in the MPLS underlay",
+      "Underlay OSPF instability breaking label bindings"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check LDP/OSPF underlay",
+        "detail": "Confirm label bindings re-establish once OSPF converges."
+      },
+      {
+        "title": "Verify MPLS forwarding",
+        "detail": "Confirm LSPs are back before declaring resolved."
+      }
+    ],
+    "startBucket": 24,
+    "impactBucket": 25,
+    "endBucket": 25
+  },
+  {
+    "id": "inc-ospf_area_flap-p13-f5dca984",
+    "status": "unknown",
+    "faultType": "ospf_area_flap",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "p13"
+    ],
+    "startedAt": "2026-07-26T02:31:30Z",
+    "impactAt": "2026-07-26T02:32:00Z",
+    "endedAt": "2026-07-26T02:32:00Z",
+    "summary": "ospf area flap detected on p13",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "ospf_area_flap active on p13 across buckets 24-25 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=2.0s ahead of impact",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Concurrent episodes",
+        "detail": "up to 2 overlapping fault episodes observed on affected rows",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "p13:eth4",
+      "p13:p13"
+    ],
+    "rootCauseHypotheses": [
+      "OSPF adjacency flapping within a POP area, forcing repeated SPF runs",
+      "MTU mismatch or unstable link triggering neighbor state churn"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check adjacency stability",
+        "detail": "Look for repeated neighbor state transitions in the affected area."
+      },
+      {
+        "title": "Verify link quality",
+        "detail": "Rule out a marginal physical link or MTU mismatch."
+      }
+    ],
+    "startBucket": 24,
+    "impactBucket": 25,
+    "endBucket": 25
+  },
+  {
+    "id": "inc-gray_failure-p13-b2b78192",
+    "status": "unknown",
+    "faultType": "gray_failure",
+    "severity": "medium",
+    "source": "ground_truth",
+    "deviceIds": [
+      "p13"
+    ],
+    "startedAt": "2026-07-26T02:32:30Z",
+    "impactAt": "2026-07-26T02:33:00Z",
+    "endedAt": "2026-07-26T02:33:30Z",
+    "summary": "gray failure detected on p13",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "gray_failure active on p13 across buckets 26-28 (severity medium)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=5.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "p13:eth4",
+      "p13:p13"
+    ],
+    "rootCauseHypotheses": [
+      "Device reports healthy but is silently dropping/degrading a subset of traffic",
+      "Partial hardware fault not surfaced by standard health checks"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Cross-check health vs traffic",
+        "detail": "Compare reported health against actual forwarded traffic/errors."
+      },
+      {
+        "title": "Consider proactive reboot",
+        "detail": "Gray failures often need a hard reset to clear."
+      }
+    ],
+    "startBucket": 26,
+    "impactBucket": 27,
+    "endBucket": 28
+  },
+  {
+    "id": "inc-bgp_cascade-ce_branch10-0ab51191",
+    "status": "unknown",
+    "faultType": "bgp_cascade",
+    "severity": "medium",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch10"
+    ],
+    "startedAt": "2026-07-26T02:45:30Z",
+    "impactAt": "2026-07-26T02:48:00Z",
+    "endedAt": "2026-07-26T02:48:00Z",
+    "summary": "bgp cascade detected on ce_branch10",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "bgp_cascade active on ce_branch10 across buckets 52-57 (severity medium)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=307.9s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch10:ce_branch10",
+      "ce_branch10:eth0",
+      "ce_branch10:eth1",
+      "ce_branch10:eth2",
+      "ce_branch10:eth3",
+      "ce_branch10:eth4",
+      "ce_branch10:lo",
+      "ce_branch10:vrf_CORP",
+      "ce_branch10:vrf_VOICE",
+      "ce_branch10:wg0"
+    ],
+    "rootCauseHypotheses": [
+      "Initial BGP event cascading into dependent sessions/prefixes",
+      "Downstream churn triggered by an upstream adjacency flap"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Trace the origin",
+        "detail": "Identify the first device in the ADJCHANGE sequence."
+      },
+      {
+        "title": "Contain downstream churn",
+        "detail": "Watch dependent VRF sessions for secondary flaps."
+      }
+    ],
+    "startBucket": 52,
+    "impactBucket": 57,
+    "endBucket": 57
+  },
+  {
+    "id": "inc-bgp_flap-ce_branch21-63ec8431-casc",
+    "status": "unknown",
+    "faultType": "bgp_flap",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch21"
+    ],
+    "startedAt": "2026-07-26T02:49:30Z",
+    "impactAt": "2026-07-26T03:00:30Z",
+    "endedAt": "2026-07-26T03:00:30Z",
+    "summary": "bgp flap detected on ce_branch21",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "bgp_flap active on ce_branch21 across buckets 60-82 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=195.8s ahead of impact",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Concurrent episodes",
+        "detail": "up to 2 overlapping fault episodes observed on affected rows",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch21:ce_branch21",
+      "ce_branch21:eth0",
+      "ce_branch21:eth1",
+      "ce_branch21:eth2",
+      "ce_branch21:eth3",
+      "ce_branch21:eth4",
+      "ce_branch21:lo",
+      "ce_branch21:vrf_CORP",
+      "ce_branch21:vrf_VOICE"
+    ],
+    "rootCauseHypotheses": [
+      "Repeated BGP session churn (clear bgp / neighbor reset loop)",
+      "Flapping physical/logical link causing adjacency bounce"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check neighbor state",
+        "detail": "Run `show bgp summary` on the device; confirm this is a flap, not a process gap."
+      },
+      {
+        "title": "Dampen if repeated",
+        "detail": "Consider BGP dampening if the flap recurs beyond the SLA window."
+      }
+    ],
+    "startBucket": 60,
+    "impactBucket": 82,
+    "endBucket": 82
+  },
+  {
+    "id": "inc-brownout-ce_branch1-d73041df",
+    "status": "unknown",
+    "faultType": "brownout",
+    "severity": "medium",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch1"
+    ],
+    "startedAt": "2026-07-26T02:53:30Z",
+    "impactAt": "2026-07-26T02:56:00Z",
+    "endedAt": "2026-07-26T02:56:00Z",
+    "summary": "brownout detected on ce_branch1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "brownout active on ce_branch1 across buckets 68-73 (severity medium)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=482.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch1:ce_branch1",
+      "ce_branch1:ce_branch1-ce_hub1",
+      "ce_branch1:ce_branch1-ce_hub2",
+      "ce_branch1:ce_branch1-ce_hub3",
+      "ce_branch1:ce_branch1-ce_hub4",
+      "ce_branch1:ce_branch1-ce_hub5",
+      "ce_branch1:ce_branch1-ce_hub6",
+      "ce_branch1:eth0",
+      "ce_branch1:eth1",
+      "ce_branch1:eth2",
+      "ce_branch1:eth3",
+      "ce_branch1:eth4"
+    ],
+    "rootCauseHypotheses": [
+      "Slow, sustained degradation short of a hard outage",
+      "Gradual resource exhaustion (bandwidth, queue, or CPU) on the affected site"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Correlate with load",
+        "detail": "Check cpu_pct/mem_pct and queue backlog alongside the tunnel metrics."
+      },
+      {
+        "title": "Watch for escalation",
+        "detail": "Brownouts can precede a hard outage -- confirm trend direction."
+      }
+    ],
+    "startBucket": 68,
+    "impactBucket": 73,
+    "endBucket": 73
+  },
+  {
+    "id": "inc-controller_drift-ce_branch10-751a6d91",
+    "status": "unknown",
+    "faultType": "controller_drift",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch10"
+    ],
+    "startedAt": "2026-07-26T02:57:30Z",
+    "impactAt": "2026-07-26T03:00:00Z",
+    "endedAt": "2026-07-26T03:00:00Z",
+    "summary": "controller drift detected on ce_branch10",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "controller_drift active on ce_branch10 across buckets 76-81 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=280.4s ahead of impact",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Concurrent episodes",
+        "detail": "up to 2 overlapping fault episodes observed on affected rows",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch10:ce_branch10",
+      "ce_branch10:ce_branch10-ce_hub1",
+      "ce_branch10:ce_branch10-ce_hub2",
+      "ce_branch10:ce_branch10-ce_hub3",
+      "ce_branch10:ce_branch10-ce_hub4",
+      "ce_branch10:ce_branch10-ce_hub5",
+      "ce_branch10:ce_branch10-ce_hub6"
+    ],
+    "rootCauseHypotheses": [
+      "SD-WAN controller state diverged from device-reported state",
+      "Stale controller policy push not yet reconciled with the data plane"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Reconcile controller state",
+        "detail": "Force a controller policy re-push to the drifted device."
+      },
+      {
+        "title": "Audit recent changes",
+        "detail": "Check for manual config changes bypassing the controller."
+      }
+    ],
+    "startBucket": 76,
+    "impactBucket": 81,
+    "endBucket": 81
+  },
+  {
+    "id": "inc-core_congestion-ce_branch13-6e7f782f",
+    "status": "unknown",
+    "faultType": "core_congestion",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch13"
+    ],
+    "startedAt": "2026-07-26T03:01:30Z",
+    "impactAt": "2026-07-26T03:04:00Z",
+    "endedAt": "2026-07-26T03:04:00Z",
+    "summary": "core congestion detected on ce_branch13",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "core_congestion active on ce_branch13 across buckets 84-89 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=218.7s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch13:ce_branch13",
+      "ce_branch13:ce_branch13-ce_hub1",
+      "ce_branch13:ce_branch13-ce_hub2",
+      "ce_branch13:ce_branch13-ce_hub3",
+      "ce_branch13:ce_branch13-ce_hub4",
+      "ce_branch13:ce_branch13-ce_hub5",
+      "ce_branch13:ce_branch13-ce_hub6",
+      "ce_branch13:eth0",
+      "ce_branch13:eth1",
+      "ce_branch13:eth2",
+      "ce_branch13:eth3",
+      "ce_branch13:eth4"
+    ],
+    "rootCauseHypotheses": [
+      "Provider-core link(s) saturated by inter-POP transit load",
+      "Traffic-engineering imbalance concentrating load on one core path"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check core link utilization",
+        "detail": "Identify the saturated inter-POP link(s)."
+      },
+      {
+        "title": "Traffic-engineer around it",
+        "detail": "Shift traffic to an alternate core path if available."
+      }
+    ],
+    "startBucket": 84,
+    "impactBucket": 89,
+    "endBucket": 89
+  },
+  {
+    "id": "inc-core_partition-ce_branch1-4568d363",
+    "status": "unknown",
+    "faultType": "core_partition",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch1"
+    ],
+    "startedAt": "2026-07-26T03:05:30Z",
+    "impactAt": "2026-07-26T03:08:00Z",
+    "endedAt": "2026-07-26T03:08:00Z",
+    "summary": "core partition detected on ce_branch1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "core_partition active on ce_branch1 across buckets 92-97 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=635.5s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch1:ce_branch1",
+      "ce_branch1:eth0",
+      "ce_branch1:eth1",
+      "ce_branch1:eth2",
+      "ce_branch1:eth3",
+      "ce_branch1:eth4",
+      "ce_branch1:lo",
+      "ce_branch1:vrf_CORP",
+      "ce_branch1:vrf_VOICE"
+    ],
+    "rootCauseHypotheses": [
+      "Provider core split into two reachability partitions",
+      "Multiple concurrent core link failures exceeding redundancy"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Map the partition boundary",
+        "detail": "Determine which POPs are on which side."
+      },
+      {
+        "title": "Restore redundant paths",
+        "detail": "Bring up any remaining spare core capacity."
+      }
+    ],
+    "startBucket": 92,
+    "impactBucket": 97,
+    "endBucket": 97
+  },
+  {
+    "id": "inc-hub_spoke_congest-ce_branch10-616f80c1",
+    "status": "unknown",
+    "faultType": "hub_spoke_congest",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch10"
+    ],
+    "startedAt": "2026-07-26T03:09:30Z",
+    "impactAt": "2026-07-26T03:12:00Z",
+    "endedAt": "2026-07-26T03:12:00Z",
+    "summary": "hub spoke congest detected on ce_branch10",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "hub_spoke_congest active on ce_branch10 across buckets 100-105 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=339.6s ahead of impact",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Concurrent episodes",
+        "detail": "up to 2 overlapping fault episodes observed on affected rows",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch10:ce_branch10",
+      "ce_branch10:ce_branch10-ce_hub1",
+      "ce_branch10:ce_branch10-ce_hub2",
+      "ce_branch10:ce_branch10-ce_hub3",
+      "ce_branch10:ce_branch10-ce_hub4",
+      "ce_branch10:ce_branch10-ce_hub5",
+      "ce_branch10:ce_branch10-ce_hub6",
+      "ce_branch10:eth0",
+      "ce_branch10:eth1",
+      "ce_branch10:eth2",
+      "ce_branch10:eth3",
+      "ce_branch10:eth4"
+    ],
+    "rootCauseHypotheses": [
+      "WireGuard hub concentrator saturated by aggregate spoke traffic",
+      "Hub uplink undersized for current spoke fan-in"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check hub aggregate load",
+        "detail": "Sum spoke tunnel throughput against the hub's uplink capacity."
+      },
+      {
+        "title": "Redistribute spokes",
+        "detail": "Consider moving some spokes to a less-loaded hub."
+      }
+    ],
+    "startBucket": 100,
+    "impactBucket": 105,
+    "endBucket": 105
+  },
+  {
+    "id": "inc-ldp_session_flap-ce_branch1-84f50d24",
+    "status": "unknown",
+    "faultType": "ldp_session_flap",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch1"
+    ],
+    "startedAt": "2026-07-26T03:13:30Z",
+    "impactAt": "2026-07-26T03:16:00Z",
+    "endedAt": "2026-07-26T03:16:00Z",
+    "summary": "ldp session flap detected on ce_branch1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "ldp_session_flap active on ce_branch1 across buckets 108-113 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=187.3s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch1:ce_branch1",
+      "ce_branch1:eth0",
+      "ce_branch1:eth1",
+      "ce_branch1:eth2",
+      "ce_branch1:eth3",
+      "ce_branch1:eth4",
+      "ce_branch1:lo",
+      "ce_branch1:vrf_CORP",
+      "ce_branch1:vrf_VOICE"
+    ],
+    "rootCauseHypotheses": [
+      "LDP session instability disrupting label bindings on a P-P or P-PE link",
+      "Underlying OSPF instability cascading into LDP"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check LDP neighbor state",
+        "detail": "Correlate with the underlying OSPF adjacency for the same link."
+      },
+      {
+        "title": "Verify label bindings",
+        "detail": "Confirm LSPs re-establish once the session stabilizes."
+      }
+    ],
+    "startBucket": 108,
+    "impactBucket": 113,
+    "endBucket": 113
+  },
+  {
+    "id": "inc-path_asymmetry-ce_branch1-0d76815a",
+    "status": "unknown",
+    "faultType": "path_asymmetry",
+    "severity": "high",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch1"
+    ],
+    "startedAt": "2026-07-26T03:17:30Z",
+    "impactAt": "2026-07-26T03:20:00Z",
+    "endedAt": "2026-07-26T03:20:00Z",
+    "summary": "path asymmetry detected on ce_branch1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "path_asymmetry active on ce_branch1 across buckets 116-121 (severity high)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=470.0s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch1:ce_branch1",
+      "ce_branch1:ce_branch1-ce_hub1",
+      "ce_branch1:ce_branch1-ce_hub2",
+      "ce_branch1:ce_branch1-ce_hub3",
+      "ce_branch1:ce_branch1-ce_hub4",
+      "ce_branch1:ce_branch1-ce_hub5",
+      "ce_branch1:ce_branch1-ce_hub6"
+    ],
+    "rootCauseHypotheses": [
+      "Forward and return paths diverging across the core, producing inconsistent latency",
+      "ECMP hashing sending flows over paths with different costs"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Compare forward/return paths",
+        "detail": "Trace both directions to find the diverging hop."
+      },
+      {
+        "title": "Check ECMP hashing",
+        "detail": "Confirm ECMP isn't sending return traffic over a longer path."
+      }
+    ],
+    "startBucket": 116,
+    "impactBucket": 121,
+    "endBucket": 121
+  },
+  {
+    "id": "inc-pop_isolation-ce_branch1-1a88e2e2",
+    "status": "unknown",
+    "faultType": "pop_isolation",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch1"
+    ],
+    "startedAt": "2026-07-26T03:21:30Z",
+    "impactAt": "2026-07-26T03:31:00Z",
+    "endedAt": "2026-07-26T03:31:00Z",
+    "summary": "pop isolation detected on ce_branch1",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "pop_isolation active on ce_branch1 across buckets 124-143 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=590.3s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch1:ce_branch1",
+      "ce_branch1:eth0",
+      "ce_branch1:eth1",
+      "ce_branch1:eth2",
+      "ce_branch1:eth3",
+      "ce_branch1:eth4",
+      "ce_branch1:lo",
+      "ce_branch1:vrf_CORP",
+      "ce_branch1:vrf_VOICE"
+    ],
+    "rootCauseHypotheses": [
+      "A POP's inter-POP backbone links all down, isolating it from the rest of the core",
+      "Cascading SRLG/core failures leaving one POP unreachable"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Check all inter-POP links for that POP",
+        "detail": "Confirm whether it's a full or partial isolation."
+      },
+      {
+        "title": "Prioritize restoration",
+        "detail": "POP isolation affects every site behind it -- treat as highest priority."
+      }
+    ],
+    "startBucket": 124,
+    "impactBucket": 143,
+    "endBucket": 143
+  },
+  {
+    "id": "inc-srlg_cut-ce_branch10-5cfca05c-casc",
+    "status": "unknown",
+    "faultType": "srlg_cut",
+    "severity": "low",
+    "source": "ground_truth",
+    "deviceIds": [
+      "ce_branch10"
+    ],
+    "startedAt": "2026-07-26T03:32:30Z",
+    "impactAt": "2026-07-26T03:35:00Z",
+    "endedAt": "2026-07-26T03:35:00Z",
+    "summary": "srlg cut detected on ce_branch10",
+    "evidence": [
+      {
+        "label": "Fault window",
+        "detail": "srlg_cut active on ce_branch10 across buckets 146-151 (severity low)",
+        "source": "ground_truth"
+      },
+      {
+        "label": "Lead time",
+        "detail": "labelled lead_time_s=476.4s ahead of impact",
+        "source": "ground_truth"
+      }
+    ],
+    "affectedScope": [
+      "ce_branch10:ce_branch10",
+      "ce_branch10:eth0",
+      "ce_branch10:eth1",
+      "ce_branch10:eth2",
+      "ce_branch10:eth3",
+      "ce_branch10:eth4",
+      "ce_branch10:lo",
+      "ce_branch10:vrf_CORP",
+      "ce_branch10:vrf_VOICE",
+      "ce_branch10:wg0"
+    ],
+    "rootCauseHypotheses": [
+      "Shared-risk link group (fiber conduit) cut taking down all its member links at once",
+      "Simultaneous loss of redundant inter-POP links sharing one physical conduit"
+    ],
+    "recommendedActions": [
+      {
+        "title": "Identify the shared conduit",
+        "detail": "Check which SRLG group's links all dropped together."
+      },
+      {
+        "title": "Confirm diverse restoration",
+        "detail": "Verify traffic rerouted over links outside the cut conduit."
+      }
+    ],
+    "startBucket": 146,
+    "impactBucket": 151,
+    "endBucket": 151
+  }
+]

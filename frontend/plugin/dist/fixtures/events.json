@@ -1,0 +1,266 @@
+[
+  {
+    "tsMs": 1785032430000,
+    "device": "ce_branch18",
+    "app": "sdwand",
+    "severity": "low",
+    "line": "%QOS-4-CONGEST: queue backlog exceeding threshold on egress interface",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032490000,
+    "device": "ce_branch15",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%DAEMON-3-DOWN: bgpd process exited, watchfrr restarting",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032490000,
+    "device": "ce_branch15",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%DAEMON-5-UP: bgpd process respawned by watchfrr",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032490000,
+    "device": "pe1",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%BGP-5-ADJCHANGE: neighbor (route-reflector) Down (BGP Notification received)",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032520000,
+    "device": "ce_branch11",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%QOS-4-CONGEST: queue backlog exceeding threshold on egress interface",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032520000,
+    "device": "pe2",
+    "app": "bgpd",
+    "severity": "low",
+    "line": "%BGP-5-ADJCHANGE: neighbor (route-reflector) Down (BGP Notification received)",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032550000,
+    "device": "ce_branch23",
+    "app": "bgpd",
+    "severity": "low",
+    "line": "%DAEMON-3-DOWN: bgpd process exited, watchfrr restarting",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032550000,
+    "device": "ce_branch23",
+    "app": "bgpd",
+    "severity": "low",
+    "line": "%DAEMON-5-UP: bgpd process respawned by watchfrr",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032610000,
+    "device": "pe1",
+    "app": "bgpd",
+    "severity": "medium",
+    "line": "%BGP-5-ADJCHANGE: neighbor (route-reflector) Down (BGP Notification received)",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032640000,
+    "device": "p10",
+    "app": "sdwand",
+    "severity": "low",
+    "line": "%LDP-3-SESSION: session Down, label bindings withdrawn",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032730000,
+    "device": "p9",
+    "app": "bgpd",
+    "severity": "medium",
+    "line": "%SYS-3-NODEDOWN: core node unreachable, LDP/OSPF sessions torn down",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032790000,
+    "device": "ce_branch20",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%SDWAN-4-TUNNEL: asymmetric loss detected between tunnel endpoints",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032850000,
+    "device": "ce_branch15",
+    "app": "sdwand",
+    "severity": "medium",
+    "line": "%SDWAN-4-DRIFT: deployed QoS/routing policy diverges from controller intent",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785032970000,
+    "device": "pe1",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%BGP-5-ADJCHANGE: neighbor (route-reflector) Down (BGP Notification received)",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033030000,
+    "device": "ce_branch8",
+    "app": "sdwand",
+    "severity": "low",
+    "line": "%SDWAN-4-TUNNEL: tunnel_latency_ms trending upward past SLA threshold",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033060000,
+    "device": "ce_branch7",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%SDWAN-4-TUNNEL: asymmetric loss detected between tunnel endpoints",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033090000,
+    "device": "p13",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%OSPF-5-ADJCHG: Neighbor Down (dead timer expired)",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033090000,
+    "device": "p19",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%LDP-3-SESSION: session Down, label bindings withdrawn",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033120000,
+    "device": "p13",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%OSPF-5-ADJCHG: Neighbor Up (full adjacency)",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033150000,
+    "device": "p13",
+    "app": "bgpd",
+    "severity": "medium",
+    "line": "%HEALTH-4-PARTIAL: device reports healthy but traffic loss observed",
+    "source": "ground_truth"
+  },
+  {
+    "tsMs": 1785033930000,
+    "device": "ce_branch10",
+    "app": "bgpd",
+    "severity": "medium",
+    "line": "%BGP-5-ADJCHANGE: neighbor Down (BGP Notification received) -- cascading churn detected",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785034170000,
+    "device": "ce_branch21",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%BGP-5-ADJCHANGE: neighbor Down (BGP Notification received)",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785034200000,
+    "device": "ce_branch21",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%BGP-5-ADJCHANGE: neighbor Up",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785034410000,
+    "device": "ce_branch1",
+    "app": "sdwand",
+    "severity": "medium",
+    "line": "%SDWAN-4-TUNNEL: sustained sub-SLA degradation short of hard failure",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785034650000,
+    "device": "ce_branch10",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%SDWAN-4-DRIFT: controller-reported policy state diverges from device state",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785034890000,
+    "device": "ce_branch13",
+    "app": "sdwand",
+    "severity": "low",
+    "line": "%MPLS-4-CORE: inter-POP core link utilization exceeding threshold",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785035130000,
+    "device": "ce_branch1",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%SYS-3-PARTITION: core reachability partition detected",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785035370000,
+    "device": "ce_branch10",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%SDWAN-4-HUB: hub concentrator uplink saturated by aggregate spoke traffic",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785035610000,
+    "device": "ce_branch1",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%LDP-5-SESSION: session Down (Hold timer expired)",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785035640000,
+    "device": "ce_branch1",
+    "app": "bgpd",
+    "severity": "high",
+    "line": "%LDP-5-SESSION: session Up",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785035850000,
+    "device": "ce_branch1",
+    "app": "sdwand",
+    "severity": "high",
+    "line": "%ROUTE-4-PATH: forward/return path divergence detected across core",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785036090000,
+    "device": "ce_branch1",
+    "app": "sdwand",
+    "severity": "low",
+    "line": "%SYS-3-POPISOLATED: all inter-POP backbone links down for this POP",
+    "source": "simulated"
+  },
+  {
+    "tsMs": 1785036750000,
+    "device": "ce_branch10",
+    "app": "sdwand",
+    "severity": "low",
+    "line": "%SYS-3-LINKDOWN: multiple links down simultaneously (shared conduit)",
+    "source": "simulated"
+  }
+]
