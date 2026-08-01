@@ -137,6 +137,29 @@ describe('appReducer', () => {
     });
   });
 
+  describe('injected faults', () => {
+    it('INJECT_FAULT adds a fault, replacing any prior fault on the same node', () => {
+      let s = appReducer(initialAppState, { type: 'INJECT_FAULT', payload: { node: 'pe1', faultType: 'node_failure' } });
+      expect(s.injectedFaults).toEqual([{ node: 'pe1', faultType: 'node_failure' }]);
+      s = appReducer(s, { type: 'INJECT_FAULT', payload: { node: 'pe1', faultType: 'congestion' } });
+      expect(s.injectedFaults).toEqual([{ node: 'pe1', faultType: 'congestion' }]);
+    });
+
+    it('CLEAR_FAULT removes one node, CLEAR_INJECTED empties all', () => {
+      let s: AppState = {
+        ...initialAppState,
+        injectedFaults: [
+          { node: 'pe1', faultType: 'node_failure' },
+          { node: 'ce_branch2', faultType: 'congestion' },
+        ],
+      };
+      s = appReducer(s, { type: 'CLEAR_FAULT', payload: { node: 'pe1' } });
+      expect(s.injectedFaults).toEqual([{ node: 'ce_branch2', faultType: 'congestion' }]);
+      s = appReducer(s, { type: 'CLEAR_INJECTED' });
+      expect(s.injectedFaults).toEqual([]);
+    });
+  });
+
   describe('absTick (monotonic display clock)', () => {
     it('starts at 0', () => {
       expect(initialAppState.absTick).toBe(0);

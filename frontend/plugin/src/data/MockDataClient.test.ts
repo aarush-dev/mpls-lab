@@ -127,6 +127,29 @@ describe('MockDataClient', () => {
     expect(kinds.has('NodeDownPredicted')).toBe(true);
   });
 
+  it('injected faults force a node red in topology and raise a NodeDown alert', async () => {
+    const client = new MockDataClient();
+    client.setCursor(0);
+    // pe1 is healthy at cursor 0 in the fixture; inject a fault.
+    (client as unknown as { setInjectedFaults: (f: Array<{ node: string; faultType: string }>) => void }).setInjectedFaults([
+      { node: 'pe1', faultType: 'node_failure' },
+    ]);
+
+    const { nodes } = await client.getTopology({});
+    expect(nodes.find((n) => n.id === 'pe1')?.state).toBe('red');
+
+    const alerts = client.getActiveAlerts();
+    const injected = alerts.find((a) => a.node === 'pe1' && a.alertname === 'NodeDown');
+    expect(injected).toBeDefined();
+    expect(injected!.severity).toBe('critical');
+    expect(injected!.summary).toContain('node_failure');
+
+    // Clearing it restores the node.
+    (client as unknown as { setInjectedFaults: (f: Array<{ node: string; faultType: string }>) => void }).setInjectedFaults([]);
+    const after = await client.getTopology({});
+    expect(after.nodes.find((n) => n.id === 'pe1')?.state).not.toBe('red');
+  });
+
   it('rewrites chart timestamps to a monotonic timeline that never rewinds on loop', async () => {
     const client = new MockDataClient();
     const bucketCount = MOCK_BUCKET_META.bucketCount;

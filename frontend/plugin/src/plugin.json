@@ -68,6 +68,14 @@
     },
     {
       "type": "page",
+      "name": "Fault Injection",
+      "path": "/a/%PLUGIN_ID%/inject",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
       "name": "Status",
       "path": "/a/%PLUGIN_ID%/status",
       "role": "Viewer",

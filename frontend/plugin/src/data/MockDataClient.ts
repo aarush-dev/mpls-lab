@@ -378,6 +378,9 @@ export class MockDataClient implements DataClient {
   // events/predictions/incidents gating stays on cursor-based curTsMs() below.
   private absTick = 0;
   private convCounter = 0;
+  // Manually injected faults (node -> faultType). Overlays the replayed node states: an injected
+  // node reads red and fires a NodeDown alert regardless of the cursor. Demo control.
+  private injectedFaults = new Map<string, string>();
 
   /** Called by App.tsx on every demo-clock tick. HttpDataClient will not implement this. */
   setCursor(n: number): void {
@@ -387,6 +390,11 @@ export class MockDataClient implements DataClient {
   /** Monotonic display clock from App.tsx (state.absTick). HttpDataClient will not implement this. */
   setAbsTick(n: number): void {
     this.absTick = Math.max(0, n);
+  }
+
+  /** Manually injected faults from App.tsx (state.injectedFaults). Mock-only demo control. */
+  setInjectedFaults(faults: Array<{ node: string; faultType: string }>): void {
+    this.injectedFaults = new Map(faults.map((f) => [f.node, f.faultType]));
   }
 
   getCursor(): number {
@@ -405,11 +413,25 @@ export class MockDataClient implements DataClient {
     const popOf = (id: string) => topology.nodes.find((n) => n.id === id)?.pop;
     const out: AlertDescriptor[] = [];
 
+    const reds = new Map<string, string | undefined>(); // node -> injected faultType (undefined = replayed)
     const bucket = nodeStates[String(this.cursor)] ?? {};
     for (const [device, state] of Object.entries(bucket)) {
       if (state === 'red') {
-        out.push({ alertname: 'NodeDown', node: device, severity: 'critical', pop: popOf(device), summary: `${device} is down` });
+        reds.set(device, undefined);
       }
+    }
+    // Manually injected faults are red too (override), carrying their chosen fault type.
+    for (const [node, faultType] of this.injectedFaults) {
+      reds.set(node, faultType);
+    }
+    for (const [device, faultType] of reds) {
+      out.push({
+        alertname: 'NodeDown',
+        node: device,
+        severity: 'critical',
+        pop: popOf(device),
+        summary: faultType ? `${device} down — ${faultType} (injected)` : `${device} is down`,
+      });
     }
 
     for (const p of predictions) {
@@ -436,6 +458,9 @@ export class MockDataClient implements DataClient {
   }
 
   private nodeStateAt(deviceId: string): 'red' | 'amber' | 'green' {
+    if (this.injectedFaults.has(deviceId)) {
+      return 'red'; // manual injection overrides the replayed state
+    }
     const bucket = nodeStates[String(this.cursor)];
     const state = bucket?.[deviceId];
     return state === 'red' || state === 'amber' ? state : 'green';

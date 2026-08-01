@@ -1,6 +1,6 @@
 # NOC Copilot — Grafana App Plugin
 
-Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.3.0. Built `dist/` is committed to the repo.
+Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.5.0. Built `dist/` is committed to the repo.
 
 Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
 
@@ -19,7 +19,7 @@ Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 
 ## Pages
 
-7 pages, all under `frontend/plugin/src/pages/`:
+8 pages, all under `frontend/plugin/src/pages/`:
 
 - **Overview** (`OverviewPage.tsx`, `/`) — fleet health summary: reporting/expected devices, degraded tunnels, active incidents, highest-risk device.
 - **Topology** (`TopologyPage.tsx`, `/topology`) — live cytoscape map of the network graph, node health coloring.
@@ -27,7 +27,10 @@ Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 - **Telemetry** (`TelemetryPage.tsx`, `/telemetry`) — time-series metric panels.
 - **Incidents** (`IncidentsPage.tsx`, `/incidents`) — incident and prediction list, evidence, root-cause hypotheses, recommended actions.
 - **Copilot** (`CopilotPage.tsx`, `/copilot`) — chat-style assistant over incidents/telemetry.
+- **Fault Injection** (`FaultInjectionPage.tsx`, `/inject`) — demo control: pick a node + fault type and fire it. The node turns red on every page (`state.injectedFaults` overlays the replayed node states in `MockDataClient.nodeStateAt`) and raises a `NodeDown` alert (Grafana Alerting + toast). Clear per-node or all.
 - **Status** (`StatusPage.tsx`, `/status`) — "Data & Integration Status": shows data source/capabilities state.
+
+Every alert (node-down, T-5min prediction, or injected fault) also pops a top-right toast that auto-fades after 5s, shown on **every** page — `src/components/AlertToaster.tsx` (`AlertToasterProvider` wraps the whole app; `App.tsx` calls `notify()` for each newly-firing alert).
 
 Route list is the source of truth in `frontend/plugin/src/plugin.json` (`includes` array).
 

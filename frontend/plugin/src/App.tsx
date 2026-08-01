@@ -12,7 +12,9 @@ import { IncidentsPage } from './pages/IncidentsPage';
 import { CopilotPage } from './pages/CopilotPage';
 import { StatusPage } from './pages/StatusPage';
 
+import { FaultInjectionPage } from './pages/FaultInjectionPage';
 import { AppShell } from './components/AppShell';
+import { AlertToasterProvider, useToaster } from './components/AlertToaster';
 import { AppProvider, useAppDispatch, useAppState } from './state/AppContext';
 import { DataClientProvider, useDataClient } from './data/DataClientContext';
 import { MOCK_BUCKET_META, MOCK_WINDOW_BUCKETS } from './data/MockDataClient';
@@ -22,7 +24,9 @@ export function App(props: AppRootProps) {
   return (
     <AppProvider>
       <DataClientProvider>
-        <AppInner {...props} />
+        <AlertToasterProvider>
+          <AppInner {...props} />
+        </AlertToasterProvider>
       </DataClientProvider>
     </AppProvider>
   );
@@ -31,9 +35,10 @@ export function App(props: AppRootProps) {
 function AppInner(_props: AppRootProps) {
   // Base path/url where Grafana mounted this app (/a/mplslab-noccopilot-app).
   const { path } = useRouteMatch();
-  const { cursor, absTick } = useAppState();
+  const { cursor, absTick, injectedFaults } = useAppState();
   const dispatch = useAppDispatch();
   const dataClient = useDataClient();
+  const { notify } = useToaster();
 
   // Fixture bucket bounds are known statically in mock mode; wire them into the shared clock once
   // on mount so the PlaybackControls slider/loop have the right range from the first render.
@@ -63,25 +68,51 @@ function AppInner(_props: AppRootProps) {
     }
   }, [dataClient, absTick]);
 
-  // Push the current firing set (node-down + T-5min predictions) into Alertmanager so they show in
-  // the native Grafana Alerting tab. Only POST when the set changes, so a stable alert isn't re-sent
-  // every tick. Runs after the setCursor effect above so getActiveAlerts reads the current bucket.
+  // Push manually injected faults (Fault Injection page) into the data client so a node reads red
+  // and fires an alert regardless of the cursor. Runs before the alert effect below.
+  useEffect(() => {
+    const injectAware = dataClient as unknown as {
+      setInjectedFaults?: (f: Array<{ node: string; faultType: string }>) => void;
+    };
+    if (typeof injectAware.setInjectedFaults === 'function') {
+      injectAware.setInjectedFaults(injectedFaults);
+    }
+  }, [dataClient, injectedFaults]);
+
+  // Push the current firing set (node-down + T-5min predictions + injected faults) into Alertmanager
+  // so they show in the native Grafana Alerting tab, AND toast any newly-appeared alert. Only POST /
+  // toast when the set changes. Runs after the setCursor/injected effects so getActiveAlerts is fresh.
   // ponytail: change-only push means a node red for >resolve_timeout auto-resolves in AM; the demo
   // loops far faster than that, so no periodic re-post is needed.
-  const lastAlertSig = useRef<string>('');
+  const prevAlertKeys = useRef<Set<string> | null>(null);
   useEffect(() => {
     const alertAware = dataClient as unknown as { getActiveAlerts?: () => AlertDescriptor[] };
     if (typeof alertAware.getActiveAlerts !== 'function') {
       return;
     }
     const alerts = alertAware.getActiveAlerts();
-    const sig = alerts.map((a) => `${a.alertname}:${a.node}`).sort().join('|');
-    if (sig === lastAlertSig.current) {
+    const keys = new Set(alerts.map((a) => `${a.alertname}:${a.node}`));
+    const prev = prevAlertKeys.current;
+
+    if (prev === null) {
+      // First run: seed without toasting the pre-existing set (avoids a load-time burst).
+      prevAlertKeys.current = keys;
+      publishAlerts(alerts);
       return;
     }
-    lastAlertSig.current = sig;
+    const sameSet = keys.size === prev.size && [...keys].every((k) => prev.has(k));
+    if (sameSet) {
+      return;
+    }
+    // Toast only alerts that are newly firing since last time.
+    for (const a of alerts) {
+      if (!prev.has(`${a.alertname}:${a.node}`)) {
+        notify({ severity: a.severity, title: a.summary, text: a.description });
+      }
+    }
+    prevAlertKeys.current = keys;
     publishAlerts(alerts);
-  }, [dataClient, cursor]);
+  }, [dataClient, cursor, injectedFaults, notify]);
 
   return (
     <AppShell meta={MOCK_BUCKET_META}>
@@ -92,6 +123,7 @@ function AppInner(_props: AppRootProps) {
         <Route path={`${path}/telemetry`} component={TelemetryPage} />
         <Route path={`${path}/incidents`} component={IncidentsPage} />
         <Route path={`${path}/copilot`} component={CopilotPage} />
+        <Route path={`${path}/inject`} component={FaultInjectionPage} />
         <Route path={`${path}/status`} component={StatusPage} />
       </Switch>
     </AppShell>
