@@ -7,7 +7,7 @@ Ticket map: `../docs/copilot-build-plan.md`. Spec: issue #3.
 
 F0 delivered the **skeleton + master config**; each other subpackage is filled by
 its owning lane as its ticket lands. Filled so far: `llm/` (F1), `adapter/` (F2),
-`agent/` loop (F3). The rest are still stubs.
+`agent/` loop (F3), `api/` streamed chat endpoint (F4). The rest are still stubs.
 
 ## Layout
 
@@ -49,6 +49,20 @@ cfg = load()          # defaults ← config.yaml ← env secrets, validated
 ```
 
 Self-check: `python3 copilot/config.py`. Fields + ADR provenance: `config.py` docstring.
+
+## Chat endpoint (F4)
+
+`POST /chat` drives the F3 loop and **streams** the canonical ADR-0009 trace events
+(`user_msg|think|tool_call|tool_result|assistant_msg`) as SSE, each stamped an
+ISO-UTC `ts` — one schema for the live stream and the persisted `events.jsonl`.
+
+```bash
+uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only
+```
+
+The LLM client + tool adapter are injected deps: tests (and later R1) override them
+via `app.dependency_overrides`; the defaults `503` until the real backends are wired.
+Self-check (stubbed, over HTTP): `python3 -m copilot.api.test_api`.
 
 ## Where the rest of the system slots in
 

@@ -1,0 +1,84 @@
+"""copilot.api.app -- FastAPI chat service, local-only (ADR-0010). Convergence (F4).
+
+Drives the F3 agent loop (copilot.agent.investigate) and STREAMS the canonical
+ADR-0009 trace events -- `user_msg | think | tool_call | tool_result | assistant_msg`
+(gate/artifact land later) -- as Server-Sent Events, each stamped with an ISO-UTC `ts`.
+Stream and store share ONE schema (`event_wire`): every streamed event round-trips into
+`events.jsonl` unchanged (ADR-0009/0010; the store is R2). SSE = the native browser
+primitive the C1 demo consumes via EventSource.
+
+Run:  uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100
+
+The LLM client + tool adapter are FastAPI dependencies: tests (and later R1) override
+them via `app.dependency_overrides`. The defaults 503 until the real backends are wired.
+"""
+import json
+import time
+from datetime import datetime, timezone
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from copilot.adapter import ToolAdapter
+from copilot.agent import Event, Outcome, investigate
+from copilot.config import Config, load
+from copilot.llm import LLMClient
+
+app = FastAPI(title="NOC Copilot", version="1.0")
+
+
+class ChatRequest(BaseModel):
+    question: str
+    start: int | None = None          # window start, epoch s (loop supplies it to tools)
+    end: int | None = None            # window end, epoch s
+
+
+def get_config() -> Config:
+    return load()
+
+
+def get_llm(cfg: Config = Depends(get_config)) -> LLMClient:
+    # ponytail: no runnable client yet (R1 ships the real HTTP one); tests override this.
+    raise HTTPException(503, "LLM backend not wired yet (R1)")
+
+
+def get_adapter(cfg: Config = Depends(get_config)) -> ToolAdapter:
+    # ponytail: real adapter needs a live dataapi; tests override this.
+    raise HTTPException(503, "tool adapter not wired yet (needs live dataapi)")
+
+
+def _window(req: ChatRequest, cfg: Config) -> tuple[int, int]:
+    if req.start is not None and req.end is not None:
+        return (req.start, req.end)
+    # ponytail: bare live window (now - X min .. now); R3 swaps in WindowContext (ADR-0002).
+    end = int(time.time())
+    return (end - cfg.window_x_min * 60, end)
+
+
+def event_wire(e: Event, ts: str) -> dict:
+    """Canonical wire/store shape (ADR-0009): type + ts + the event's payload. ONE
+    schema for the live stream and the persisted events.jsonl (R2 reuses this). The
+    payload owns no `type`/`ts` key, so the round-trip is lossless -- guard it."""
+    assert "type" not in e.data and "ts" not in e.data, \
+        f"event payload must not shadow type/ts (round-trip would clobber): {e.data!r}"
+    return {"type": e.type, "ts": ts, **e.data}
+
+
+def _sse(outcome: Outcome):
+    # ponytail: the loop is synchronous -> we stream its completed event tuple, each
+    # stamped as it goes out (send-time ~= occurrence-time when one LLM round-trip
+    # blocks). Live flush + true per-step ts need the loop to yield (Lane-Investigation
+    # change; F3 deferred ts-stamping to F4 by design) -- not worth it yet.
+    for e in outcome.events:
+        ts = datetime.now(timezone.utc).isoformat()
+        yield f"data: {json.dumps(event_wire(e, ts))}\n\n"
+
+
+@app.post("/chat")
+def chat(req: ChatRequest, cfg: Config = Depends(get_config),
+         llm: LLMClient = Depends(get_llm),
+         adapter: ToolAdapter = Depends(get_adapter)) -> StreamingResponse:
+    outcome = investigate(req.question, _window(req, cfg),
+                          llm=llm, adapter=adapter, cfg=cfg)
+    return StreamingResponse(_sse(outcome), media_type="text/event-stream")
