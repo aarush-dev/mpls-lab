@@ -1,0 +1,39 @@
+# ADR-0004 — LLM backend
+
+**Status:** accepted
+
+## Decision
+
+The LLM backend is **one OpenAI-compatible HTTP client**, config = `{base_url, model, api_key}`,
+selected by a **master-config profile**:
+
+- `nim` (interim) → NVIDIA NIM, `gpt-oss-20b`.
+- `unsloth-local` (final) → a local API URL served on the air-gapped network (Gemma, later).
+
+Model/provider swap = **one config line**. Native OpenAI function-calling when the endpoint supports
+it, an owned JSON/ReAct parser as fallback (ADR-0005).
+
+## Context
+
+Both the interim (NIM) and final (unsloth) runtimes expose OpenAI-compatible HTTP, so the loop never
+sees the difference. Engine choice (llama.cpp vs vLLM vs NIM) is irrelevant above the HTTP line. The
+final host gives "just a local API link" — hardware is not the copilot's concern.
+
+## Alternatives rejected
+
+- **CPU-only llama.cpp / GGUF as the assumed runtime** — moot; both real runtimes are HTTP APIs.
+- **Fail-closed `deployment_mode` gating** (forbid NIM in an `airgapped` mode) — rejected by user as
+  over-engineering; the master config already handles backend selection.
+
+## Nuances
+
+- **NIM breaks the air-gap** — every prompt (telemetry, logs, evidence) leaves to a third party.
+  Acceptable as a dev scaffold; the air-gap claim only holds on `unsloth-local`.
+  `# ponytail:` NIM egress isn't air-gapped; upgrade path = point the profile at unsloth-local. No
+  enforcement code built.
+- **API key** never in the repo or chat — `.env` (gitignored) / env var, read at implement-time.
+
+## Consequences
+
+- Backend is a swappable dependency; the loop is model-agnostic.
+- Any eval/demo that proves the air-gap property must run on `unsloth-local`, not NIM (ADR-0017).
