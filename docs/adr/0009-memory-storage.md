@@ -26,8 +26,14 @@ sessions/<id>/          cases/<id>/
 ```
 
 - **One `events.jsonl` per session, every event timestamped (ISO-8601 UTC), all events user-visible**
-  (`tool_call`/`tool_result`/`gate` shown so the user watches the agent work). Types:
-  `user_msg | assistant_msg | tool_call | tool_result | gate | artifact`.
+  (`tool_call`/`tool_result`/`gate` shown so the user watches the agent work). **Canonical event
+  type enum** (used by BOTH the persisted log AND the live stream — one vocabulary, no second set):
+  `user_msg | assistant_msg | think | tool_call | tool_result | gate | artifact`.
+- **The ADR-0010 live trace IS this same event stream, surfaced live** — not a separate vocabulary.
+  Map its stage words onto the enum: `think`→`think`, `observation`→`tool_result`,
+  `answer`→`assistant_msg`. A streamed event must round-trip into `events.jsonl` unchanged. Any
+  ticket producing the stream (F4) MUST emit these canonical types, not invent `answer`/`observation`
+  as new persisted types.
 - **`scratchpad/`** — persistent working dir (Milestone B), never auto-wiped.
 - **`artifacts/`** — append-only **snapshot of each presented file at present-time** (fixes overwrite
   corruption); referenced by `artifact` events.

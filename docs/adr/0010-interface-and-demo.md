@@ -8,7 +8,10 @@
   NOC dashboard integrates through it later.
 - The chat endpoint **streams a structured, timestamped step-trace** — `think → tool_call →
   observation → gate verdict → answer` — not just final text. This is the persisted `events.jsonl`
-  stream (ADR-0009) surfaced live.
+  stream (ADR-0009) surfaced live, **using ADR-0009's canonical event enum** (`user_msg |
+  assistant_msg | think | tool_call | tool_result | gate | artifact`). The stage words above are
+  readable aliases, not new types: `observation`=`tool_result`, `answer`=`assistant_msg`. Stream and
+  store share ONE schema so every streamed event round-trips into the log unchanged.
 - A **demo app** consumes that trace to *show what the agent is doing* (live tool calls, evidence,
   citations, gate pass/fail), inspired by agentic apps. Throwaway-ish until the dashboard exists.
 

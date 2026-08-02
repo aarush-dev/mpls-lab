@@ -132,7 +132,9 @@ case → write the record → generate the initial report → spawn chat(s). **O
 by scenario/device+fault); restart-safe via last-processed record id.
 
 **Interface + demo (ADR-0010).** A local **FastAPI** service; the chat endpoint **streams a
-timestamped step-trace** (think/tool/observe/gate/answer). A small **demo web app** consumes the trace
+timestamped step-trace** using ADR-0009's canonical event enum (`user_msg | assistant_msg | think |
+tool_call | tool_result | gate | artifact`; `observation`=`tool_result`, `answer`=`assistant_msg`) so
+stream and persisted log share one schema. A small **demo web app** consumes the trace
 to show the agent working live (tool calls, evidence, citations, gate pass/fail), agentic-app style —
 scaffolding until a real dashboard integrates through the same API.
 
