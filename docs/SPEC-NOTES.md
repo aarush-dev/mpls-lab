@@ -845,3 +845,29 @@ is R3 work, enforced at the adapter — not built yet. The window itself is a ba
 `(start, end)` pair, not the full `WindowContext{start,end,frozen}` (also R3).
 Also note: the flow window filters on `docker logs --since/--until`, i.e. log
 print time, not a per-record `stamp_updated` filter — approximate, not exact.
+
+## Copilot I2a: LanceDB direct, embedder profile like the LLM
+
+`copilot/retrieval/` ships the `Retriever` seam (`add` / `search → [Hit(doc,
+score)]`) on **embedded LanceDB** (`LanceRetriever`), plus `make_embedder(cfg)`
+swapped on `embed_profile` (`nim` | `unsloth-local`) — same profile pattern as the
+LLM (ADR-0004). Per ADR-0006 the numpy-cosine/npz interim store was **rejected**;
+the scalable LanceDB path is built directly. Provenance (source, node, ts) rides on
+every `Doc`, so it survives into each `Hit` (the I4a gate needs it).
+
+- **Embedder is lazy**: nim's `httpx` and local's `SentenceTransformer` load on first
+  `encode`, never at construction — so the swap is one config line and the selection
+  is testable air-gapped (no server, no model on disk). `HashEmbedder` is a
+  deterministic test double (no deps), injected directly like `llm.ScriptedLLM`; it is
+  NOT a profile and NOT a store substitute (the rejected numpy path stays rejected).
+- **nim/local model ids differ** (endpoint id vs HF repo id), so the env vars are
+  distinct: `COPILOT_EMBED_MODEL_NIM` / `COPILOT_EMBED_MODEL_LOCAL` (+
+  `COPILOT_EMBED_BASE_URL`). These are non-secret config living in env, not
+  `config.yaml`, because `config.py` is another lane's file (F0) — same "constant
+  stays local to the lane" call as the adapter's `MAX_LIMIT`.
+- **score = `1 − _distance`** (LanceDB cosine distance ∈ [0,2]) → cosine similarity
+  ∈ [−1,1]. Real bge/gte vectors go negative; an I2b/I4a threshold must band on
+  −1..1, not 0..1.
+- **Deferred (not built):** `search_runbooks`/`search_incidents` + topology-hop filter
+  (I2b, #11); upsert-on-id (`add` is append-only until the S1/S2 seeder needs
+  `merge_insert`); real corpus content (S1/S2 seeding).

@@ -7,8 +7,11 @@ Ticket map: `../docs/copilot-build-plan.md`. Spec: issue #3.
 
 F0 delivered the **skeleton + master config**; each other subpackage is filled by
 its owning lane as its ticket lands. Filled so far: `llm/` (F1), `adapter/` (F2),
-`agent/` loop (F3), `api/` streamed chat endpoint (F4), `tools/` registry (I1).
-The rest are still stubs.
+`agent/` loop (F3), `api/` streamed chat endpoint (F4), `tools/` registry (I1),
+`retrieval/` spine (I2a). The rest are still stubs.
+
+Deps: `pip install -r copilot/requirements.txt` (air-gap: pre-stage wheels, see
+the file header). I2a adds `lancedb`.
 
 ## Layout
 
@@ -21,7 +24,7 @@ copilot/
   # Lane-Investigation (Dev 1) — disjoint ownership
   adapter/    tool adapter over dataapi: filters+caps+injection guard  (F2)
   tools/      registry: query_metrics, search_logs, flows            (I1,I3)
-  retrieval/  Retriever over embedded LanceDB (KB)                     (I2a,I2b)
+  retrieval/  Retriever over embedded LanceDB (KB): I2a done, I2b next (I2a,I2b)
   agent/      agent loop + two-stage quality gate                      (F3,I4)
   skills/     progressive-disclosure diagnostic skills                 (I5)
 
@@ -84,6 +87,33 @@ Not built yet: the forensic end-freeze guard (`end > T_snapshot` forbidden,
 ADR-0002) is R3 — I1 only gets the window plumbed to `/flows`, it doesn't
 enforce the freeze. The flow window is bounded by `docker logs --since/--until`
 (log print time), not a per-record timestamp filter — approximate.
+
+## Retrieval (I2a)
+
+`copilot/retrieval/` is the KB retrieval spine (ADR-0006):
+
+- `contract.py` — `Doc(id, text, source, node, ts)` + `Hit(doc, score)` and the
+  `Retriever` / `Embedder` Protocols (structural seams, config-only swap).
+- `store.py` — `LanceRetriever(embedder, uri)`: `add(docs)` / `search(query, k) →
+  [Hit]` over **embedded LanceDB** (no server, single on-disk dataset). Cosine;
+  `score` = `1 − _distance` ∈ −1..1. Provenance (source, node, ts) rides on every
+  returned `Hit.doc` — required by the I4a gate.
+- `embedder.py` — `make_embedder(cfg)` dispatches on `cfg.embed_profile`: `nim`
+  (OpenAI-compatible `/embeddings`, interim) | `unsloth-local` (sentence-transformers
+  on the 3080Ti, final). Both load the model/endpoint **lazily** on first `encode`,
+  so the swap is one config line and testable air-gapped. `HashEmbedder` is a
+  deterministic, dependency-free test double (injected directly, not profile-selected —
+  mirrors `llm.ScriptedLLM`).
+
+Env for the real embedders (not secrets, kept out of the committed YAML because
+`config.py` is another lane's file): `COPILOT_EMBED_BASE_URL`,
+`COPILOT_EMBED_MODEL_NIM`, `COPILOT_EMBED_MODEL_LOCAL`, `COPILOT_EMBED_API_KEY`.
+
+Self-check (fixture corpus, `HashEmbedder`): `python3 -m copilot.retrieval.test_retrieval`.
+
+Not built yet: `search_runbooks` / `search_incidents` tools + the topology-hop
+proximity filter are I2b (#11); the corpus is a test fixture — real content is S1/S2
+seeding. `add` is append-only (no upsert-on-id) until the seeder lands.
 
 ## Where the rest of the system slots in
 

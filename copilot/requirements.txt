@@ -1,0 +1,12 @@
+# Copilot subsystem deps. Build-time egress OK to install; for AIR-GAP these must
+# be PRE-STAGED (`pip download -r requirements.txt -d wheels/` on a connected host,
+# ship the wheels, then `pip install --no-index --find-links wheels/`). Same rule as
+# dataapi/requirements.txt.
+fastapi          # api/ streamed /chat (F4)
+uvicorn
+httpx            # llm/ + retrieval nim embedder HTTP client
+PyYAML           # config.py
+python-dotenv    # config.py secret loading
+lancedb          # retrieval/ embedded vector store (ADR-0006, I2a)
+# unsloth-local embed profile also needs sentence-transformers on the 3080Ti box;
+# not listed here — it is a large GPU dep pulled only for that profile (R1-adjacent).
