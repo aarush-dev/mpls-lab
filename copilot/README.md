@@ -5,8 +5,9 @@ LLM-facing half of the air-gapped NOC pipeline. Two systems, one agent core:
 (human asks → cited answer). Vocabulary: `../CONTEXT.md`. Decisions: `../docs/adr/`.
 Ticket map: `../docs/copilot-build-plan.md`. Spec: issue #3.
 
-F0 delivers only the **skeleton + master config**. Every other subpackage is an
-empty stub its owning lane fills in.
+F0 delivered the **skeleton + master config**; each other subpackage is filled by
+its owning lane as its ticket lands. Filled so far: `llm/` (F1), `adapter/` (F2),
+`agent/` loop (F3). The rest are still stubs.
 
 ## Layout
 

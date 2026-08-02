@@ -17,5 +17,7 @@ history_compaction: false   # ADR-0015: summarize old chat turns (off by default
 window_x_min: 10            # ADR-0002: X, rolling/forensic window length (minutes)
 gate_min_evidence: 2       # ADR-0008: N, deterministic pre-gate evidence floor
 gate_max_retries: 2        # ADR-0008: agentic retries when the gate fails
+step_cap: 8                # ADR-0005: max agent-loop turns per investigation
+tool_call_cap: 6           # ADR-0005: max tool invocations per investigation
 error_profile: light       # ADR-0003: oracle | light | heavy
 predict_interval_s: 10     # ADR-0014: PA/emulator predict-loop cadence (seconds)
