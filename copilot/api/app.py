@@ -13,6 +13,7 @@ The LLM client + tool adapter are FastAPI dependencies: tests (and later R1) ove
 them via `app.dependency_overrides`. The defaults 503 until the real backends are wired.
 """
 import json
+import os
 import time
 from datetime import datetime, timezone
 
@@ -24,6 +25,7 @@ from copilot.adapter import ToolAdapter
 from copilot.agent import Event, Outcome, investigate
 from copilot.config import Config, load
 from copilot.llm import LLMClient
+from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 
 app = FastAPI(title="NOC Copilot", version="1.0")
 
@@ -46,6 +48,25 @@ def get_llm(cfg: Config = Depends(get_config)) -> LLMClient:
 def get_adapter(cfg: Config = Depends(get_config)) -> ToolAdapter:
     # ponytail: real adapter needs a live dataapi; tests override this.
     raise HTTPException(503, "tool adapter not wired yet (needs live dataapi)")
+
+
+_KB_CACHE: dict[str, Retriever] = {}
+
+
+def get_retriever(cfg: Config = Depends(get_config)) -> Retriever | None:
+    # The KB is OPTIONAL (unlike the llm/adapter the loop can't run without): if a seeded
+    # LanceDB is pointed to by COPILOT_KB_URI, wire the real retriever (embedder profile per
+    # cfg, ADR-0004) so search_runbooks/search_incidents work over the HTTP seam; otherwise
+    # None -> a read-only investigation still runs, the search_* tools just report "backend
+    # not available" until S1/S2 seed a corpus. Env, not config.yaml, mirrors the I2a
+    # embedder env vars (config.py is another lane's file). Tests override this directly.
+    # ponytail: memoize per uri so we don't reconnect LanceDB every request.
+    uri = os.environ.get("COPILOT_KB_URI")
+    if not uri:
+        return None
+    if uri not in _KB_CACHE:
+        _KB_CACHE[uri] = LanceRetriever(make_embedder(cfg), uri)
+    return _KB_CACHE[uri]
 
 
 def _window(req: ChatRequest, cfg: Config) -> tuple[int, int]:
@@ -78,7 +99,8 @@ def _sse(outcome: Outcome):
 @app.post("/chat")
 def chat(req: ChatRequest, cfg: Config = Depends(get_config),
          llm: LLMClient = Depends(get_llm),
-         adapter: ToolAdapter = Depends(get_adapter)) -> StreamingResponse:
+         adapter: ToolAdapter = Depends(get_adapter),
+         retriever: Retriever | None = Depends(get_retriever)) -> StreamingResponse:
     outcome = investigate(req.question, _window(req, cfg),
-                          llm=llm, adapter=adapter, cfg=cfg)
+                          llm=llm, adapter=adapter, cfg=cfg, retriever=retriever)
     return StreamingResponse(_sse(outcome), media_type="text/event-stream")

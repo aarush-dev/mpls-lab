@@ -29,7 +29,7 @@
 |---|---|---|
 | I1 | 9 | `search_logs` + `flows` tools — **done** |
 | I2a | 10 | Retriever interface + embedded LanceDB + embedder profile — **done** |
-| I2b | 11 | `search_runbooks` + `search_incidents` (+ topology-hop filter) |
+| I2b | 11 | `search_runbooks` + `search_incidents` (+ topology-hop filter) — **done** |
 | I3 | 12 | `walk_topology_graph` (BFS + `/metrics` enrich, `kg` flag) |
 | I4a | 13 | quality gate: deterministic pre-gate + citation check |
 | I4b | 14 | quality gate: self-judge + ≤2 agentic retry |

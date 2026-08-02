@@ -868,6 +868,41 @@ every `Doc`, so it survives into each `Hit` (the I4a gate needs it).
 - **score = `1 − _distance`** (LanceDB cosine distance ∈ [0,2]) → cosine similarity
   ∈ [−1,1]. Real bge/gte vectors go negative; an I2b/I4a threshold must band on
   −1..1, not 0..1.
-- **Deferred (not built):** `search_runbooks`/`search_incidents` + topology-hop filter
-  (I2b, #11); upsert-on-id (`add` is append-only until the S1/S2 seeder needs
-  `merge_insert`); real corpus content (S1/S2 seeding).
+- **Deferred to I2b/later:** upsert-on-id (`add` is append-only until the S1/S2 seeder
+  needs `merge_insert`); real corpus content (S1/S2 seeding).
+
+## Copilot I2b: retrieval tools + topology-hop filter (prefilter, not post-filter)
+
+`search_runbooks` / `search_incidents` register in `copilot/tools/registry.py`
+(`RETRIEVAL_TOOLS`) over the I2a `Retriever`; the loop + `/chat` thread an optional
+`retriever` through `dispatch`. Both scope the KB by provenance; incidents add the
+topology-hop proximity filter (ADR-0006/0007). Wired end to end: a fault question over
+`POST /chat` returns a cited runbook + a nearby past incident (`copilot.api.test_api`).
+
+- **Hop filter PREFILTERS, it does not post-filter a top-k.** `search(query, k, source,
+  nodes)` pushes both scopes into LanceDB `where(..., prefilter=True)`, so the top-k is
+  taken *within* {source=incident ∧ node ∈ near}. A post-filter (search top-k globally,
+  then drop far nodes) would return "no matches" whenever the k best incidents are all
+  distant while a nearby one sits at rank k+1 — the exact trap I2a's source prefilter
+  already avoided. Node-less incidents fall out of `node IN (...)` naturally (can't prove
+  proximity). Regression test: `test_hop_filter_prefilters_rather_than_trimming_top_k`.
+- **The adapter owns the `/topology` shape, not the registry** (ADR-0006: only the adapter
+  knows endpoint shapes). `adapter.hops_within(focus, n)` returns the ≤n-hop node set;
+  `hops_within_links` (BFS, `adapter/contract.py`) is the one place that reads the
+  `{source,target}` link dict. The registry never touches raw topology JSON. I3's
+  `walk_topology_graph` builds BFS + `/metrics` enrich on the same primitive. Default
+  radius `DEFAULT_HOPS=2` is a registry constant (like adapter `MAX_LIMIT`) — `config.py`
+  is another lane's file; lift to config only if tuned.
+- **Provenance is the full triple.** Rendered hits carry `source`, `node`, AND `ts`
+  (ADR-0006 wants time-range provenance; the I4a gate needs it). KB text is `sanitize()`d
+  inline — incidents can embed untrusted log excerpts (ADR-0016).
+- **Bad args are guidance, never a raise** (ADR-0015). Missing `query`, absent retriever,
+  and non-int `k`/`hops` (incl. `null`/list → `TypeError`, not just `ValueError`) come back
+  as `error: …` observation text so the model can correct. `k` is clamped to `MAX_LIMIT`
+  (no paging concept for KB search, unlike the read tools' cap-and-page).
+- **KB is optional at the HTTP seam.** `get_retriever` returns `None` unless
+  `COPILOT_KB_URI` points at a seeded LanceDB (env, mirroring the I2a embedder vars) — a
+  read-only investigation still runs; the search tools report "backend not available" until
+  S1/S2 seed a corpus. `None` retriever is why the search tools guard for it.
+- **Deferred:** upsert-on-id + real corpus (S1/S2); the default `/chat` KB wiring is live
+  but needs a seeded `COPILOT_KB_URI` + an embedder backend (R1) to return real hits.

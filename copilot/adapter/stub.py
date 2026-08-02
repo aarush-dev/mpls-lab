@@ -6,7 +6,9 @@ VictoriaMetrics/Loki running (spec §Testing).
 """
 from collections.abc import Sequence
 
-from copilot.adapter.contract import Evidence, Filters, Result, MAX_LIMIT, frame
+from copilot.adapter.contract import (
+    Evidence, Filters, MAX_LIMIT, Result, frame, hops_within_links,
+)
 
 
 class StubAdapter:
@@ -19,12 +21,14 @@ class StubAdapter:
     def __init__(self, metrics_rows: Sequence[dict] = (),
                  events_rows: Sequence[dict] = (),
                  flows_rows: Sequence[dict] = (),
+                 topology: dict | None = None,
                  max_limit: int = MAX_LIMIT):
         self._rows = {
             "metrics": list(metrics_rows),
             "events": list(events_rows),
             "flows": list(flows_rows),
         }
+        self._topology = topology or {"nodes": [], "links": []}
         self._max_limit = max_limit
 
     def metrics(self, filters: Filters) -> Result:
@@ -35,6 +39,9 @@ class StubAdapter:
 
     def flows(self, filters: Filters) -> Result:
         return self._serve("flows", filters)
+
+    def hops_within(self, focus: str, n: int) -> set[str]:
+        return hops_within_links(self._topology.get("links", ()), focus, n)
 
     def _serve(self, source: str, filters: Filters) -> Result:
         filters.validate(self._max_limit)

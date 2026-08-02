@@ -56,6 +56,17 @@ def test_append_batch_with_null_provenance_round_trips():
     assert "rb-ospf" in ids, "appended doc is searchable"
 
 
+def test_search_source_filter_returns_only_that_source():
+    # I2b: search_incidents/search_runbooks scope by provenance. A query whose best
+    # match is a runbook, filtered to source="incident", must skip the runbook.
+    r = _retriever()
+    r.add(CORPUS)
+    hits = r.search("tunnel latency jitter", k=5, source="incident")
+    assert hits, "an incident is returned"
+    assert all(h.doc.source == "incident" for h in hits), \
+        f"source filter leaked non-incident: {[h.doc.source for h in hits]}"
+
+
 def test_k_caps_result_count():
     r = _retriever()
     r.add(CORPUS)
@@ -92,6 +103,7 @@ def test_embedder_swap_is_config_only_and_lazy():
 def _run():
     test_add_then_search_returns_ranked_hits_with_provenance()
     test_append_batch_with_null_provenance_round_trips()
+    test_search_source_filter_returns_only_that_source()
     test_k_caps_result_count()
     test_search_before_add_is_empty_not_crash()
     test_store_and_embedder_satisfy_the_protocols()

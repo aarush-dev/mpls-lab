@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from copilot.adapter import ToolAdapter
 from copilot.config import Config
 from copilot.llm import LLMClient, ToolCall
+from copilot.retrieval import Retriever
 from copilot.tools import TOOL_SPECS, dispatch
 
 # canonical event enum (ADR-0009) -- ONE vocabulary for the live stream AND the
@@ -50,11 +51,13 @@ class Outcome:
 
 
 SYSTEM_PROMPT = (
-    "You are a read-only network investigator. Use the investigation tools "
+    "You are a read-only network investigator. Use the live-telemetry tools "
     "(query_metrics, search_logs, flows) to gather evidence within the given time "
-    "window; you must narrow every call by device or pattern. Cite the evidence ids "
-    "you rely on. If the request is too vague to investigate, ask one clarifying "
-    "question instead of calling a tool."
+    "window -- narrow every such call by device or pattern -- and the knowledge-base "
+    "tools (search_runbooks, search_incidents) to find the matching runbook and similar "
+    "past incidents (pass a device to search_incidents to focus on nearby topology). "
+    "Cite the evidence ids you rely on. If the request is too vague to investigate, ask "
+    "one clarifying question instead of calling a tool."
 )
 
 # TOOL_SPECS + dispatch live in copilot.tools (the registry, I1) -- re-exported here so
@@ -81,7 +84,8 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
 
 
 def investigate(question: str, window: tuple[int, int], *,
-                llm: LLMClient, adapter: ToolAdapter, cfg: Config) -> Outcome:
+                llm: LLMClient, adapter: ToolAdapter, cfg: Config,
+                retriever: Retriever | None = None) -> Outcome:
     """Run the loop until the model answers, asks back, or a cap trips."""
     events: list[Event] = []
 
@@ -113,7 +117,7 @@ def investigate(question: str, window: tuple[int, int], *,
                 return _capped(events, "tool_call_cap")
             tool_calls += 1
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
-            observation, n = dispatch(tc.name, tc.arguments, adapter, window)
+            observation, n = dispatch(tc.name, tc.arguments, adapter, window, retriever)
             emit("tool_result", id=tc.id, name=tc.name, content=observation, n=n)
             messages.append({"role": "tool", "tool_call_id": tc.id,
                              "name": tc.name, "content": observation})

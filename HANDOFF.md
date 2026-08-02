@@ -74,19 +74,24 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 ## Copilot subsystem — state
 `copilot/` is a second, separate build (GitHub issues, two lanes — see `docs/copilot-build-plan.md`).
 **Built:** F0–F4 (config/module skeleton, LLM-client seam, tool-adapter seam, agent loop, FastAPI
-`/chat` endpoint) + **I1** (#9, `search_logs` + `flows` tools) + **I2a** (#10, retrieval spine).
+`/chat` endpoint) + **I1** (#9, `search_logs` + `flows`) + **I2a** (#10, retrieval spine) + **I2b**
+(#11, `search_runbooks`/`search_incidents` + topology-hop filter).
 I1: `copilot/tools/` registry (`TOOLS`/`TOOL_SPECS`/dispatch) wires
 `query_metrics`/`search_logs`/`flows` on the F2 adapter contract; `copilot/agent/loop.py`
 dispatches through it; `dataapi` `/flows` gained `start`/`end` window params as a prereq.
 I2a: `copilot/retrieval/` — `LanceRetriever` (add/search over **embedded LanceDB**, provenance on
 every `Hit`) + `make_embedder(cfg)` profile-swapped (`nim`|`unsloth-local`, lazy) + `HashEmbedder`
-test double (ADR-0006). New dep `lancedb` → `copilot/requirements.txt`. All self-checks green:
-config/llm/adapter/agent/tools/api/retrieval, plus dataapi's `python3 test_flows_window.py`.
-**Next ticket:** I2a unblocks #11 (I2b, `search_runbooks`/`search_incidents`) and #33 (B4). I1
-unblocks #11, #12 (I3). Grabbable in Lane-Investigation: #11 (I2b), #12 (I3), #13 (I4a), #15 (I5),
-#26 (I6) — user picks order.
+test double (ADR-0006). New dep `lancedb` → `copilot/requirements.txt`.
+I2b: `RETRIEVAL_TOOLS` (`search_runbooks`/`search_incidents`) over the I2a Retriever; provenance-
+scoped `search(query,k,source,nodes)` **prefilters** in LanceDB; the incident hop-filter uses
+`adapter.hops_within(focus,n)` (adapter owns the `/topology` shape, ADR-0006/0007) — I3's
+`walk_topology_graph` reuses it. `/chat` threads an optional `retriever` (`COPILOT_KB_URI` env, else
+absent). All self-checks green: config/llm/adapter/agent/tools/api/retrieval, plus dataapi's
+`python3 test_flows_window.py`.
+**Next ticket:** I2b unblocks nothing new; I2a unblocks #33 (B4). Grabbable in Lane-Investigation:
+#12 (I3), #13 (I4a), #15 (I5), #26 (I6) — user picks order.
 **Not done:** forensic end-freeze guard / full `WindowContext` (R3), real HTTP adapter (R1);
-retrieval `search_*` tools + hop-filter (I2b), upsert-on-id + real corpus (S1/S2 seeding).
+upsert-on-id + real KB corpus (S1/S2 seeding); default `/chat` KB needs a seeded `COPILOT_KB_URI`.
 
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.

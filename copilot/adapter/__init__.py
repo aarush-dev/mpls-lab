@@ -7,11 +7,11 @@ builds here; do not edit from the other lane.
 """
 from copilot.adapter.contract import (
     EVIDENCE_CLOSE, EVIDENCE_OPEN, MAX_LIMIT, Evidence, FilterError, Filters,
-    Result, ToolAdapter, frame, sanitize,
+    Result, ToolAdapter, frame, hops_within_links, sanitize,
 )
 from copilot.adapter.stub import StubAdapter
 
 __all__ = [
     "ToolAdapter", "StubAdapter", "Filters", "FilterError", "Result", "Evidence",
-    "frame", "sanitize", "EVIDENCE_OPEN", "EVIDENCE_CLOSE", "MAX_LIMIT",
+    "frame", "sanitize", "hops_within_links", "EVIDENCE_OPEN", "EVIDENCE_CLOSE", "MAX_LIMIT",
 ]

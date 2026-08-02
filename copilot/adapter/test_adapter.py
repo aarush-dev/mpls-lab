@@ -73,6 +73,20 @@ def test_injected_instruction_is_framed_as_data():
     assert "ignore previous instructions" in ev.content
 
 
+def test_hops_within_is_undirected_and_depth_bounded():
+    # topology proximity (ADR-0007) the adapter owns -- feeds I2b's incident hop-filter.
+    # the adapter, not the caller, knows the /topology {source,target} link shape.
+    line = {"nodes": [], "links": [{"source": "r1", "target": "r2"},
+                                   {"source": "r2", "target": "r3"},
+                                   {"source": "r3", "target": "r4"}]}
+    a = StubAdapter(topology=line)
+    assert a.hops_within("r1", 0) == {"r1"}                 # self only
+    assert a.hops_within("r1", 1) == {"r1", "r2"}
+    assert a.hops_within("r1", 2) == {"r1", "r2", "r3"}
+    assert a.hops_within("r3", 1) == {"r2", "r3", "r4"}     # reachable both ways
+    assert a.hops_within("nope", 3) == {"nope"}             # unknown focus -> itself only
+
+
 def test_stub_satisfies_protocol():
     assert isinstance(StubAdapter(), ToolAdapter)
 
@@ -82,6 +96,7 @@ def _run():
     test_missing_window_and_bad_limit_rejected()
     test_results_capped_with_provenance_and_paging()
     test_injected_instruction_is_framed_as_data()
+    test_hops_within_is_undirected_and_depth_bounded()
     test_stub_satisfies_protocol()
     print("copilot.adapter self-check OK")
 

@@ -6,17 +6,43 @@ tool adapter stubbed via dependency_overrides (spec #3 §Testing, ADR-0010). Ass
 the canonical ADR-0009 event stream, each event timestamped.
 Run:  python3 -m copilot.api.test_api
 """
+import atexit
 import json
+import shutil
+import tempfile
 from datetime import datetime
 
 from fastapi.testclient import TestClient
 
 from copilot.adapter import StubAdapter
 from copilot.agent import EVENT_TYPES, Event
-from copilot.api.app import app, get_adapter, get_llm
+from copilot.api.app import app, get_adapter, get_llm, get_retriever
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
+from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
 
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
+
+# KB + topology fixtures for the I2b retrieval-over-HTTP test (real corpus = S1/S2).
+KB = [
+    Doc(id="rb-bgp", text="bgp neighbor down runbook check hold timer and session reset",
+        source="runbook", node="pe1", ts=1000),
+    Doc(id="inc-near", text="past incident bgp session dropped hold timer expiry", source="incident",
+        node="pe2", ts=1001),
+    Doc(id="inc-far", text="past incident bgp session dropped hold timer expiry", source="incident",
+        node="pe4", ts=1002),
+]
+TOPOLOGY = {"nodes": [{"id": n} for n in ("pe1", "pe2", "pe3", "pe4")],
+            "links": [{"source": "pe1", "target": "pe2"},
+                      {"source": "pe2", "target": "pe3"},
+                      {"source": "pe3", "target": "pe4"}]}
+
+
+def _kb_retriever():
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    r = LanceRetriever(HashEmbedder(), d)
+    r.add(KB)
+    return r
 
 
 def _client(script):
@@ -96,6 +122,31 @@ def test_device_question_streams_cited_log_and_flow_rows():
     assert evs[-1]["content"] == "r1 flapping [events:0] with a traffic spike [flows:0]"
 
 
+def test_fault_returns_cited_runbook_and_nearby_incident_over_http():
+    # I2b acceptance: ask a fault -> a cited runbook + a similar past incident via the
+    # HTTP seam, and the hop-filter narrows incidents to devices near the focus (pe1).
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM([
+        tool_call("search_runbooks", {"query": "bgp neighbor down"}, id="c1"),
+        tool_call("search_incidents", {"query": "bgp session dropped", "device": "pe1",
+                                       "hops": 2}, id="c2"),
+        final("bgp hold-timer expiry [rb-bgp]; matches past incident [inc-near]"),
+    ])
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(topology=TOPOLOGY)
+    app.dependency_overrides[get_retriever] = _kb_retriever
+    resp = TestClient(app).post("/chat", json={"question": "bgp neighbor down on pe1?",
+                                               "start": 100, "end": 200})
+    evs = _events(resp)
+    names = [e["name"] for e in evs if e["type"] == "tool_call"]
+    assert names == ["search_runbooks", "search_incidents"]
+    trs = [e for e in evs if e["type"] == "tool_result"]
+    assert any("[rb-bgp]" in e["content"] and "source=runbook" in e["content"] for e in trs)
+    inc = next(e["content"] for e in trs if e["name"] == "search_incidents")
+    assert "[inc-near]" in inc, "1-hop incident kept"
+    assert "[inc-far]" not in inc, "3-hop incident filtered out by the hop filter"
+    assert evs[-1]["content"] == "bgp hold-timer expiry [rb-bgp]; matches past incident [inc-near]"
+
+
 def test_unfiltered_call_rejected_through_http_seam():
     # over-broad tool call (no device/pattern) -> F2 contract guidance as a tool_result,
     # never rows (acceptance: unfiltered rejected).
@@ -151,6 +202,7 @@ def test_streamed_event_round_trips_into_an_event():
 def _run():
     test_chat_streams_tool_call_and_cited_answer()
     test_device_question_streams_cited_log_and_flow_rows()
+    test_fault_returns_cited_runbook_and_nearby_incident_over_http()
     test_unfiltered_call_rejected_through_http_seam()
     test_every_event_carries_ts_and_canonical_type()
     test_ask_back_streams_question_no_tool_call()

@@ -36,12 +36,24 @@ class LanceRetriever:
         else:
             self._db.create_table(self._name, data=rows)
 
-    def search(self, query: str, k: int = 5) -> list[Hit]:
+    def search(self, query: str, k: int = 5, source: str | None = None,
+               nodes: set[str] | None = None) -> list[Hit]:
         if self._name not in self._db.table_names():
             return []                                    # nothing added yet
         vec = self._embedder.encode([query])[0]
-        rows = (self._db.open_table(self._name)
-                .search(vec).metric("cosine").limit(k).to_list())
+        q = self._db.open_table(self._name).search(vec).metric("cosine")
+        # prefilter=True filters BEFORE the ANN scan -> true top-k WITHIN the scope (a
+        # post-filter would trim an all-out-of-scope top-k to nothing, so a nearby
+        # incident at global rank 6 would vanish). `source` is a fixed tool constant and
+        # `nodes` are topology ids from the adapter, never raw user text -> f-string safe.
+        preds = []
+        if source is not None:
+            preds.append(f"source = '{source}'")
+        if nodes is not None:
+            preds.append("node IN (%s)" % ", ".join(f"'{n}'" for n in nodes))
+        if preds:
+            q = q.where(" AND ".join(preds), prefilter=True)
+        rows = q.limit(k).to_list()
         return [Hit(doc=Doc(id=r["id"], text=r["text"], source=r["source"],
                             node=r["node"], ts=r["ts"]),
                     score=1.0 - r["_distance"]) for r in rows]  # cosine dist [0,2] -> sim [-1,1]

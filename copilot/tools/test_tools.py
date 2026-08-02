@@ -5,28 +5,120 @@ Seam under test: the registry -- TOOLS / TOOL_SPECS / dispatch(name, args, adapt
 window) -> (observation, n) -- with a canned StubAdapter (spec #3 §Testing).
 Run:  python3 -m copilot.tools.test_tools
 """
+import atexit
+import shutil
+import tempfile
+
 from copilot.adapter import StubAdapter
-from copilot.tools import TOOLS, TOOL_SPECS, dispatch
+from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
+from copilot.tools import RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
 
 WINDOW = (100, 200)
 METRICS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
 LOGS = [{"device": "r1", "ts": 100 + i, "msg": f"link flap {i}"} for i in range(2)]
 FLOWS = [{"device": "r1", "ts": 100 + i, "bytes": 1000 + i} for i in range(4)]
 
+# a line topology r1-r2-r3-r4 so hop distance from r1 is unambiguous.
+TOPOLOGY = {"nodes": [{"id": n} for n in ("r1", "r2", "r3", "r4")],
+            "links": [{"source": "r1", "target": "r2"},
+                      {"source": "r2", "target": "r3"},
+                      {"source": "r3", "target": "r4"}]}
+
+# KB fixture: a runbook + two incidents. inc-far's text is the BETTER match for the
+# bgp query, so a post-filter-over-top-k would surface it first then drop it; only a
+# prefilter keeps the nearer-but-weaker inc-near. Real corpus = S1/S2.
+KB = [
+    Doc(id="rb-bgp", text="bgp neighbor flap runbook check hold timer session reset",
+        source="runbook", node="r1", ts=1000),
+    Doc(id="inc-near", text="interface congestion queue drops incident", source="incident",
+        node="r2", ts=1001),
+    Doc(id="inc-far", text="bgp session reset hold timer expiry incident", source="incident",
+        node="r4", ts=1002),
+]
+
 
 def _adapter():
-    return StubAdapter(metrics_rows=METRICS, events_rows=LOGS, flows_rows=FLOWS)
+    return StubAdapter(metrics_rows=METRICS, events_rows=LOGS, flows_rows=FLOWS,
+                       topology=TOPOLOGY)
 
 
-def test_registry_covers_the_three_i1_tools():
-    # search_logs + flows join query_metrics; each maps to an adapter method.
+def _retriever():
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    r = LanceRetriever(HashEmbedder(), d)
+    r.add(KB)
+    return r
+
+
+def test_registry_covers_read_and_retrieval_tools():
+    # I1 read tools (adapter methods) + I2b retrieval tools (the KB retriever).
     assert set(TOOLS) == {"query_metrics", "search_logs", "flows"}
+    assert set(RETRIEVAL_TOOLS) == {"search_runbooks", "search_incidents"}
     names = {s["name"] for s in TOOL_SPECS}
-    assert names == set(TOOLS), "every tool is advertised in TOOL_SPECS"
-    # specs expose narrowing args only -- NOT start/end (loop owns the window, ADR-0002)
-    for s in TOOL_SPECS:
-        props = set(s["parameters"]["properties"])
-        assert props == {"device", "pattern", "limit", "offset"}, s["name"]
+    assert names == set(TOOLS) | set(RETRIEVAL_TOOLS), "every tool advertised in TOOL_SPECS"
+    # read tools expose narrowing args only -- NOT start/end (loop owns the window, ADR-0002)
+    specs = {s["name"]: set(s["parameters"]["properties"]) for s in TOOL_SPECS}
+    for name in TOOLS:
+        assert specs[name] == {"device", "pattern", "limit", "offset"}, name
+    # retrieval tools take a query (+ k); incidents adds the hop-filter narrowing.
+    assert specs["search_runbooks"] == {"query", "k"}
+    assert specs["search_incidents"] == {"query", "k", "device", "hops"}
+
+
+def test_search_runbooks_routes_to_retriever_with_full_provenance():
+    obs, n = dispatch("search_runbooks", {"query": "bgp neighbor flap"},
+                      _adapter(), WINDOW, _retriever())
+    assert n >= 1
+    assert "[rb-bgp]" in obs, "hit cited by its doc id (gate needs the citation)"
+    # full provenance triple rides the observation (ADR-0006 / I4a gate): source, node, ts.
+    assert "source=runbook" in obs and "node=r1" in obs and "ts=1000" in obs
+
+
+def test_search_incidents_hop_filter_narrows_to_nearby_devices():
+    # acceptance: hop-filter narrows incidents to devices near the focus (r1, hops<=2).
+    obs, n = dispatch("search_incidents",
+                      {"query": "interface congestion drops", "device": "r1", "hops": 2},
+                      _adapter(), WINDOW, _retriever())
+    assert "[inc-near]" in obs, "1-hop incident kept"
+    assert "[inc-far]" not in obs, "3-hop incident filtered out"
+
+
+def test_hop_filter_prefilters_rather_than_trimming_top_k():
+    # the far incident is the STRONGER match for this query, so a post-filter over a
+    # top-1 global search would surface inc-far then drop it -> "no matches". A prefilter
+    # searches WITHIN the near set and returns the weaker-but-nearby inc-near.
+    obs, n = dispatch("search_incidents",
+                      {"query": "bgp session reset hold timer expiry", "device": "r1",
+                       "hops": 2, "k": 1}, _adapter(), WINDOW, _retriever())
+    assert "[inc-near]" in obs and n == 1, f"prefilter kept the nearby incident, got: {obs}"
+    assert "no matches" not in obs
+
+
+def test_search_incidents_without_device_skips_hop_filter():
+    obs, n = dispatch("search_incidents", {"query": "incident"},
+                      _adapter(), WINDOW, _retriever())
+    assert "[inc-near]" in obs and "[inc-far]" in obs, "no focus device -> no hop narrowing"
+
+
+def test_retrieval_tool_missing_query_reports_guidance_not_crash():
+    obs, n = dispatch("search_runbooks", {}, _adapter(), WINDOW, _retriever())
+    assert n == 0 and obs.startswith("error:") and "query" in obs
+
+
+def test_retrieval_tool_null_k_reports_guidance_not_crash():
+    # a weak model may emit k/hops as null (not just a bad string) -> TypeError, which must
+    # still come back AS guidance (ADR-0015), never crash the loop/stream.
+    obs, n = dispatch("search_runbooks", {"query": "x", "k": None},
+                      _adapter(), WINDOW, _retriever())
+    assert n == 0 and obs.startswith("error:")
+    obs2, n2 = dispatch("search_incidents", {"query": "x", "device": "r1", "hops": None},
+                        _adapter(), WINDOW, _retriever())
+    assert n2 == 0 and obs2.startswith("error:")
+
+
+def test_retrieval_tool_without_retriever_reports_guidance_not_crash():
+    obs, n = dispatch("search_incidents", {"query": "x"}, _adapter(), WINDOW)  # no retriever
+    assert n == 0 and obs.startswith("error:")
 
 
 def test_search_logs_routes_to_events():
@@ -73,7 +165,14 @@ def test_window_is_supplied_by_caller_not_model():
 
 
 def _run():
-    test_registry_covers_the_three_i1_tools()
+    test_registry_covers_read_and_retrieval_tools()
+    test_search_runbooks_routes_to_retriever_with_full_provenance()
+    test_search_incidents_hop_filter_narrows_to_nearby_devices()
+    test_hop_filter_prefilters_rather_than_trimming_top_k()
+    test_search_incidents_without_device_skips_hop_filter()
+    test_retrieval_tool_missing_query_reports_guidance_not_crash()
+    test_retrieval_tool_null_k_reports_guidance_not_crash()
+    test_retrieval_tool_without_retriever_reports_guidance_not_crash()
     test_search_logs_routes_to_events()
     test_flows_routes_to_flows()
     test_query_metrics_still_routes_to_metrics()
