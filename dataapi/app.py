@@ -69,9 +69,16 @@ def events(
 
 
 @app.get("/flows")
-def flows(limit: int = Query(500), device: str = Query(None)):
+def flows(
+    limit: int = Query(500),
+    device: str = Query(None),
+    start: int = Query(None, description="epoch s; window start (scopes the fetch itself)"),
+    end: int = Query(None, description="epoch s; window end (forensic freeze passes T_snapshot)"),
+):
+    # start/end reach flow_rows as since/until so a named/forensic window is not
+    # silently reduced to the newest log lines (ADR-0002/0015). None = unscoped (legacy).
     try:
-        return {"rows": sources.flow_rows(limit=limit, device=device)}
+        return {"rows": sources.flow_rows(limit=limit, device=device, since=start, until=end)}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"flow source error: {e}")
 

@@ -389,6 +389,10 @@ curl 'http://127.0.0.1:8000/flows?device=ce_hub1&limit=100' | jq '.rows[0]'
 #   "timestamp": "2026-06-21T23:30:00Z",
 #   ...
 # }
+
+# Windowed: only flows logged in this range (start/end = epoch s, bounds
+# docker-log print time, not per-record timestamp)
+curl 'http://127.0.0.1:8000/flows?device=ce_hub1&start=1719002400&end=1719006000' | jq '.rows | length'
 ```
 
 ### /labels — All ground-truth fault labels

@@ -93,9 +93,11 @@ Loki log lines flattened to rows.
   "severity":"informational","line":"… bgp_update_rec …"}]}
 ```
 
-### `GET /flows?[limit=&device=]`
+### `GET /flows?[limit=&device=&start=&end=]`
 Recent nfacctd IPFIX purge records. Returns HTTP 502 on a source failure
-(`app.py:76`) — not 200 with an empty list.
+(`app.py:83`) — not 200 with an empty list. `start`/`end` (epoch s, optional)
+scope the fetch itself (`docker logs --since/--until`) — approximate, bounds
+log print time, not per-record timestamp. Omit both for legacy newest-N behavior.
 ```json
 {"rows":[{"ts":"2026-06-21 15:06:31","device":"ce_dc1","ip_src":"192.168.26.10",
   "ip_dst":"192.168.18.10","port_src":34897,"port_dst":19010,"proto":"tcp",

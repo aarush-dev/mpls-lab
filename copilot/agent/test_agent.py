@@ -41,6 +41,23 @@ def test_scripted_investigation_completes_with_query_metrics():
     assert all(isinstance(e, Event) for e in out.events)
 
 
+def test_loop_dispatches_search_logs_and_flows():
+    # I1: the loop routes the new tools through the registry, not just query_metrics.
+    logs = [{"device": "r1", "ts": 100 + i, "msg": f"bgp flap {i}"} for i in range(2)]
+    flows = [{"device": "r1", "ts": 100 + i, "bytes": 1000 + i} for i in range(4)]
+    llm = ScriptedLLM([
+        tool_call("search_logs", {"device": "r1"}, id="c1"),
+        tool_call("flows", {"device": "r1"}, id="c2"),
+        final("r1 flapping [events:0] with a traffic spike [flows:0]"),
+    ])
+    out = investigate("what happened on r1?", WINDOW, llm=llm,
+                      adapter=StubAdapter(events_rows=logs, flows_rows=flows), cfg=_cfg())
+    assert out.stopped is None
+    trs = out.of_type("tool_result")
+    assert trs[0].data["name"] == "search_logs" and "[events:0]" in trs[0].data["content"]
+    assert trs[1].data["name"] == "flows" and "[flows:0]" in trs[1].data["content"]
+
+
 def test_ask_back_when_underspecified():
     # underspecified request -> clarifying question, no tool call (ADR-0005 ask-back).
     llm = ScriptedLLM([final("Which device or link should I look at?")])
@@ -127,6 +144,7 @@ def test_bad_event_type_rejected():
 
 def _run():
     test_scripted_investigation_completes_with_query_metrics()
+    test_loop_dispatches_search_logs_and_flows()
     test_ask_back_when_underspecified()
     test_tool_call_cap_stops_runaway()
     test_step_cap_stops_runaway()

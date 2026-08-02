@@ -827,3 +827,21 @@ per-`kind` lock and a same-device, different-kind cascade.
 Schema went 40 → 49 columns. The shipped real capture was re-joined in place by
 `dataapi/reschema.py` (labels re-derived from `faults/labels/labels.jsonl`, metric
 columns untouched), which is why its fault rows went 327 → 391.
+
+## Copilot I1: tool registry, not per-tool branches
+
+`copilot/tools/registry.py` is a dict (`TOOLS`: name → adapter method +
+description) plus one `dispatch()`, not a branch per tool in `agent/loop.py`.
+Three tools (`query_metrics`, `search_logs`, `flows`) share the same F2
+mandatory-filter contract (window, device/pattern, limit ≤ `MAX_LIMIT`) with no
+per-tool argument differences, so a table beats three near-identical `if` arms.
+Ceiling: the day a tool needs args beyond device/pattern/limit/offset, `TOOLS`
+grows a per-tool arg schema — not before, YAGNI until then.
+
+**`/flows` window plumbing lands in I1; the freeze guard does not.** dataapi's
+`/flows` gained `start`/`end` (epoch s) so a named/forensic window reaches the
+flow source. The forensic end-freeze guard (forbid `end > T_snapshot`, ADR-0002)
+is R3 work, enforced at the adapter — not built yet. The window itself is a bare
+`(start, end)` pair, not the full `WindowContext{start,end,frozen}` (also R3).
+Also note: the flow window filters on `docker logs --since/--until`, i.e. log
+print time, not a per-record `stamp_updated` filter — approximate, not exact.

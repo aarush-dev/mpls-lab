@@ -123,8 +123,13 @@ Each row has: `ts` (ISO UTC), `device`, `app`, `severity`, `line` (raw log text)
 
 NetFlow records show which IP pairs are talking, on what ports, and how much data. Useful for detecting traffic anomalies that don't show up in SNMP counters.
 
+Optional `start`/`end` (epoch s) scope the fetch itself via `docker logs --since/--until` — bounds log print time, not each record's own timestamp. Omit both for newest-N (legacy) behavior.
+
 ```bash
 curl "localhost:8000/flows?device=ce_branch1&limit=100"
+
+# windowed: only flows logged in this range
+curl "localhost:8000/flows?device=ce_branch1&start=$((NOW-3600))&end=$NOW"
 ```
 
 ```python

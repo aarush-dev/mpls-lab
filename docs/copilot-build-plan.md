@@ -27,7 +27,7 @@
 ### Lane-Investigation (Dev 1)
 | Code | # | Delivers |
 |---|---|---|
-| I1 | 9 | `search_logs` + `flows` tools |
+| I1 | 9 | `search_logs` + `flows` tools — **done** |
 | I2a | 10 | Retriever interface + embedded LanceDB + embedder profile |
 | I2b | 11 | `search_runbooks` + `search_incidents` (+ topology-hop filter) |
 | I3 | 12 | `walk_topology_graph` (BFS + `/metrics` enrich, `kg` flag) |

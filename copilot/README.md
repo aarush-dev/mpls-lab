@@ -7,7 +7,8 @@ Ticket map: `../docs/copilot-build-plan.md`. Spec: issue #3.
 
 F0 delivered the **skeleton + master config**; each other subpackage is filled by
 its owning lane as its ticket lands. Filled so far: `llm/` (F1), `adapter/` (F2),
-`agent/` loop (F3), `api/` streamed chat endpoint (F4). The rest are still stubs.
+`agent/` loop (F3), `api/` streamed chat endpoint (F4), `tools/` registry (I1).
+The rest are still stubs.
 
 ## Layout
 
@@ -19,7 +20,7 @@ copilot/
 
   # Lane-Investigation (Dev 1) — disjoint ownership
   adapter/    tool adapter over dataapi: filters+caps+injection guard  (F2)
-  tools/      investigation tools (query_metrics, search_*, flows…)    (F3,I1,I3)
+  tools/      registry: query_metrics, search_logs, flows            (I1,I3)
   retrieval/  Retriever over embedded LanceDB (KB)                     (I2a,I2b)
   agent/      agent loop + two-stage quality gate                      (F3,I4)
   skills/     progressive-disclosure diagnostic skills                 (I5)
@@ -63,6 +64,26 @@ uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only
 The LLM client + tool adapter are injected deps: tests (and later R1) override them
 via `app.dependency_overrides`; the defaults `503` until the real backends are wired.
 Self-check (stubbed, over HTTP): `python3 -m copilot.api.test_api`.
+
+## Tools (I1)
+
+`copilot/tools/registry.py` holds `TOOLS` (name → adapter method + description),
+`TOOL_SPECS` (generated from `TOOLS`), and `dispatch(name, arguments, adapter,
+window) -> (observation_text, n_rows)`. Three tools wired: `query_metrics` →
+`adapter.metrics`, `search_logs` → `adapter.events`, `flows` → `adapter.flows`.
+All ride the F2 mandatory-filter contract (window + device/pattern + limit ≤
+`MAX_LIMIT`), per-item provenance, paging (ADR-0006/0015). Bad args (over-broad
+filter, non-int limit/offset) come back as observation text, never an exception.
+
+`copilot/agent/loop.py` dispatches every tool call through the registry
+(previously hardcoded to `query_metrics`); `SYSTEM_PROMPT` lists all three.
+
+Self-check: `python3 -m copilot.tools.test_tools` (from repo root).
+
+Not built yet: the forensic end-freeze guard (`end > T_snapshot` forbidden,
+ADR-0002) is R3 — I1 only gets the window plumbed to `/flows`, it doesn't
+enforce the freeze. The flow window is bounded by `docker logs --since/--until`
+(log print time), not a per-record timestamp filter — approximate.
 
 ## Where the rest of the system slots in
 

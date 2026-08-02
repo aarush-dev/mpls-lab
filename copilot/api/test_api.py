@@ -69,6 +69,46 @@ def test_every_event_carries_ts_and_canonical_type():
         assert dt.tzinfo is not None, "ts must be tz-aware UTC"
 
 
+def test_device_question_streams_cited_log_and_flow_rows():
+    # I1 acceptance: a device question returns filtered, cited log/flow rows through
+    # the HTTP seam (search_logs + flows now ride the loop).
+    app.dependency_overrides.clear()
+    logs = [{"device": "r1", "ts": 100 + i, "msg": f"bgp flap {i}"} for i in range(2)]
+    flows = [{"device": "r1", "ts": 100 + i, "bytes": 1000 + i} for i in range(4)]
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM([
+        tool_call("search_logs", {"device": "r1"}, id="c1"),
+        tool_call("flows", {"device": "r1"}, id="c2"),
+        final("r1 flapping [events:0] with a traffic spike [flows:0]"),
+    ])
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(events_rows=logs, flows_rows=flows)
+    resp = TestClient(app).post("/chat", json={"question": "what happened on r1?",
+                                               "start": 100, "end": 200})
+    evs = _events(resp)
+    assert [e["type"] for e in evs] == \
+        ["user_msg", "tool_call", "tool_call", "tool_result", "tool_result", "assistant_msg"] or \
+        [e["type"] for e in evs] == \
+        ["user_msg", "tool_call", "tool_result", "tool_call", "tool_result", "assistant_msg"]
+    names = [e["name"] for e in evs if e["type"] == "tool_call"]
+    assert names == ["search_logs", "flows"]
+    trs = [e for e in evs if e["type"] == "tool_result"]
+    assert any("[events:0]" in e["content"] for e in trs)
+    assert any("[flows:0]" in e["content"] for e in trs)
+    assert evs[-1]["content"] == "r1 flapping [events:0] with a traffic spike [flows:0]"
+
+
+def test_unfiltered_call_rejected_through_http_seam():
+    # over-broad tool call (no device/pattern) -> F2 contract guidance as a tool_result,
+    # never rows (acceptance: unfiltered rejected).
+    client = _client([
+        tool_call("search_logs", {}, id="c1"),
+        final("need to narrow to a device"),
+    ])
+    resp = client.post("/chat", json={"question": "show me everything",
+                                      "start": 100, "end": 200})
+    tr = [e for e in _events(resp) if e["type"] == "tool_result"][0]
+    assert tr["content"].startswith("error:") and "device" in tr["content"]
+
+
 def test_ask_back_streams_question_no_tool_call():
     client = _client([final("Which device should I look at?")])
     resp = client.post("/chat", json={"question": "is the network ok?",
@@ -110,6 +150,8 @@ def test_streamed_event_round_trips_into_an_event():
 
 def _run():
     test_chat_streams_tool_call_and_cited_answer()
+    test_device_question_streams_cited_log_and_flow_rows()
+    test_unfiltered_call_rejected_through_http_seam()
     test_every_event_carries_ts_and_canonical_type()
     test_ask_back_streams_question_no_tool_call()
     test_think_event_streams_before_tool_call()

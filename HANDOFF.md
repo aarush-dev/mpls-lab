@@ -71,5 +71,17 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 11. **The live path's `ramp_derived` t_impact is untested against a lab.** `faults/orchestrator.draw_ramp_seconds` + `injectors.NetemImpair.ramp(total_seconds=)` are exercised only by `python3 faults/orchestrator.py --selftest`. At the default `--duration 90` the 0.7x cap truncates almost every drawn lead, so a real campaign needs a much longer `--duration` to exercise the priors.
 12. **The real capture's labels were re-joined, not re-measured** (`dataapi/reschema.py`), which is why its fault rows went 327 -> 391. Its `impact_methods` contain no `ramp_derived` because the capture predates it.
 
+## Copilot subsystem — state
+`copilot/` is a second, separate build (GitHub issues, two lanes — see `docs/copilot-build-plan.md`).
+**Built:** F0–F4 (config/module skeleton, LLM-client seam, tool-adapter seam, agent loop, FastAPI
+`/chat` endpoint) + **I1** (#9, `search_logs` + `flows` tools) — `copilot/tools/` registry
+(`TOOLS`/`TOOL_SPECS`/dispatch) wires `query_metrics`/`search_logs`/`flows` on the F2 adapter
+contract; `copilot/agent/loop.py` dispatches through it; `dataapi` `/flows` gained `start`/`end`
+window params as a prereq. All self-checks green: config/llm/adapter/agent/tools/api, plus
+`python3 -m copilot.tools.test_tools` and dataapi's `python3 test_flows_window.py`.
+**Next ticket:** I1 unblocks #11 (I2b) and #12 (I3). Grabbable now in Lane-Investigation: #13
+(I4a quality gate), #15 (I5 skills loader), #26 (I6 history compaction) — user picks order.
+**Not done:** forensic end-freeze guard / full `WindowContext` (R3), real HTTP adapter (R1).
+
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.
