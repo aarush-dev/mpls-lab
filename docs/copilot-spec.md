@@ -93,9 +93,9 @@ with step + tool-call caps and ask-back.
 endpoints are not a trusted-final contract) and enforces a **mandatory filter contract** — every call
 must carry a window + device/pattern + a hard low limit; unfiltered/over-broad calls are rejected;
 results are small by construction with paging for more; result content is framed as **untrusted data**
-(injection guard). Five investigation tools ride the adapter: `query_metrics`, `search_logs`,
-`walk_topology_graph`, `search_runbooks`, `search_incidents`. The set is **provisional**, pruned later
-by measured usage.
+(injection guard). Investigation tools ride the adapter: `query_metrics`, `search_logs`, `walk_topology_graph`,
+`search_runbooks`, `search_incidents`, plus `flows` (via `/flows`). The set is **provisional** —
+"five" is the core, `flows` the first candidate beyond it; pruned/merged later by measured usage.
 
 **Retrieval (ADR-0006).** A `Retriever` interface (`add`, `search → [(doc, score, provenance)]`) backed
 by **embedded LanceDB** (no server); embedder profile-swapped. Iterative retrieval; provenance on every

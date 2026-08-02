@@ -37,7 +37,7 @@ Use these terms exactly; don't drift to synonyms.
 | **PA-emulator** | Stand-in that produces Prediction Records from `/labels` ground truth while the real PA is unbuilt. Behind the `emulate_pa` flag. Full §3.3 fidelity. (ADR-0003) |
 | **Forecast** | Part of a Prediction Record: quantile telemetry trajectory. |
 | **Agent core / loop** | The owned `think → pick tool → run → observe → decide → cited answer` loop. ~150 lines, not a framework. (ADR-0005) |
-| **Investigation tools** | The 5 read-only tools: `query_metrics`, `search_logs`, `walk_topology_graph`, `search_runbooks`, `search_incidents`. Provisional set (ADR-0017). |
+| **Investigation tools** | Read-only tools on the adapter: `query_metrics`, `search_logs`, `walk_topology_graph`, `search_runbooks`, `search_incidents`, plus `flows` (via `/flows`). **Provisional set** — pruned/merged by measured use (ADR-0017); "five" is the core, `flows` the first candidate beyond it. |
 | **Workspace tools** | The 4 coding tools (Milestone B): `read`, `write`, `edit`, `bash`. little-coder invariants, scoped to the scratchpad. (ADR-0011) |
 | **Tool adapter** | One layer wrapping the data API so endpoint changes move the adapter, not the agent — the dataapi endpoints are **not a trusted-final contract** yet, so nothing hard-couples to them. Enforces mandatory filters + caps. (ADR-0006, ADR-0015) |
 | **WindowContext** | `{start, end, frozen}` threaded into every tool call. Three cases: Live = rolling `now−X`; **Query = the arbitrary/historical period the human names** (agent resolves or asks; defaults to rolling); Forensic = frozen at `T`. Copilot-owned, not a shared service. (ADR-0002) |
