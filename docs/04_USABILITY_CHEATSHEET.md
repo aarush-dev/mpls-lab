@@ -21,7 +21,7 @@ The lab requires:
 modprobe mpls_router mpls_gso mpls_iptunnel && echo "PASS: MPLS modules available" || echo "FAIL: enable MPLS in kernel"
 
 # Check Phase 0 (detailed setup)
-cat /root/LAB/DOCS/PHASE0ENVIRONMENT.md
+cat /root/LAB/docs/PHASE0ENVIRONMENT.md
 ```
 
 ---
@@ -1092,7 +1092,7 @@ python3 /root/LAB/telemetry/envmodel.py      # model selftest
 **All commands are copy-paste ready.** No manual intervention needed once the lab is running.
 
 For detailed architecture, see `/root/LAB/PLAN.md`.
-For environment checklist, see `/root/LAB/DOCS/PHASE0ENVIRONMENT.md`.
+For environment checklist, see `/root/LAB/docs/PHASE0ENVIRONMENT.md`.
 
 ---
 

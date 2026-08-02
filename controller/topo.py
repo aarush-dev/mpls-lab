@@ -5,7 +5,7 @@ Shared by controller.py (telemetry/path-selection) and the trafficgen, so both s
 wired to the SAME node naming the generator emits. Pure derivation from the spec —
 no hardcoded node lists (matches generator/generate.py conventions).
 
-# ponytail: minimal YAML read + index arithmetic mirroring DOCS/SPEC-NOTES.md.
+# ponytail: minimal YAML read + index arithmetic mirroring docs/SPEC-NOTES.md.
 #   Ceiling: if the spec's addressing formulas change, update them here too.
 #   Upgrade path: have generate.py dump a model.json the controller reads instead.
 """

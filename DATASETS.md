@@ -86,14 +86,14 @@ present — an unattributable file cannot ship. Seed 42 keeps its old filename; 
   `faults/leadpriors.py` (lognormal, p10/p90 pinned to a per-fault-type bucket
   range). The previous value came from the median lead of this 24.5-minute capture
   — about 2 s, which the 4-bucket floor then clamped to exactly 120 s on 100% of
-  episodes. See `DOCS/SPEC-NOTES.md` for the per-group reasoning.
+  episodes. See `docs/SPEC-NOTES.md` for the per-group reasoning.
 - **Chassis and optical columns are modelled** — containers have no sensors.
   `device_temp_c`, `device_power_watts`, `device_fan_rpm`, `device_psu_voltage_v`,
   `xcvr_*` come from `telemetry/envmodel.py`, imported by both the live sidecar and
   the generator so they cannot drift. Per-column table in
-  `DOCS/03_TECHNICAL_CODE_GUIDE.md`.
+  `docs/03_TECHNICAL_CODE_GUIDE.md`.
 - **VPNv4 dataplane was down during the real capture.** This kernel lacks
-  `CONFIG_LWTUNNEL`, so MPLS label imposition fails (`DOCS/PHASE0ENVIRONMENT.md`).
+  `CONFIG_LWTUNNEL`, so MPLS label imposition fails (`docs/PHASE0ENVIRONMENT.md`).
   OSPF/LDP control-plane metrics are real; VRF-scoped forwarding metrics reflect a
   partial FIB.
 - **The real capture's labels were re-joined, not re-measured.** `dataapi/reschema.py`

@@ -2,7 +2,7 @@
 
 > Handoff note: this plan was researched and approved in a remote authoring environment.
 > Build/deploy it on the **local agent / workstation** (full kernel + 19 cores / 108 GB / 1007 GB).
-> See `DOCS/PHASE0ENVIRONMENT.md` for what was verified remotely and what the local agent must
+> See `docs/PHASE0ENVIRONMENT.md` for what was verified remotely and what the local agent must
 > re-check on its own kernel before deploying.
 
 ## Context

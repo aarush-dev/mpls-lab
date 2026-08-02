@@ -9,7 +9,7 @@ distribution from a constant.
 
 Ranges are expressed in BUCKETS, not seconds, so they stay correct when --step
 changes. They are engineering priors on how far ahead each failure mode is
-visible in telemetry, not measurements -- see DOCS/SPEC-NOTES.md for the
+visible in telemetry, not measurements -- see docs/SPEC-NOTES.md for the
 reasoning per group.
 
 Draw: lognormal with the 10th/90th percentiles pinned to the range endpoints, so

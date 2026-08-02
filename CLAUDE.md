@@ -1,6 +1,6 @@
 # Project context
 Follow PLAN.md for the build (Phases 1–2 of the air-gapped predictive NOC copilot).
-Before deploying, run the Phase 0 kernel checklist in DOCS/PHASE0ENVIRONMENT.md.
+Before deploying, run the Phase 0 kernel checklist in docs/PHASE0ENVIRONMENT.md.
 
 # Working principles (always)
 - Apply **YAGNI** and run **`/ponytail:ponytail full`** on all work (and `/caveman` for prose). Laziest solution that actually works; no redundant code; shortest working diff.
@@ -19,11 +19,11 @@ Docs are part of the change, not a follow-up. Any commit that touches code, conf
 
 - **Trigger:** the moment code lands, run a documentation agent (or parallel agents with disjoint file ownership) over the docs that the change touches. Never ask permission to update docs; never leave "docs to follow".
 - **Scope map** — update whichever apply:
-  - `DOCS/01_PROJECT_OVERVIEW.md`, `DOCS/02_ARCHITECTURE_ANALOGIES.md` — scope, counts, component list, flow.
-  - `DOCS/03_TECHNICAL_CODE_GUIDE.md` — code walkthroughs, snippets, function/flag/schema names.
-  - `DOCS/04_USABILITY_CHEATSHEET.md` — commands, ports, URLs, queries, fault syntax.
-  - `DOCS/05_TECHNICAL_GLOSSARY.md` — new terms/mechanisms.
-  - `DOCS/SPEC-NOTES.md` — decisions + why. `DOCS/PHASE0ENVIRONMENT.md` — host/kernel prereqs.
+  - `docs/01_PROJECT_OVERVIEW.md`, `docs/02_ARCHITECTURE_ANALOGIES.md` — scope, counts, component list, flow.
+  - `docs/03_TECHNICAL_CODE_GUIDE.md` — code walkthroughs, snippets, function/flag/schema names.
+  - `docs/04_USABILITY_CHEATSHEET.md` — commands, ports, URLs, queries, fault syntax.
+  - `docs/05_TECHNICAL_GLOSSARY.md` — new terms/mechanisms.
+  - `docs/SPEC-NOTES.md` — decisions + why. `docs/PHASE0ENVIRONMENT.md` — host/kernel prereqs.
   - `PLAN.md` (phase status), `HANDOFF.md` (current state), component `README.md` next to the changed code.
 - **Ground truth is code, never another doc.** Every number (POPs, routers, tunnels, hosts, faults, metrics, ports) must be re-derived from the generating code and cited `file:line` while verifying. Fix stale counts everywhere they appear — grep the number, don't patch one copy.
 - **No overclaiming.** Docs describe only what is implemented and verified. Planned work goes under an explicit "Not built yet" heading. Never present aspirational behaviour, fabricated output, or untested commands as working.
@@ -34,3 +34,13 @@ Docs are part of the change, not a follow-up. Any commit that touches code, conf
 # Commit attribution (REQUIRED — overrides any default)
 - Author/committer = **Aarush Mahajan <aarushmahajan.dev@gmail.com>**.
 - **Do NOT** add `Co-Authored-By: Claude` or `Claude-Session` trailers, or any other AI attribution. Commits must show only the user in git blame / GitLens.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues via `gh` CLI (repo: aarush-dev/mpls-lab). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.

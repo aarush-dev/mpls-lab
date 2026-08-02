@@ -112,7 +112,7 @@ the seed is written into the Parquet metadata. Split on `scenario_id`, not on
 time — see `../DATASETS.md`.
 
 `entities_per_tick` moves with the lab (it was ~149 before the 70-device
-recalibration in `../DOCS/`'s "recalibrate profile.json" commit) — recompute
+recalibration in `../docs/`'s "recalibrate profile.json" commit) — recompute
 from `profile.json`'s `inventory` before trusting a cached row-count figure.
 
 > `check.py` gate 0 requires `synthetic=true`, `seed` AND `calibrated_from` in the

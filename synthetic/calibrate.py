@@ -156,7 +156,7 @@ def _fault_signatures(f, tun_nf, df=None):
         # --- core / catastrophic / correlated (faults/orchestrator.py SCENARIOS) ---
         # ponytail: these were missing, so the synthetic set only ever contained
         #   7 of the 21 implemented scenario types and no core faults at all.
-        #   lead_s values track the per-scenario table in DOCS/03.
+        #   lead_s values track the per-scenario table in docs/03.
         "p_node_failure":  {"lat_peak": base_lat * 1.3, "loss_peak": 2.0, "jit_peak": base_jit * 2.0, "lead_s": 5.0, "kind": "iface_down"},
         "pop_isolation":   {"lat_peak": base_lat * 1.6, "loss_peak": 6.0, "jit_peak": base_jit * 2.5, "lead_s": 3.0, "kind": "iface_down"},
         "core_partition":  {"lat_peak": base_lat * 1.8, "loss_peak": 8.0, "jit_peak": base_jit * 3.0, "lead_s": 3.0, "kind": "iface_down"},

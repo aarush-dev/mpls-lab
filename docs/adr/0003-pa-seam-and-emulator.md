@@ -5,7 +5,7 @@
 ## Decision
 
 The **only** seam between the copilot and the prediction stack is the **Prediction Record** — the
-JSON in `DOCS/plans/PA.md` §3.3 (`/v1/predict` response). The copilot consumes records; how they're
+JSON in `docs/plans/PA.md` §3.3 (`/v1/predict` response). The copilot consumes records; how they're
 produced lives behind the seam.
 
 While the real PA is unbuilt, a **PA-emulator** produces records, gated by the **`emulate_pa`** flag:

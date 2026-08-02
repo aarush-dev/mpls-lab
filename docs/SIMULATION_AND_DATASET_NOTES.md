@@ -466,7 +466,7 @@ never used (`orchestrator.py:620-622`).
    so label imposition fails: `Error: CONFIG_LWTUNNEL is not enabled in this
    kernel.` Observed: `Status: Label Changed Failed`, 114 OSPF routes but 9 in
    pe1's FIB, VPNv4 iBGP stuck in `Connect`, `bgp_peer_established` = 0. Phase 0's
-   check gives a false pass — see `DOCS/PHASE0ENVIRONMENT.md` step 1b. The
+   check gives a false pass — see `docs/PHASE0ENVIRONMENT.md` step 1b. The
    `vrflite` fallback named in `topology-spec.yaml:52-53` is **not implemented**.
 2. **`if_in_errors` / `if_in_discards` / `if_out_errors` are constant 0** in
    BOTH paths, deliberately. veth pairs produce no CRC or input errors, so they

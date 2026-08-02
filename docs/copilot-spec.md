@@ -73,7 +73,7 @@ Query (on-demand, past+live, ask-back) — share **one conversational agent core
 retrieval, quality gate, memory). They differ only in *who starts them* and *the data window*.
 
 **Prediction seam (ADR-0003).** The only boundary to the prediction stack is the **Prediction Record**
-(`DOCS/plans/PA.md` §3.3): fault-type PMF, cumulative incidence, time-to-impact, localization, anomaly
+(`docs/plans/PA.md` §3.3): fault-type PMF, cumulative incidence, time-to-impact, localization, anomaly
 token, calibrated decision, drift/health state. Behind an `emulate_pa` flag, a **PA-emulator** produces
 full-fidelity records from `/labels` ground truth with an `error_profile` (oracle|light|heavy) and a
 faked drift/health scalar, so the copilot builds and tests with zero dependency on the real model.

@@ -33,7 +33,7 @@ Use these terms exactly; don't drift to synonyms.
 |---|---|
 | **Copilot subsystem** | The LLM-facing half: agent core + tools + retrieval + trust gate + memory + the two systems. NOT the prediction stack. |
 | **Prediction stack / PA** | The 4-expert + meta-learner model that emits **Prediction Records**. Out of scope; a separate team owns it. "PA" = Predictive Analysis system. |
-| **Prediction Record** | The one JSON object the PA emits per prediction (`DOCS/plans/PA.md` §3.3): fault-type PMF, cumulative incidence, time-to-impact, localization, anomaly token, calibrated decision, drift/health state. The **only seam** between copilot and prediction stack. |
+| **Prediction Record** | The one JSON object the PA emits per prediction (`docs/plans/PA.md` §3.3): fault-type PMF, cumulative incidence, time-to-impact, localization, anomaly token, calibrated decision, drift/health state. The **only seam** between copilot and prediction stack. |
 | **PA-emulator** | Stand-in that produces Prediction Records from `/labels` ground truth while the real PA is unbuilt. Behind the `emulate_pa` flag. Full §3.3 fidelity. (ADR-0003) |
 | **Forecast** | Part of a Prediction Record: quantile telemetry trajectory. |
 | **Agent core / loop** | The owned `think → pick tool → run → observe → decide → cited answer` loop. ~150 lines, not a framework. (ADR-0005) |
