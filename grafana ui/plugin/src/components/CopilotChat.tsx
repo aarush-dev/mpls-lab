@@ -3,7 +3,7 @@ import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2, Button, Icon, Spinner } from '@grafana/ui';
 
-import { CopilotMessage, CopilotResponse } from '../data/types';
+import { CopilotMessage, CopilotResponse, GateVerdict, TraceStep } from '../data/types';
 import { nodeDetailPath } from '../constants';
 
 export interface ChatItem {
@@ -54,6 +54,8 @@ function ResponseCard({ response }: { response: CopilotResponse }) {
   const r = response;
   return (
     <div className={styles.card}>
+      {r.gateVerdict && <GateBadge verdict={r.gateVerdict} />}
+
       {(r.predictedIssue || r.confidence != null) && (
         <div className={styles.predict}>
           {r.predictedIssue && <strong>{r.predictedIssue}</strong>}
@@ -118,9 +120,77 @@ function ResponseCard({ response }: { response: CopilotResponse }) {
         </Section>
       )}
 
+      {r.trace && r.trace.length > 0 && <TraceDetails trace={r.trace} />}
+
       {r.disclaimer && <div className={styles.disclaimer}>{r.disclaimer}</div>}
     </div>
   );
+}
+
+// The quality-gate outcome: green when the answer was verified, amber with the missing evidence
+// when it wasn't. `retry ×N` when the agent looped to gather more (ADR-0008).
+function GateBadge({ verdict }: { verdict: GateVerdict }) {
+  const styles = useStyles2(getStyles);
+  const retry = verdict.retry > 0 ? ` · retry ×${verdict.retry}` : '';
+  return (
+    <div className={verdict.ok ? styles.gateOk : styles.gateBad}>
+      <Icon name={verdict.ok ? 'check-circle' : 'exclamation-triangle'} size="sm" />
+      {verdict.ok ? (
+        <span>Verified{retry}</span>
+      ) : (
+        <span>Missing: {verdict.missing.join(', ') || 'more evidence'}{retry}</span>
+      )}
+    </div>
+  );
+}
+
+// The agent's visible work (ADR-0009/0010), collapsed by default: read the answer first, drill in
+// on demand. tool_result rows are indented under their tool_call by shared id.
+function TraceDetails({ trace }: { trace: TraceStep[] }) {
+  const styles = useStyles2(getStyles);
+  return (
+    <details className={styles.trace}>
+      <summary className={styles.traceSummary}>How I investigated ({trace.length} steps)</summary>
+      <ul className={styles.traceList}>
+        {trace.map((s, i) => (
+          <li key={i} className={s.kind === 'tool_result' ? styles.traceResult : styles.traceStep}>
+            {s.kind === 'think' && (
+              <span>
+                <Icon name="comment-alt" size="sm" /> {s.content}
+              </span>
+            )}
+            {s.kind === 'tool_call' && (
+              <span>
+                <Icon name="cog" size="sm" /> <code>{s.name}({argsOf(s.arguments)})</code>
+              </span>
+            )}
+            {s.kind === 'tool_result' && (
+              <span>
+                <Icon name="list-ul" size="sm" /> {s.name}
+                {s.n != null ? ` · ${s.n} rows` : ''}
+                {s.content ? <pre className={styles.tracePre}>{s.content}</pre> : null}
+              </span>
+            )}
+            {s.kind === 'gate' && s.gate && (
+              <span>
+                <Icon name={s.gate.ok ? 'check-circle' : 'exclamation-triangle'} size="sm" />{' '}
+                gate {s.gate.ok ? 'passed' : `blocked — missing ${s.gate.missing.join(', ') || 'evidence'}`}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function argsOf(a: unknown): string {
+  if (a == null || typeof a !== 'object') {
+    return '';
+  }
+  return Object.entries(a as Record<string, unknown>)
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .join(', ');
 }
 
 function Section({ title, children }: React.PropsWithChildren<{ title: string }>) {
@@ -241,5 +311,63 @@ const getStyles = (theme: GrafanaTheme2) => ({
     color: ${theme.colors.text.secondary};
     font-size: ${theme.typography.bodySmall.fontSize};
     font-style: italic;
+  `,
+  gateOk: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(0.5)};
+    align-self: flex-start;
+    padding: 1px ${theme.spacing(0.75)};
+    border-radius: ${theme.shape.radius.default};
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.success.text};
+    background: ${theme.colors.success.transparent};
+  `,
+  gateBad: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(0.5)};
+    align-self: flex-start;
+    padding: 1px ${theme.spacing(0.75)};
+    border-radius: ${theme.shape.radius.default};
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.warning.text};
+    background: ${theme.colors.warning.transparent};
+  `,
+  trace: css`
+    font-size: ${theme.typography.bodySmall.fontSize};
+  `,
+  traceSummary: css`
+    cursor: pointer;
+    color: ${theme.colors.text.secondary};
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: ${theme.typography.fontWeightMedium};
+  `,
+  traceList: css`
+    list-style: none;
+    margin: ${theme.spacing(0.5)} 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(0.5)};
+  `,
+  traceStep: css`
+    color: ${theme.colors.text.primary};
+  `,
+  traceResult: css`
+    color: ${theme.colors.text.secondary};
+    padding-left: ${theme.spacing(2)};
+  `,
+  tracePre: css`
+    margin: ${theme.spacing(0.25)} 0 0;
+    padding: ${theme.spacing(0.5)};
+    background: ${theme.colors.background.primary};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ${theme.typography.fontFamilyMonospace};
+    font-size: ${theme.typography.bodySmall.fontSize};
   `,
 });

@@ -68,6 +68,14 @@
     },
     {
       "type": "page",
+      "name": "Forensics",
+      "path": "/a/%PLUGIN_ID%/forensics",
+      "role": "Viewer",
+      "addToNav": true,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
       "name": "Fault Injection",
       "path": "/a/%PLUGIN_ID%/inject",
       "role": "Viewer",

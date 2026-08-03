@@ -28,10 +28,13 @@ import type {
   CopilotFeedbackRequest,
   FaultScenario,
   InjectFaultRequest,
+  ChatStreamRequest,
+  CopilotEvent,
 } from './types';
 import { normalizeError } from './errors';
 import { METRIC_CATALOG } from './metricCatalog';
 import { MockDataClient, TopologyNodeLive } from './MockDataClient';
+import { CopilotClient, ChatResult } from './CopilotClient';
 
 // --- Raw backend DTOs -------------------------------------------------------------------------
 
@@ -137,8 +140,16 @@ function popOf(id: string): string | undefined {
 
 export class HttpDataClient implements DataClient {
   private mock = new MockDataClient();
+  private copilot: CopilotClient;
 
-  constructor(private baseUrl: string, private timeoutMs: number) {}
+  constructor(
+    private baseUrl: string,
+    private timeoutMs: number,
+    copilotBaseUrl = 'http://127.0.0.1:8100',
+    copilotTimeoutMs = 120000
+  ) {
+    this.copilot = new CopilotClient(copilotBaseUrl, copilotTimeoutMs);
+  }
 
   // --- transport ------------------------------------------------------------------------------
 
@@ -523,7 +534,7 @@ export class HttpDataClient implements DataClient {
     };
   }
 
-  // --- copilot (no live backend yet — forward to the mock) ------------------------------------
+  // --- copilot (UI-2 #51: live via CopilotClient; conversation persistence stays mock) --------
 
   getConversation(id: string): Promise<Conversation> {
     return this.mock.getConversation(id);
@@ -531,11 +542,18 @@ export class HttpDataClient implements DataClient {
   createConversation(request: CreateConversationRequest): Promise<Conversation> {
     return this.mock.createConversation(request);
   }
+  // DataClient interface: unchanged (mock). The Copilot page drives the live copilot via streamChat.
   sendMessage(request: SendMessageRequest): Promise<SendMessageResponse> {
     return this.mock.sendMessage(request);
   }
   submitFeedback(request: CopilotFeedbackRequest): Promise<void> {
     return this.mock.submitFeedback(request);
+  }
+
+  // --- copilot streaming (beyond the DataClient interface; feature-detected by the page) --------
+
+  streamChat(req: ChatStreamRequest, onEvent: (e: CopilotEvent) => void): Promise<ChatResult> {
+    return this.copilot.streamChat(req, onEvent);
   }
 
   // --- fault injection (extra, beyond the DataClient interface) --------------------------------

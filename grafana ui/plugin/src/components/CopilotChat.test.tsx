@@ -41,6 +41,51 @@ describe('CopilotChat', () => {
     expect(screen.getByText('Runbook: tunnel latency')).toBeInTheDocument();
   });
 
+  it('renders the trace and a verified gate badge when present', () => {
+    const withTrace: CopilotResponse = {
+      ...response,
+      gateVerdict: { ok: true, missing: [], retry: 1 },
+      trace: [
+        { kind: 'think', content: 'check metrics' },
+        { kind: 'tool_call', name: 'query_metrics', arguments: { device: 'pe1' }, id: 'c1' },
+        { kind: 'tool_result', name: 'query_metrics', id: 'c1', content: 'cpu 95', n: 3 },
+        { kind: 'gate', gate: { ok: true, missing: [], retry: 1 } },
+      ],
+    };
+    const items: ChatItem[] = [
+      { message: { id: 'a1', role: 'assistant', content: 'hi', createdAt: 't', state: 'complete' }, response: withTrace },
+    ];
+    render(<CopilotChat items={items} onRetry={jest.fn()} />);
+
+    expect(screen.getByText(/how i investigated/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/query_metrics/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/verified/i)).toBeInTheDocument();
+  });
+
+  it('shows the missing evidence when the gate did not pass', () => {
+    const blocked: CopilotResponse = {
+      ...response,
+      gateVerdict: { ok: false, missing: ['topology', 'latency'], retry: 2 },
+    };
+    const items: ChatItem[] = [
+      { message: { id: 'a1', role: 'assistant', content: 'hi', createdAt: 't', state: 'complete' }, response: blocked },
+    ];
+    render(<CopilotChat items={items} onRetry={jest.fn()} />);
+
+    // the gate badge lists the missing evidence (retry ×2 folded in)
+    expect(screen.getByText(/missing: topology, latency/i)).toBeInTheDocument();
+    expect(screen.getByText(/retry ×2/i)).toBeInTheDocument();
+  });
+
+  it('renders no trace section when the response carries none', () => {
+    const items: ChatItem[] = [
+      { message: { id: 'a1', role: 'assistant', content: 'hi', createdAt: 't', state: 'complete' }, response },
+    ];
+    render(<CopilotChat items={items} onRetry={jest.fn()} />);
+
+    expect(screen.queryByText(/how i investigated/i)).not.toBeInTheDocument();
+  });
+
   it('shows a thinking indicator while sending', () => {
     const items: ChatItem[] = [
       { message: { id: 'u1', role: 'user', content: 'hi', createdAt: 't', state: 'sending' } },

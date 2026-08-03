@@ -3,7 +3,7 @@ import { useParams, useHistory } from 'react-router-dom';
 import { css } from '@emotion/css';
 import { PluginPage } from '@grafana/runtime';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { useStyles2, Link, Select, FilterInput } from '@grafana/ui';
+import { useStyles2, Link, Select, FilterInput, LinkButton } from '@grafana/ui';
 
 import { TimeSeriesPanel } from '../components/TimeSeriesPanel';
 import { EmptyState } from '../components/EmptyState';
@@ -11,7 +11,7 @@ import { ErrorState } from '../components/ErrorState';
 import { InterfaceTable } from '../components/InterfaceTable';
 import { FlowTable } from '../components/FlowTable';
 import { LogTerminal } from '../components/LogTerminal';
-import { nodeDetailPath } from '../constants';
+import { nodeDetailPath, copilotExplainPath } from '../constants';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { FlowRecord, Incident, MetricSeries, NetworkEvent, Prediction, TopologyGraph } from '../data/types';
@@ -130,6 +130,9 @@ export function NodeDetailPage() {
           value={id}
           onChange={(v: SelectableValue<string>) => v?.value && history.push(nodeDetailPath(v.value))}
         />
+        <LinkButton icon="comment-alt" variant="secondary" size="sm" href={copilotExplainPath({ device: id })}>
+          Explain with Copilot
+        </LinkButton>
       </div>
 
       {error ? (

@@ -1,10 +1,12 @@
 import React from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2, Drawer, Link } from '@grafana/ui';
+import { useStyles2, Drawer, Link, LinkButton } from '@grafana/ui';
 
-import { nodeDetailPath } from '../constants';
+import { nodeDetailPath, copilotExplainPath } from '../constants';
 import { Incident } from '../data/types';
+
+const toEpochMs = (t?: string | null) => (t ? Date.parse(t) || undefined : undefined);
 
 interface Props {
   incident: Incident;
@@ -17,6 +19,21 @@ export function IncidentDetail({ incident, onClose }: Props) {
   return (
     <Drawer title={incident.faultType} subtitle={`${incident.status} · ${incident.severity} severity`} onClose={onClose}>
       <p>{incident.summary}</p>
+
+      <LinkButton
+        icon="comment-alt"
+        variant="secondary"
+        size="sm"
+        href={copilotExplainPath({
+          device: incident.deviceIds[0],
+          incident: incident.id,
+          faultType: incident.faultType,
+          from: toEpochMs(incident.startedAt),
+          to: toEpochMs(incident.impactAt) ?? toEpochMs(incident.endedAt),
+        })}
+      >
+        Explain with Copilot
+      </LinkButton>
 
       <h4 className={styles.sectionTitle}>Affected scope</h4>
       {incident.affectedScope.length === 0 ? (

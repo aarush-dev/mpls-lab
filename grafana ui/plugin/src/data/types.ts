@@ -152,6 +152,70 @@ export interface CopilotResponse {
   recommendedActions: RecommendedAction[];
   citations: Citation[];
   disclaimer?: string;
+  // UI-2 (#51): the real copilot's visible work. Optional so the mock + its fixtures stay valid.
+  trace?: TraceStep[];
+  gateVerdict?: GateVerdict;
+}
+
+// --- Copilot live chat (UI-2 #51) -------------------------------------------------------------
+
+/** One step in the agent's visible trace, mapped from a canonical copilot event. */
+export interface TraceStep {
+  kind: 'think' | 'tool_call' | 'tool_result' | 'gate';
+  ts?: string;
+  content?: string; // think text / tool_result content
+  name?: string; // tool name (tool_call, tool_result)
+  arguments?: unknown; // tool_call args
+  id?: string; // correlates tool_call <-> tool_result
+  n?: number; // tool_result row count
+  gate?: GateVerdict;
+}
+
+/** The quality-gate outcome, folded from the run's gate events. */
+export interface GateVerdict {
+  ok: boolean;
+  missing: string[];
+  retry: number;
+}
+
+/**
+ * A raw SSE frame from POST /chat. Mirrors the copilot's ADR-0009 canonical enum
+ * (`agent/loop.py` EVENT_TYPES); each frame is `{type, ts, ...payload}`.
+ */
+export type CopilotEvent =
+  | { type: 'user_msg'; ts?: string; content: string }
+  | { type: 'think'; ts?: string; content: string }
+  | { type: 'tool_call'; ts?: string; name: string; arguments?: unknown; id?: string }
+  | { type: 'tool_result'; ts?: string; id?: string; name?: string; content: string; n?: number }
+  | { type: 'gate'; ts?: string; ok: boolean; missing?: string[]; retry?: number }
+  | { type: 'assistant_msg'; ts?: string; content: string };
+
+/** Request to the streaming copilot chat. Window is epoch seconds (the copilot's tool window). */
+export interface ChatStreamRequest {
+  question: string;
+  start?: number;
+  end?: number;
+  skills?: string[];
+  sessionId?: string;
+  caseId?: string;
+}
+
+/** A forensic case summary (UI-4 #53; sample-backed until the copilot exposes /cases). */
+export interface CaseSummary {
+  id: string;
+  device?: string;
+  cause?: string;
+  alert?: boolean;
+  abstain?: boolean;
+  ts?: string;
+}
+
+/** A forensic case detail: the report markdown + its prediction record. */
+export interface CaseDetail {
+  id: string;
+  caseMd: string;
+  prediction?: Record<string, unknown>;
+  chats?: string[];
 }
 
 export interface Conversation {

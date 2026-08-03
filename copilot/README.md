@@ -91,6 +91,10 @@ turn's **gate outcomes** (pass and fail) are also written to the R2b Event Ledge
 uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only
 ```
 
+CORS (#50): `/chat` allows the Grafana plugin origin (`http://localhost:3000` +
+`http://127.0.0.1:3000`), so the browser dashboard reaches it cross-origin — mirrors dataapi's
+allow-list, the only copilot change the UI integration needs.
+
 The LLM client + tool adapter are injected deps: tests override them via
 `app.dependency_overrides`. `get_adapter` returns the real `HttpAdapter`
 (`cfg.dataapi_url`, env `COPILOT_DATAAPI_URL` wins) — A1 replaced the F2 stub; `get_llm`
