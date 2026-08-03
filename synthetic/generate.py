@@ -873,7 +873,12 @@ def _inject_faults(rng, df, inv, prof, times, step, scale,
     if hard_neg_target:
         _inject_hard_negatives(hard_neg_target)
 
-    df["is_hard_negative"] = hn_mask  # G4
+    # G4: a hard negative is by definition NOT a fault. Where a Stream-F
+    # hard-neg window overlaps a real fault on the same rows, the fault wins and
+    # is_hard_negative clears -- otherwise a row carries both, which is a label
+    # contradiction the near-miss weighting cannot use.
+    has_fault = np.fromiter((len(a) > 0 for a in acc), dtype=bool, count=len(acc))
+    df["is_hard_negative"] = hn_mask & ~has_fault
 
     # write arrays back to df once
     df["tunnel_latency_ms"] = lat_arr

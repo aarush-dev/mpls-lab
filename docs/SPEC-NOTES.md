@@ -1313,3 +1313,37 @@ share timestamps (independent realities of one topology). Companion tables
 (`*_events`, `*_topology_edges`, `*_paths`) versioned alongside the main Parquet.
 Nothing changes without an explicit regeneration decision (air-gap transfer makes
 schema churn expensive).
+
+### DEFECT 1 fix — hard-negative label purity (2026-08-03)
+
+`is_hard_negative` rows must never carry a real impact label. Found 3,402 rows
+(across **234 distinct real-fault episodes**) that were real faults which *also*
+fell inside a hard-negative perturbation window, so they carried both `is_fault`
+and `is_hard_negative`. Fix (`synthetic/generate.py`): the fault wins —
+`is_hard_negative = hn_mask & ~has_fault`, so a near-miss flag clears wherever a
+real episode labels the row. In this generator hard negatives never compute
+severity/impact themselves (they set `t_impact=None`/`no_impact`/null), so the
+leak was pure overlap, not a hard-neg ramp crossing SLA — `congestion_recedes`
+caps its peak at 0.7× the SLA headroom and can never breach, so **0 literal
+hard-neg→fault promotions**, 234 spurious flags cleared. Regression guard added to
+`synthetic/check.py`: every `is_hard_negative` row must have null
+`severity_primary`, all-null `time_to_impact_s`, and `impact_methods` empty/null/
+`no_impact`. `verify_hardneg_paths.py` all-pass (0 leaked rows).
+
+### DEFECT 2 fix — paths.parquet is now path-SELECTION history, not a catalog
+
+`paths.parquet` was a static catalog (every row spanned the full capture,
+`valid_to=capture_end`, no `path_id` repeats). `build_paths` now emits
+interval-encoded per-`(ce, vrf)` path history (`synthetic/topology_paths.py`),
+mirroring `topology_edges`. `path_id` is stable per `(topology_id, ce, vrf)`
+(hub excluded), so a tunnel's whole failover history groups by `path_id`.
+Failover windows are derived from the fault ledger (the synthetic generator does
+not execute `controller.py`; the ledger is the ground truth of which tunnels
+degraded, i.e. exactly what the controller would react to — non-hard-negative
+episodes with `kind=tunnel_ramp` or a failover-capable `fault_type`, window
+`[t_impact,t_end]`). Outside windows the path sits on its preferred hub; inside,
+it rotates to an alternate. Closed intervals get a real `valid_to`; the final
+still-active tail is NULL. Result on the `d0.2_n12` sample: **40.3% of rows
+`valid_to=NULL`** (was 0%), **all 12 topologies show ≥1 reroute**, max path-id
+group 13 rows. Example: `[ce_branch1,ce_hub1]` (preferred) → `[ce_branch1,ce_hub2]`
+(failover window) → `[ce_branch1,ce_hub1]` `valid_to=NULL` (recovered).

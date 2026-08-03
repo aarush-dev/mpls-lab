@@ -193,6 +193,32 @@ def main():
         assert gray.xcvr_tx_bias_ma.mean() > healthy.xcvr_tx_bias_ma.mean(), \
             "gray_failure did not raise laser bias current"
 
+    # DEFECT 1 (hard-negative purity): a near-miss must never carry a real impact
+    # label. Every is_hard_negative row must have null severity, an all-null
+    # time_to_impact_s, and impact_methods that are empty/all-null or 'no_impact'.
+    # A row that overlapped a real fault keeps the fault (is_fault wins) and loses
+    # its hard-negative flag upstream, so any leak here is a generator bug.
+    if "is_hard_negative" in df.columns and bool(df.is_hard_negative.any()):
+        import numpy as _np_hn
+        hn = df[df.is_hard_negative]
+        sev_col = "severity_primary" if "severity_primary" in hn.columns else "severity"
+        assert hn[sev_col].isna().all(), \
+            f"{int(hn[sev_col].notna().sum())} hard-negative rows carry a real severity"
+
+        def _tti_null(x):
+            if isinstance(x, (list, tuple, _np_hn.ndarray)):
+                return all(v is None or (isinstance(v, float) and _np_hn.isnan(v)) for v in x)
+            return x is None or (isinstance(x, float) and _np_hn.isnan(x))
+
+        def _im_null(x):
+            if isinstance(x, (list, tuple, _np_hn.ndarray)):
+                return all(v is None or v == "no_impact" for v in x)
+            return x is None or x == "no_impact"
+        assert hn.time_to_impact_s.apply(_tti_null).all(), \
+            f"{int((~hn.time_to_impact_s.apply(_tti_null)).sum())} hard-negative rows carry a real time_to_impact_s"
+        assert hn.impact_methods.apply(_im_null).all(), \
+            f"{int((~hn.impact_methods.apply(_im_null)).sum())} hard-negative rows carry a real impact_method"
+
     # 8. a precursor label must have a precursor SIGNAL behind it: for every
     # tunnel_ramp fault type, pre-impact tunnel latency must already exceed the
     # healthy mean. Calibrated lead_s of ~2s (< one bucket) used to produce

@@ -29,6 +29,12 @@ DOWNING_FAULTS = {
     "node_failure", "p_node_failure", "pop_isolation",
     "core_partition", "srlg_cut",
 }
+# DEFECT 2: fault_types whose degradation drives a wg hub failover (a reroute the
+# controller would trigger) over [t_impact, t_end]. Hard negatives excluded.
+FAILOVER_FAULTS = {
+    "hub_spoke_congest", "path_asymmetry", "tunnel_degrade", "asymmetric_loss",
+    "brownout", "core_congestion", "congestion",
+}
 
 
 def _hid(*parts) -> str:
@@ -252,31 +258,93 @@ def _dijkstra(g, src):
     return paths
 
 
-def build_paths(topology_id, inventory, meta, capture_start, capture_end):
-    rows = []
-    vf, vt = _ts(capture_start), _ts(capture_end)
+def _merge_windows(wins):
+    """Union overlapping [a, b] windows -> sorted disjoint list (mirrors the
+    interval union that build_edges' _intervals does over downtime)."""
+    out = []
+    for a, b in sorted(wins):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
 
-    def add(pid_parts, hops, ptype, vrf):
+
+def build_paths(topology_id, inventory, meta, ledger, capture_start, capture_end):
+    # DEFECT 2: paths.parquet is the INTERVAL-ENCODED path-SELECTION history, not
+    # a static catalog. ponytail: the synthetic generator never runs
+    # controller.py, so failover is DERIVED FROM THE FAULT LEDGER — the ground
+    # truth of which tunnels degraded, i.e. exactly what the controller reroutes
+    # on. Same interval style as build_edges: closed rows for reroute windows,
+    # valid_to=NULL for the still-active tail.
+    rows = []
+
+    def add(pid, hops, ptype, vrf, vf, vt):
         rows.append({
-            "path_id": _hid(topology_id, ptype, vrf, *hops),
+            "path_id": pid,
             "topology_id": topology_id, "hop_sequence": list(hops),
             "path_type": ptype, "vrf": vrf, "sla_class": VRF_SLA[vrf],
-            "valid_from": vf, "valid_to": vt,
+            "valid_from": _ts(vf), "valid_to": _ts(vt),
         })
 
-    # wg_tunnel paths from inventory tunnels; one row per VRF riding the src CE.
+    # failover windows per CE device, harvested from the ledger.
+    fail = {}
+    for ep in ledger or []:
+        if ep.get("topology_id") not in (None, topology_id):
+            continue
+        if ep.get("is_hard_negative"):           # near-miss stays under SLA -> no reroute
+            continue
+        inducing = (ep.get("kind") == "tunnel_ramp"
+                    or ep.get("fault_type") in FAILOVER_FAULTS)
+        if not inducing:
+            continue
+        imp = ep.get("t_impact")
+        imp = ep.get("t_start") if imp is None else imp
+        end = ep.get("t_end")
+        if imp is None or end is None:
+            continue
+        fail.setdefault(ep.get("device"), []).append((float(imp), float(end)))
+
+    # one logical wg path per (ce, vrf); path_id STABLE per (topology_id, ce, vrf)
+    # (no hub in the id) so a tunnel's whole failover history groups by path_id.
     for dev, v in inventory.items():
         if v.get("site_type") not in ("branch", "dc", "hub"):
             continue
+        dsts = [t.partition("-")[2] for t in v.get("tunnels", [])]
+        if not dsts:
+            continue
+        preferred, alternates = dsts[0], dsts[1:]
         vrfs = [i.split("vrf_")[1] for i in v.get("interfaces", [])
                 if i.startswith("vrf_") and i.split("vrf_")[1] in VRF_SLA] or ["CORP"]
-        for t in v.get("tunnels", []):
-            src, _, dst = t.partition("-")
-            hops = [src, dst]                     # direct WG overlay (>=2 hops)
-            for vrf in vrfs:
-                add((t,), hops, "wg_tunnel", vrf)
 
-    # ospf_spf_path — cheapest PE->PE over the IGP. Underlay carries CORP.
+        # clamp + merge this CE's reroute windows into the capture range.
+        wins = _merge_windows([
+            (max(a, capture_start), min(b, capture_end))
+            for a, b in fail.get(dev, [])
+            if min(b, capture_end) > max(a, capture_start)
+        ])
+
+        # timeline of (vf, vt, hub): on-preferred outside windows, rotate onto an
+        # alternate hub inside each window. Last segment runs to capture_end.
+        segs, cur, ai = [], capture_start, 0
+        for ws, we in wins:
+            if ws > cur:
+                segs.append((cur, ws, preferred))
+            alt = alternates[ai % len(alternates)] if alternates else preferred
+            ai += 1
+            segs.append((ws, we, alt))
+            cur = we
+        if cur < capture_end or not segs:
+            segs.append((cur, capture_end, preferred))
+        segs[-1] = (segs[-1][0], None, segs[-1][2])   # still active -> NULL valid_to
+
+        for vrf in vrfs:
+            pid = _hid(topology_id, "wg_tunnel", vrf, dev)
+            for vf, vt, hub in segs:
+                add(pid, [dev, hub], "wg_tunnel", vrf, vf, vt)
+
+    # ospf_spf_path — cheapest PE->PE over the IGP. Underlay carries CORP. Lazy:
+    # no IGP reroute modelling, so one still-active row per pair (valid_to=NULL).
     g = _ospf_graph(inventory, meta)
     pes = sorted(p for p in g if str(p).startswith("pe"))
     for i, a in enumerate(pes):
@@ -284,7 +352,8 @@ def build_paths(topology_id, inventory, meta, capture_start, capture_end):
         for b in pes[i + 1:]:
             hops = sp.get(b)
             if hops and len(hops) >= 2:
-                add((a, b), hops, "ospf_spf_path", "CORP")
+                add(_hid(topology_id, "ospf_spf_path", "CORP", *hops),
+                    hops, "ospf_spf_path", "CORP", capture_start, None)
 
     return _paths_frame(rows)
 
@@ -311,7 +380,7 @@ def write_topology_and_paths(topologies_with_ledgers, edges_path, paths_path,
         edge_frames.append(
             build_edges(topology_id, inventory, meta, ledger, capture_start, capture_end))
         path_frames.append(
-            build_paths(topology_id, inventory, meta, capture_start, capture_end))
+            build_paths(topology_id, inventory, meta, ledger, capture_start, capture_end))
     pd.concat(edge_frames, ignore_index=True).to_parquet(edges_path, index=False)
     pd.concat(path_frames, ignore_index=True).to_parquet(paths_path, index=False)
     return str(edges_path), str(paths_path)
@@ -337,8 +406,9 @@ if __name__ == "__main__":
         "pe3": {"site_type": "pe", "interfaces": ["eth1", "lo"], "tunnels": []},
         "ce_branch1": {"site_type": "branch",
                        "interfaces": ["eth1", "wg0", "vrf_CORP", "vrf_VOICE"],
-                       "tunnels": ["ce_branch1-ce_hub1"]},
+                       "tunnels": ["ce_branch1-ce_hub1", "ce_branch1-ce_hub2"]},
         "ce_hub1": {"site_type": "hub", "interfaces": ["eth1", "wg0"], "tunnels": []},
+        "ce_hub2": {"site_type": "hub", "interfaces": ["eth1", "wg0"], "tunnels": []},
     }
     meta = {
         "pops": {"pop1": ["p1", "p2"], "pop2": ["p5", "p6"]},
@@ -347,13 +417,23 @@ if __name__ == "__main__":
         "inter_pop_links": [{"pop_a": 1, "pop_b": 2, "srlg": "srlg_x",
                              "links": [["p1", "eth4"], ["p5", "eth4"]]}],
     }
-    # one iface_down on the inter-POP link iface p1/eth4.
-    ledger = [{"topology_id": "T", "kind": "iface_down", "fault_type": "link_flap",
-               "device": "p1", "entity": "eth4",
-               "t_start": T_IMPACT, "t_impact": T_IMPACT, "t_end": T_END}]
+    # one iface_down on the inter-POP link iface p1/eth4 (drives an edge flap),
+    # one tunnel_degrade on ce_branch1 (drives a wg hub failover), and one hard
+    # negative that must be ignored.
+    ledger = [
+        {"topology_id": "T", "kind": "iface_down", "fault_type": "link_flap",
+         "device": "p1", "entity": "eth4",
+         "t_start": T_IMPACT, "t_impact": T_IMPACT, "t_end": T_END},
+        {"topology_id": "T", "kind": "tunnel_ramp", "fault_type": "tunnel_degrade",
+         "device": "ce_branch1", "entity": "wg0", "is_hard_negative": False,
+         "t_start": T_IMPACT, "t_impact": T_IMPACT, "t_end": T_END},
+        {"topology_id": "T", "kind": "tunnel_ramp", "fault_type": "tunnel_degrade",
+         "device": "ce_branch1", "entity": "wg0", "is_hard_negative": True,
+         "t_start": START + 100, "t_impact": START + 100, "t_end": START + 200},
+    ]
 
     edges = build_edges("T", inventory, meta, ledger, START, END)
-    paths = build_paths("T", inventory, meta, START, END)
+    paths = build_paths("T", inventory, meta, ledger, START, END)
 
     # schema/type asserts
     assert {"valid_from", "valid_to"} <= set(edges.columns)
@@ -383,6 +463,18 @@ if __name__ == "__main__":
     assert (paths["path_type"] == "ospf_spf_path").any(), "no SPF path built"
     assert (paths["path_type"] == "wg_tunnel").any(), "no tunnel path built"
 
+    # DEFECT 2: interval-encoded SELECTION history, not a static catalog.
+    assert paths["valid_to"].isna().any(), "no still-active (NULL valid_to) row"
+    assert paths["valid_to"].notna().any(), "no closed interval (real valid_to)"
+    assert paths["path_id"].duplicated().any(), "no path_id grouping >1 row"
+    # the rerouted group must change hub across its interval rows.
+    dup_id = paths["path_id"][paths["path_id"].duplicated()].iloc[0]
+    grp = paths[paths["path_id"] == dup_id]
+    assert len({hs[1] for hs in grp["hop_sequence"]}) >= 2, "reroute did not change hub"
+    # closed-interval valid_to values are real UTC timestamps.
+    assert paths.loc[paths["valid_to"].notna(), "valid_to"].map(
+        lambda t: isinstance(t, pd.Timestamp)).all()
+
     # write + reread parquet
     d = tempfile.mkdtemp()
     ep, pp = os.path.join(d, "e.parquet"), os.path.join(d, "p.parquet")
@@ -398,4 +490,6 @@ if __name__ == "__main__":
     print("\npath_type counts:")
     print(paths["path_type"].value_counts().to_string())
     print(f"\ninterval-flap OK: {len(ended)} closed row(s), "
-          f"{len(edges[edges['valid_to'].isna()])} still-up rows. self-check PASS")
+          f"{len(edges[edges['valid_to'].isna()])} still-up rows.")
+    print(f"path selection: {int(paths['valid_to'].isna().sum())} still-active (NULL) / "
+          f"{int(paths['valid_to'].notna().sum())} closed reroute row(s). self-check PASS")
