@@ -27,12 +27,13 @@ import json
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "dataapi"))
-from export import COLUMNS, precursor_mask
+from export import COLUMNS, SEVERITY_INERT_FAULTS, _as_vrf_list, precursor_mask
 from generate import CHURN_FAULTS, CONGEST_FAULTS
 
 OUTDIR = os.path.join(HERE, "output")
@@ -97,6 +98,11 @@ def main():
     # interface octets overlap real per-site magnitude (loose: same order)
     real = pd.read_parquet(max(glob.glob(os.path.join(DATASETS, "*.parquet")),
                                key=os.path.getmtime))
+    # DEFECT 2a: vrf is list<string> now. A capture exported before this change
+    # still carries scalar vrf; normalise it the way a re-export would so the
+    # dtype/concat gate compares like against like.
+    if "vrf" in real.columns:
+        real["vrf"] = real["vrf"].map(_as_vrf_list)
     rin = real["if_in_octets"].dropna()
     sin = df["if_in_octets"].dropna()
     assert sin.max() >= rin.min() and sin.min() <= rin.max(), \
@@ -236,6 +242,27 @@ def main():
     # DEFECT 5: within-device concurrency must exist for the multi-label head
     assert int(df.n_concurrent.max()) >= 2, \
         f"max n_concurrent={int(df.n_concurrent.max())} -- no concurrent episodes"
+    # DEFECT 1 (severity regression): scenarios whose injector ignores severity
+    # (ProcessKill / link-set) must have null severity AND severity_primary in
+    # 100% of rows -- the synthetic path used to draw one for every episode.
+    for scen in sorted(SEVERITY_INERT_FAULTS & set(df.fault_type_primary.dropna())):
+        sub = df[df.fault_type_primary == scen]
+        assert sub.severity.isna().all() and sub.severity_primary.isna().all(), \
+            f"{scen}: severity on {int(sub.severity.notna().sum())} rows -- must be null"
+    # DEFECT 2a: tunnel vrf is list<string>, never a "+"-joined scalar.
+    tv = df[df.entity_type == "tunnel"].vrf.dropna()
+    assert tv.map(lambda v: isinstance(v, (list, np.ndarray))).all(), \
+        "tunnel vrf is not list-typed"
+    assert not tv.map(lambda v: isinstance(v, str) and "+" in v).any(), \
+        "legacy '+'-joined vrf strings remain in tunnel vrf"
+    # DEFECT 2b: every tunnel ramp_derived instance names a binding VRF it carries.
+    assert "sla_binding_vrf" in df.columns, "sla_binding_vrf column missing"
+    for r in df[(df.entity_type == "tunnel") & df.is_fault].itertuples(index=False):
+        vrfs = set(r.vrf if r.vrf is not None else ())
+        for m, b in zip(r.impact_methods or (), r.sla_binding_vrf or ()):
+            if m == "ramp_derived":
+                assert b is not None and b in vrfs, \
+                    f"ramp_derived binding vrf {b!r} not in tunnel vrfs {vrfs}"
     print(f"  fault_types={df.fault_type_primary.nunique()}  lead CV={cv:.2f}  "
           f"max_concurrent={int(df.n_concurrent.max())}")
     print(f"  concat real+synth -> {len(cat)} rows, schema stable")

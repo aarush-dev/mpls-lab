@@ -78,6 +78,15 @@ def strictest_sla(vrfs):
             min(THETA_SLA[v]["loss_pct"] for v in present))
 
 
+def sla_binding_vrf(vrfs):
+    """DEFECT 2b: which VRF's SLA is the binding (strictest) one on a multi-VRF
+    tunnel. VOICE is tightest on BOTH latency and loss, so the strictest is just
+    the first present in _STRICT_ORDER -- recorded per fault so t_impact's choice
+    on a multi-VRF tunnel is auditable, not an accident of string parsing."""
+    present = [v for v in _STRICT_ORDER if v in set(vrfs or ())] or ["CORP"]
+    return present[0]
+
+
 DEFAULT_RANGE = (8, 30)
 FLOOR_BUCKETS = 4.0  # safety net only: a ramp shorter than this has no signal
 _P90_Z = 1.2815515655446004  # standard-normal 90th percentile

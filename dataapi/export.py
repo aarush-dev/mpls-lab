@@ -24,6 +24,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 
 import sources
@@ -63,12 +64,26 @@ COLUMNS = [
     # reader does not have to know that the legacy scalar names ARE the primary.
     "severity_label",
     "fault_type_primary", "severity_primary", "scenario_id_primary",
+    # DEFECT 2b: which VRF's SLA governed t_impact on a multi-VRF tunnel ramp,
+    # index-aligned with fault_types (strictest VRF present; null off ramp_derived).
+    "sla_binding_vrf",
 ]
 
 # DEFECT 6a: ordinal severity. A magnitude the loss function can use, with the
 # convention that severity is NULL for scenarios whose injector ignores it
 # (faults/orchestrator.py:_label_row) preserved -- null stays null.
 SEVERITY_ORDINAL = {"low": 0.33, "medium": 0.66, "high": 1.0}
+
+# DEFECT 1 (severity regression): the scenarios whose injector (ProcessKill /
+# MultiLinkFault link-set) has no severity concept. Their `severity` MUST be null
+# in every row -- orchestrator.py sets it via spec["severity_inert"], but the
+# synthetic path (generate.py) draws a severity for every episode and so silently
+# populated it. Canonical set = the scen_* builders in faults/orchestrator.py that
+# return "severity_inert": True. check.py cross-checks this against orchestrator.
+SEVERITY_INERT_FAULTS = frozenset({
+    "node_failure", "mpls_underlay_failure", "p_node_failure", "pop_isolation",
+    "core_partition", "srlg_cut", "rr_failure",
+})
 
 # entity_type values and what carries their metrics:
 #   "interface"  one row per (device, physical interface) -- SNMP IF-MIB counters,
@@ -219,13 +234,29 @@ def tunnel_vrf_set(vrfs):
 
     A WireGuard tunnel is shared: every VRF of the site rides it, and under
     failover a non-preferred hub carries them too (controller.VRF_PREFERRED_HUB
-    is a preference, not a binding). So the honest value is the SET, joined --
-    `CORP+VOICE` on a branch, `CORP+GUEST+VOICE` on a hub/dc. Naming one VRF per
-    tunnel would be a fabrication, and splitting tunnel rows per VRF would change
-    the row-count arithmetic (899 keys/bucket) the consumers depend on.
+    is a preference, not a binding). So the honest value is the SET --
+    `["CORP","VOICE"]` on a branch, `["CORP","GUEST","VOICE"]` on a hub/dc.
+    Naming one VRF per tunnel would be a fabrication, and splitting tunnel rows
+    per VRF would change the row-count arithmetic (899 keys/bucket) consumers
+    depend on.
+
+    DEFECT 2a: returned as a list<string>, matching fault_types/severities --
+    a `"+"`-joined scalar was one opaque categorical a consumer could not
+    decompose back into member VRFs.
     """
     present = sorted(v for v in _VRF_NAMES if v in set(vrfs or ()))
-    return "+".join(present) or None
+    return present or None
+
+
+def _as_vrf_list(v):
+    """DEFECT 2a: normalise any `vrf` value to list<string> | None so the column
+    is one Arrow type across tunnels (multi-VRF), interfaces (single), and device
+    rows (null). Also migrates legacy `"CORP+VOICE"` delimited strings."""
+    if isinstance(v, (list, tuple, np.ndarray)):
+        return list(v) or None
+    if v is None or (not isinstance(v, str) and pd.isna(v)):
+        return None
+    return v.split("+")  # scalar VRF name, or a legacy "+"-joined string
 
 
 def _apply_labels(df, step):
@@ -275,6 +306,7 @@ def _apply_labels(df, step):
                     "lead_time_s": lab.get("lead_time"),
                     "time_to_impact_s": round(t_imp - float(epoch[i]), 1),
                     "impact_method": lab.get("impact_method"),
+                    "sla_binding_vrf": lab.get("sla_binding_vrf"),  # DEFECT 2b
                 })
     return attach_labels(df, acc)
 
@@ -290,13 +322,13 @@ def attach_labels(df, acc):
     cols = {c: [] for c in ("is_fault", "scenario_id", "fault_type", "severity",
                             "severity_label", "lead_time_s", "time_to_impact_s",
                             "fault_types", "severities", "scenario_ids",
-                            "impact_methods", "n_concurrent")}
+                            "impact_methods", "sla_binding_vrf", "n_concurrent")}
     for eps in acc:
         if not eps:
             cols["is_fault"].append(False)
             for c in ("scenario_id", "fault_type", "severity", "severity_label",
                       "lead_time_s", "time_to_impact_s", "fault_types", "severities",
-                      "scenario_ids", "impact_methods"):
+                      "scenario_ids", "impact_methods", "sla_binding_vrf"):
                 cols[c].append(None)
             cols["n_concurrent"].append(0)
             continue
@@ -313,6 +345,8 @@ def attach_labels(df, acc):
         cols["severities"].append([e["severity"] for e in eps])
         cols["scenario_ids"].append([e["scenario_id"] for e in eps])
         cols["impact_methods"].append([e["impact_method"] for e in eps])
+        # DEFECT 2b: index-aligned with fault_types; None for non-ramp episodes.
+        cols["sla_binding_vrf"].append([e.get("sla_binding_vrf") for e in eps])
         cols["n_concurrent"].append(len(eps))
     for c, v in cols.items():
         df[c] = v
@@ -326,7 +360,7 @@ def attach_labels(df, acc):
 # every training epoch is pure overhead, and a timestamp type lets a loader check
 # monotonicity without a parse.
 _LIST_COLS = ("fault_types", "severities", "scenario_ids", "impact_methods",
-              "time_to_impact_s")
+              "time_to_impact_s", "sla_binding_vrf")
 _FLOAT_COLS = ("if_in_octets", "if_out_octets", "if_oper_status",
                "tunnel_latency_ms", "tunnel_jitter_ms", "tunnel_loss_pct",
                "tunnel_rekeys", "flow_bytes", "flow_packets", "lead_time_s",
@@ -367,6 +401,8 @@ def finalize_schema(df):
     for c in ("scenario_id", "fault_type", "severity_label", "vrf",
               "fault_type_primary", "scenario_id_primary") + _LIST_COLS:
         df[c] = df[c].astype("object")
+    # DEFECT 2a: one Arrow type for vrf -- list<string> | None on every row.
+    df["vrf"] = df["vrf"].map(_as_vrf_list)
     return df.sort_values(["ts", "device", "entity"]).reset_index(drop=True)
 
 

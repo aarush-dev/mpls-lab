@@ -187,7 +187,10 @@ two can never disagree.
 `dataapi/export.py:38-53`. First 21 are the original schema in their original
 order, so readers written against it still work.
 
-- keys: `ts, device, site_type, vrf, entity, entity_type`
+- keys: `ts, device, site_type, vrf, entity, entity_type` — `vrf` is
+  `list<string>` on every row (DEFECT 2a): a tunnel carries several VRFs
+  (`["CORP","VOICE"]`), an interface one (`["CORP"]`), a physical/device row
+  null. Was a `"+"`-joined scalar tunnels-only, undecomposable as a categorical.
 - interface: `if_in_octets, if_out_octets, if_oper_status`
 - tunnel: `tunnel_latency_ms, tunnel_jitter_ms, tunnel_loss_pct, tunnel_rekeys`
 - flow: `flow_bytes, flow_packets`
@@ -201,10 +204,12 @@ order, so readers written against it still work.
   ospf_lsa_count, device_temp_c, device_power_watts, device_fan_rpm,
   device_psu_voltage_v`
 - **added (multi-label)**: `time_to_impact_s, fault_types, severities,
-  scenario_ids, impact_methods` are index-aligned LISTS — one entry per episode
-  overlapping the row, element 0 = primary — plus `n_concurrent` (int8),
-  `severity_label`, and the explicit `fault_type_primary / severity_primary /
-  scenario_id_primary` aliases
+  scenario_ids, impact_methods, sla_binding_vrf` are index-aligned LISTS — one
+  entry per episode overlapping the row, element 0 = primary — plus
+  `n_concurrent` (int8), `severity_label`, and the explicit `fault_type_primary /
+  severity_primary / scenario_id_primary` aliases. `sla_binding_vrf` (DEFECT 2b)
+  names the VRF whose SLA governed `t_impact` on a multi-VRF tunnel ramp, null
+  off `ramp_derived` episodes.
 
 Three `entity_type` values (`export.py:55-60`): `interface` (per physical port),
 `tunnel` (per WireGuard tunnel), `device` (whole box, `entity` == device name).
@@ -456,7 +461,13 @@ signature, device, dry_run, error`, plus `campaign_id` in campaign mode.
 
 `severity` is written as **null** for scenarios whose injector ignores it
 (link-set and process-kill faults) — the column must not carry a value the fault
-never used (`orchestrator.py:620-622`).
+never used (`orchestrator.py:620-622`). DEFECT 1: the synthetic path drew a
+severity for *every* episode and so populated it for these scenarios too; it now
+nulls `severity`/`severity_label` when `fault_type ∈
+export.SEVERITY_INERT_FAULTS` (the 7 `severity_inert` scenarios:
+`node_failure, mpls_underlay_failure, p_node_failure, pop_isolation,
+core_partition, srlg_cut, rr_failure`), so `severity_primary` is null whenever
+the primary episode is one of them. `check.py` asserts 100% null on these.
 
 ---
 
@@ -480,6 +491,13 @@ never used (`orchestrator.py:620-622`).
    fires (`vm_threshold`), and modelled otherwise — in the shipped synthetic files
    the split is ~49% `ramp_derived` / ~51% `modelled`, because the calibrated
    latency peaks sit below every latency objective and only loss breaches.
+   **A multi-VRF tunnel resolves against the STRICTEST (lowest-tolerance) VRF it
+   carries** — the first to breach, so the physically correct `t_impact`
+   (`leadpriors.strictest_sla` / `sla_binding_vrf`; VOICE is tightest on both
+   latency and loss, then CORP, then GUEST). The binding VRF is recorded per
+   episode in the `sla_binding_vrf` label column so the choice is auditable, not
+   an accident of string parsing; `check.py` asserts it is one of the tunnel's
+   VRFs on every `ramp_derived` tunnel instance.
 4. **`flow_bytes`/`flow_packets` on synthetic device rows are MODELLED from the
    per-VRF flow shapes** (`trafficgen.VRF_FLOW`) scaled by the diurnal curve, not
    calibrated against the real flow rows. They were null before, which was itself

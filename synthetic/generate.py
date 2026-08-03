@@ -40,8 +40,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "telemetry"))
 sys.path.insert(0, os.path.join(HERE, "..", "faults"))
 sys.path.insert(0, os.path.join(HERE, "..", "trafficgen"))
 # canonical schema + the label writer, so real and synthetic cannot diverge
-from export import (COLUMNS, SEVERITY_ORDINAL, attach_labels, finalize_schema,
-                    precursor_mask, tunnel_vrf_set, vrf_of_entity)
+from export import (COLUMNS, SEVERITY_INERT_FAULTS, SEVERITY_ORDINAL,
+                    attach_labels, finalize_schema, precursor_mask,
+                    tunnel_vrf_set, vrf_of_entity)
 import envmodel  # chassis/optical models, shared with the live sidecar
 import leadpriors  # lead-time priors + per-VRF SLA, shared with the live orchestrator
 from trafficgen import VRF_FLOW  # per-VRF flow shapes, for flow_bytes/flow_packets
@@ -568,6 +569,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         # exactly at t_impact -- so the crossing lands on the drawn lead by
         # construction, and the lead keeps its full spread.
         p_cross, method = 1.0, "modelled"
+        binding_vrf = None  # DEFECT 2b: set only when a ramp SLA crossing resolves
         tmask = win & (etype == "tunnel")
         if kind == "tunnel_ramp" and tmask.any():
             theta_lat, theta_loss = leadpriors.strictest_sla(
@@ -582,6 +584,8 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
             cross = min(p_lat, p_loss)
             if 0 < cross <= 1.0:
                 p_cross, method = cross, "ramp_derived"
+                # DEFECT 2b: strictest VRF governs t_impact -- record which one.
+                binding_vrf = leadpriors.sla_binding_vrf(site_vrfs(inv[target]))
 
         # Label ONLY rows a perturbation actually reaches. The window is
         # device-wide but each `kind` moves one entity_type, so labelling the
@@ -597,14 +601,21 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
 
         sid = f"{ft}-{target}-{_sid_hex(rng)}{suffix}"
         rank = {"low": 1, "medium": 2, "high": 3}[str(sev)]
+        # DEFECT 1: link-set / process-kill scenarios have no severity concept, so
+        # severity is null (matching orchestrator.py's severity_inert). rank still
+        # uses the drawn sev to order the primary; only the recorded value is null.
+        inert = ft in SEVERITY_INERT_FAULTS
+        sev_ord = None if inert else SEVERITY_ORDINAL[str(sev)]
+        sev_lab = None if inert else str(sev)
         tti = np.round(t_impact - epoch[lab], 1)
         for i, tt in zip(np.flatnonzero(lab), tti):
             acc[i].append({"scenario_id": sid, "fault_type": ft,
-                           "severity": SEVERITY_ORDINAL[str(sev)],
-                           "severity_label": str(sev), "rank": rank,
+                           "severity": sev_ord,
+                           "severity_label": sev_lab, "rank": rank,
                            "lead_time_s": round(lead, 1),
                            "time_to_impact_s": float(tt),
-                           "impact_method": method})
+                           "impact_method": method,
+                           "sla_binding_vrf": binding_vrf})  # DEFECT 2b
 
         if kind == "tunnel_ramp" and tmask.any():
             _tunnel_ramp(tmask, sig, _prog(tmask, t_start, t_impact, t_end,
