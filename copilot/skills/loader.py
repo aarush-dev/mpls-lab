@@ -51,6 +51,17 @@ def catalog(skills: dict[str, Skill]) -> str:
     return "\n".join(lines)
 
 
+def fault_type_hint(fault_type: str | None) -> str:
+    """A soft steer for skill selection (ADR-0012, R4a): tells the model the Prediction Record's
+    `fault_type` so it can pick the matching diagnostic skill by description. Deliberately NOT a
+    rigid `fault_type -> skill` map (ADR-0012 rejects that) -- it's context, the agent still
+    chooses. Empty in -> empty out, so the base prompt is unchanged when no prediction is wired."""
+    if not fault_type:
+        return ""
+    return (f"The current prediction flags a {fault_type!r} fault -- prefer the diagnostic skill "
+            "whose description matches it, if one applies.")
+
+
 def _split_frontmatter(text: str) -> tuple[dict, str]:
     """Return ({frontmatter}, body). Frontmatter = the first `---`-fenced YAML block at the
     top of the file; no fence -> ({}, text) so the file falls out (no name/description)."""

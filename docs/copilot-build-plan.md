@@ -69,6 +69,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | R1 | 16 | real LLM backend profiles **+ the loop message-assembly fix** (narrow: fake-server + 1 smoke, not live-lab) |
 | R2a | 17 | session store (`sessions/<id>/{events.jsonl,meta.json}`) + multi-turn loop entry (`history`) + emit-time event ts + gate-on-pass |
 | R2b | 18 | Event Ledger (`copilot/memory/ledger.py` — append-only SQLite, idempotent by record id, query by device / time range) + gate outcomes routed in via F4 (`api/app.py`) |
+| R4a | 20 | PA-emulator core (`copilot/emulator/emulate.py` — ground-truth `/labels` → full §3.3 record, oracle-deterministic) + `emulate_pa` seam + `persist`→ledger; `abstain`→gate soften + `fault_type`→skill steer; resolved §3.3.1 (health in-record, `n_concurrent`) |
 | E1 | 42 | **end-to-end: real chat on real model + real dataapi + seeded KB** |
 
 **#42 (E1) closing is the first moment `/chat` answers a real question end to end** — not #16. R1 is
@@ -78,8 +79,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 ### Remaining Milestone A
 | Code | # | Delivers |
 |---|---|---|
-| R4a | 20 | PA-emulator core: ground-truth → §3.3 record (oracle) + `abstain`→gate + `fault_type`→skills |
-| R4b | 21 | emulator `error_profile` + drift/health knobs |
+| R4b | 21 | emulator `error_profile` + drift/health knobs (R4a shipped `oracle`/`light`/`heavy` scaffolding; R4b tunes the knobs + the periodic firing that writes records every `predict_interval_s`) |
 | R5a | 22 | forensic trigger: 10 s loop, alert, episode dedup, restart-safe |
 | R5b | 23 | case creation + **file-backed replay adapter** |
 | R6a | 24 | multi-chat per case + follow-up over frozen window |
@@ -155,8 +155,8 @@ with anything it shares a row with.
 | **R1** #16 | `agent/loop.py:203` (assistant `tool_calls` dropped), `tools/registry.py:61` + `agent/loop.py:91` (two copies of the flat tool-spec shape), `agent/loop.py:104` (ReAct parser), `config.py:49,68` | ADR-0004. A real backend rejects the current message assembly. |
 | **R2a** #17 | `agent/loop.py:122,155` (single-shot → multi-turn), `api/app.py` (`ChatRequest`, session id), `agent/loop.py:46` (emit-time ts), `:185` (gate event on pass) | ADR-0009. Resume is a loop change, not a writer. |
 | **R2b** #18 | `memory/ledger.py` (new), `api/app.py` (gate outcomes → ledger via F4) | ADR-0009. Routed through F4's event pipeline (not the I4b emit site) — reuses the single `event_wire` schema. |
-| **R4a** #20 | `agent/gate.py` (`abstain` softens), `agent/loop.py:145-154` + `skills/loader.py` (`fault_type` steers) | ADR-0008 §Nuances, ADR-0012 §Decision. I4a/I4b/I5 are incomplete against their own ADRs. |
-| **R4b** #21 | `agent/gate.py` (via #20) | its own acceptance — "heavy stresses the gate" — is otherwise unsatisfiable. |
+| **R4a** #20 ✅ | `emulator/emulate.py` (new — producer + `emulate_pa` seam + `persist`), `agent/gate.py` (`abstain` softens sufficiency, keeps integrity), `agent/loop.py` + `skills/loader.py` (`fault_type_hint` steers), `docs/plans/PA.md` §3.3.1/§3.5 (health-in-record + `n_concurrent` resolved) | ADR-0008 §Nuances, ADR-0012 §Decision, ADR-0003. Consumer **hooks** land here (tested end-to-end producer→gate/skills); the **runtime callers** are named downstream — periodic firing that writes records to the ledger = R4b/#21 (ADR-0014 `predict_interval_s`, still unread until then), forensic chat that threads a frozen record into `investigate()` = R5. §3.3.1 unblocks T1/#41. |
+| **R4b** #21 | `emulator/` (new firing loop — the periodic predictor that reads `cfg.predict_interval_s` + `emulator.fetch_labels` and `persist`s a record every tick, ADR-0014), `config.py` (`predict_interval_s` gains its first reader), `agent/gate.py` (heavy-profile gate stress, via #20) | R4a left `predict_interval_s` unread by design — this row now owns it. "heavy stresses the gate" is otherwise unsatisfiable. |
 | **R5a** #22 | *nothing outside `forensic/`* | **the one honest ticket in the original plan.** Keep it that way. |
 | **R5b** #23 | `adapter/` (file-backed replay adapter), `agent/loop.py` + `agent/gate.py` (`case.md` format) | #23 wants "replayable from disk"; tools only read via `ToolAdapter`. ADR-0010 §Open is unresolved. |
 | **R6a** #24 | `agent/loop.py` (multi-turn), `api/app.py` (case/session routing), `adapter/contract.py` (freeze bites) | follow-ups are multi-turn and frozen. |

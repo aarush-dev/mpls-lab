@@ -32,7 +32,7 @@ copilot/
   llm/        OpenAI-compatible client, profile-selected               (F1,R1)
   memory/     Session Store (sessions/<id>/events.jsonl+meta.json, resumable) (R2a); Event Ledger (ledger.py — append-only SQLite timeline, gate outcomes) (R2b)
   window/     WindowContext live/query/forensic                        (R3)
-  emulator/   PA-emulator: /labels ground truth → Prediction Record    (R4)
+  emulator/   PA-emulator: /labels ground truth → §3.3 Prediction Record; emulate_pa seam; abstain→gate, fault_type→skills (R4a)
   forensic/   forensic trigger: predict loop, dedup, case creation     (R5,R6)
 
   # Convergence
@@ -206,11 +206,16 @@ front end. Nothing here duplicates them; it **consumes** them.
 
 - **PA / prediction stack** (separate team, `../docs/plans/PA.md`) — out of scope
   for this subpackage. Its only seam is the **Prediction Record** (§3.3). Until it
-  ships, `copilot/emulator/` produces full-fidelity records from `/labels` ground
-  truth behind `emulate_pa=true`. When the real PA lands it writes the same record
-  to the Event Ledger (`copilot/memory/`) and the flag flips to `false` — no
-  copilot code change. If the real PA grows its own package, it lives **beside**
-  `copilot/`, not inside it (the seam is the record, not an import).
+  ships, `copilot/emulator/` (R4a) produces full-fidelity records from `/labels`
+  ground truth: `emulate_record(label)` derives every §3.3 block (oracle-exact;
+  `light`/`heavy` perturb TTI/abstain/drift), `prediction(cfg, labels)` is the
+  `emulate_pa`-routed seam (on→emulator, off→real PA, no caller change), `persist`
+  lands a record in the Event Ledger (`copilot/memory/`). The record's `abstain`
+  softens the quality gate and its `fault_type` steers skill selection (the two
+  consumer hooks). Two §3.3 gaps are resolved here (PA.md §3.3.1): `health.drift_state`
+  folds INSIDE the record, `n_concurrent` is added. When the real PA lands, the flag
+  flips to `false` — no copilot code change. If the real PA grows its own package,
+  it lives **beside** `copilot/`, not inside it (the seam is the record, not an import).
 - **Kafka** — reuse the running bridge (`../streaming/bridge.py`), do not add a
   broker. It already publishes `noc.{metrics,events,faults,topology}` to two
   consumer groups: **`noc-predictive`** (PA stack) and **`noc-copilot`** (this

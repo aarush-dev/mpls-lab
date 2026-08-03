@@ -4,6 +4,6 @@ Steers the weak model with diagnostic METHOD (how to investigate), distinct from
 cited evidence. Only {name, description} of each skill sits in the base prompt; the body loads
 on match (the agent's `load_skill` tool) or on manual invoke. Owner lane builds here.
 """
-from copilot.skills.loader import Skill, catalog, load_skills
+from copilot.skills.loader import Skill, catalog, fault_type_hint, load_skills
 
-__all__ = ["Skill", "catalog", "load_skills"]
+__all__ = ["Skill", "catalog", "fault_type_hint", "load_skills"]

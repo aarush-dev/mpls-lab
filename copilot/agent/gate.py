@@ -54,23 +54,30 @@ def tool_calls_ok(errors) -> GateResult:
     return _result([f"failed tool call: {e}" for e in errors])
 
 
-def pre_gate(cites, *, window, entities, min_evidence) -> GateResult:
-    """Deterministic sufficiency + topicality check over gathered `Cite`s (ADR-0008 stage 1)."""
+def pre_gate(cites, *, window, entities, min_evidence, soft=False) -> GateResult:
+    """Deterministic sufficiency + topicality check over gathered `Cite`s (ADR-0008 stage 1).
+
+    `soft` (ADR-0008 §Nuances: the Prediction Record's `abstain==true`) drops the SUFFICIENCY
+    checks -- the evidence floor + the "every named entity has support" requirement -- because
+    "anomalous, no confident call, here's the evidence" is a valid answer that by definition
+    lacks a full case. The INTEGRITY checks stay on: whatever the answer does cite must still be
+    in-window and on-topic, so a soft gate never licenses out-of-window or off-topic evidence."""
     start, end = window.start, window.end            # R3: window is a WindowContext, not a tuple
     missing = []
-    if len(cites) < min_evidence:
+    if not soft and len(cites) < min_evidence:       # sufficiency: relaxed on abstain
         missing.append(f"thin evidence: {len(cites)} item(s) < required {min_evidence}")
     for c in cites:
         if c.source not in WINDOWED_SOURCES:             # KB / topo exempt (see WINDOWED_SOURCES)
             continue
-        if c.ts is None or not (start <= c.ts <= end):   # windowed evidence MUST be in-window
+        if c.ts is None or not (start <= c.ts <= end):   # integrity: in-window, even when soft
             missing.append(f"out-of-window: {c.id} ts={c.ts} not in [{start},{end}]")
         if entities and c.device and c.device.lower() not in entities:
             missing.append(f"off-topic: {c.id} on {c.device} not in question entities")
-    supported = {c.device.lower() for c in cites if c.device}
-    for e in sorted(entities):
-        if e not in supported:
-            missing.append(f"off-topic: no evidence for entity {e!r}")
+    if not soft:                                         # sufficiency: every entity supported
+        supported = {c.device.lower() for c in cites if c.device}
+        for e in sorted(entities):
+            if e not in supported:
+                missing.append(f"off-topic: no evidence for entity {e!r}")
     return _result(missing)
 
 
@@ -90,12 +97,16 @@ def citation_check(answer: str, valid_ids) -> GateResult:
     return _result(missing)
 
 
-def run_gate(answer: str, cites, *, window, question, min_evidence, tool_errors=()) -> GateResult:
+def run_gate(answer: str, cites, *, window, question, min_evidence, tool_errors=(),
+             abstain=False) -> GateResult:
     """I4a stage-1 gate (ADR-0008): tool-call success + deterministic pre-gate + citation check,
-    combined. Stage-2 (self-judge LLM) + the bounded agentic retry on fail are I4b (#14)."""
+    combined. Stage-2 (self-judge LLM) + the bounded agentic retry on fail are I4b (#14).
+
+    `abstain` (R4a): the Prediction Record abstained -> soften the pre-gate's sufficiency checks
+    (ADR-0008 §Nuances). Integrity (tool-call success, in-window, on-topic, citation) is unmoved."""
     calls = tool_calls_ok(tool_errors)
     pre = pre_gate(cites, window=window, entities=extract_entities(question),
-                   min_evidence=min_evidence)
+                   min_evidence=min_evidence, soft=abstain)
     cite = citation_check(answer, {c.id for c in cites})
     return _result([*calls.missing, *pre.missing, *cite.missing])
 

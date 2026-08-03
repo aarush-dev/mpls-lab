@@ -134,6 +134,29 @@ here from their producer (PA-emulator, #20/#23). `COPILOT_LEDGER_PATH` (default 
 Self-check: `python3 -m copilot.memory.test_ledger` (+ a pass/fail gate-outcome case in the `api`
 suite). Unblocks **R4a (#20)** / **B4**.
 
+**R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
+seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth
+`/labels` fault into a full-fidelity §3.3 record — every block (risk/forecast/localization/anomaly/
+decision) a deterministic readout of the label; `oracle` exact, `light`/`heavy` perturb (TTI/abstain/
+drift) keyed by a scenario_id hash (no clock/RNG → reproducible). `prediction(cfg, labels, now=…)`
+is the `emulate_pa`-routed seam (on→emulator, off→`real_pa(now)` callable that raises until built;
+the window_end_ts crosses the seam, the caller is unchanged). `fetch_labels(base_url)` reads the
+ground-truth `/labels` timeline (injectable transport) so produce→persist runs off real rows, not
+a literal; the *periodic* firing that loops it is R4b. `persist(ledger, record)` lands a record in
+the R2b Ledger (idempotent by alert_id). **Two consumer hooks** (tested end-to-end producer→
+consumer): `is_abstain(record)`→`run_gate(…, abstain=True)` softens the pre-gate's *sufficiency*
+checks (thin-evidence floor + entity-support) while keeping *integrity* (in-window/on-topic/
+citation) — "anomalous, no confident call" is a valid answer (ADR-0008 §Nuances); stage-2 self_judge
+still runs under abstain but only a *contradiction* blocks (a self-inconsistent answer is never
+licensed). `fault_type(record)`→`investigate(…, fault_type=…)` adds a soft skill-selection steer
+(`skills.fault_type_hint`, no rigid mapping, ADR-0012). **Two shape conflicts
+resolved** (PA.md §3.3.1, amended §3.5): `health.drift_state`+`codebook_novelty` fold INSIDE the
+record (ADR-0003 wins the §3.5 separate-endpoint split — one air-gapped seam), unblocking T1/#41;
+`n_concurrent` (int≥1) invented for ADR-0014/0009/#25. Runtime callers are downstream: periodic
+firing that writes records every `predict_interval_s` = R4b/#21 (ADR-0014); forensic chat threading
+a frozen record into `investigate()` = R5. Self-check: `python3 -m copilot.emulator.test_emulate`
+(+ new gate/loop cases in `agent` suites). Unblocks **R4b (#21)**, **R5a (#22)**.
+
 **Plan repaired 2026-08-03, audited same day.** Repair created **#38** (codependency rule + graph
 repair), **#39** (redeploy lab + verify dataapi live), **#40** (real HTTP tool adapter); #16–#27
 rewritten with `Modifies` + `Consumes stub` sections + corrected `blocked_by`; #9–#15 closed. The
@@ -165,7 +188,8 @@ teaching the exact `[metrics:0]` citation token. **Regressions filed** (#42 mand
 patch): #43 (range/unicode citations), #44 (embedder query/passage asymmetry), #45 (harmony leak),
 #46 (all-None-node retrieval crash — **fixed** here: `store.py` pins the pyarrow schema).
 
-**Not done:** emulator (R4a/b), trust gate (T1), forensic chain (R5–R6), C1;
+**Not done:** emulator knobs + periodic firing (R4b), trust gate (T1/#41 — now unblocked: #20
+landed `health` in-record), forensic chain (R5–R6), C1;
 Milestone B. Seeder does not set `node` on incidents, so `search_incidents`-by-device narrows to
 empty (S1 follow-up, noted in #46). Default `/chat` KB still needs a seeded `COPILOT_KB_URI`.
 

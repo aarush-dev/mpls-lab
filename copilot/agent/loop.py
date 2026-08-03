@@ -35,7 +35,7 @@ from copilot.agent.gate import GateResult, run_gate
 from copilot.config import Config
 from copilot.llm import LLMClient, ToolCall
 from copilot.retrieval import Retriever
-from copilot.skills import Skill, catalog
+from copilot.skills import Skill, catalog, fault_type_hint
 from copilot.tools import Cite, TOOL_SPECS, dispatch
 from copilot.window import WindowContext
 
@@ -151,7 +151,9 @@ def investigate(question: str, window: WindowContext, *,
                 kg: dict[str, str] | None = None,
                 skills: dict[str, Skill] | None = None,
                 invoke: list[str] | None = None,
-                history: list[dict] | None = None) -> Outcome:
+                history: list[dict] | None = None,
+                fault_type: str | None = None,
+                abstain: bool = False) -> Outcome:
     """Run the loop until the model answers, asks back, or a cap trips. `kg` is the optional
     curated-KG hint map (ADR-0007): additive, never load-bearing -- the caller passes it only
     when cfg.kg_enabled (get_kg), so it's None here whenever the flag is off.
@@ -165,7 +167,13 @@ def investigate(question: str, window: WindowContext, *,
     `history` (R2a, ADR-0009) is the prior conversation turns of a resumed session --
     {"role","content"} messages the SessionStore reconstructs from a session's events.jsonl
     -- inserted between the system prompt and the new question so the model sees where the
-    chat left off. None (default) = a fresh single-turn run."""
+    chat left off. None (default) = a fresh single-turn run.
+
+    `fault_type` / `abstain` (R4a, ADR-0003) come from the current Prediction Record (via the
+    emulator seam, extracted by the caller with copilot.emulator.fault_type / is_abstain):
+    `fault_type` is a soft steer for skill selection (ADR-0012, no rigid mapping); `abstain`
+    (the PA made no confident call) softens the quality gate (ADR-0008 §Nuances). Both default
+    to nothing, so the loop is byte-identical to F3 when no prediction is wired."""
     skills = skills or {}
     events: list[Event] = []
 
@@ -177,6 +185,9 @@ def investigate(question: str, window: WindowContext, *,
     system = SYSTEM_PROMPT
     if skills:
         system += "\n\n" + catalog(skills)
+        hint = fault_type_hint(fault_type)               # R4a: the record's fault_type steers
+        if hint:                                         # which skill the agent picks (ADR-0012)
+            system += "\n" + hint
     for name in (invoke or ()):
         s = skills.get(name)
         if s:                                            # ponytail: an unknown manual-invoke
@@ -209,9 +220,18 @@ def investigate(question: str, window: WindowContext, *,
                 return Outcome(answer=text, events=tuple(events))
             # stage 1 (I4a deterministic) then, over its survivors, stage 2 (I4b self-judge).
             gate = run_gate(text, evidence, window=window, question=question,
-                            min_evidence=cfg.gate_min_evidence, tool_errors=tool_errors)
+                            min_evidence=cfg.gate_min_evidence, tool_errors=tool_errors,
+                            abstain=abstain)
             # stage 2 only over stage-1 survivors (self_judge sees the sanitized transcript).
-            missing = gate.missing or self_judge(llm, messages, text).missing
+            missing = gate.missing
+            if not missing:
+                judged = self_judge(llm, messages, text).missing
+                # R4a: an abstaining PA softens SUFFICIENCY only -- self_judge's "insufficient"
+                # verdict is dropped ("no confident call, here's the evidence" is a valid answer),
+                # but a CONTRADICTION (the answer conflicts with its own evidence) still blocks:
+                # abstain licenses a thin answer, never a self-inconsistent one (ADR-0008 §Nuances).
+                missing = (tuple(m for m in judged if m.startswith("contradiction:"))
+                           if abstain else judged)
             if missing:
                 # ADR-0008: on fail re-enter the loop to fetch missing[], bounded by
                 # gate_max_retries; when the cap is hit the missing[] list IS the message.

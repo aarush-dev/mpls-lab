@@ -267,6 +267,24 @@ splits accordingly:
 }
 ```
 
+### 3.3.1 Two seam fields the example above omits (resolved R4a, ADR-0003)
+
+The §3.3 example predates two fields the copilot seam needs. R4a's PA-emulator
+(`copilot/emulator/emulate.py`) emits both; recorded here as the seam's ground truth:
+
+- **`health` (top-level)** — `{"drift_state": "R0..R5", "codebook_novelty": <float>}`. The
+  faked model-health scalar (ADR-0003 §Nuances: the `research/07` R0–R5 ladder + a rising
+  novelty). **Conflict with §3.5, resolved in ADR-0003's favour:** §3.5 says drift belongs on a
+  separate `GET /v1/health/drift`, *not* in the per-prediction response. That split is a real-PA
+  *latency* optimization (§3.1) — the copilot's seam is ONE record (ADR-0003), with no separate
+  endpoint to air-gap and poll, so the emulator folds the scalar into the record. §3.5's
+  "deliberately not in the sync response" therefore does **not** bind the copilot seam; it stays
+  true only for the real PA's latency-budgeted `/v1/predict`.
+- **`n_concurrent` (top-level, `int >= 1`)** — the count of faults concurrently active in the
+  window this record covers. Absent from §3.3 but load-bearing for ADR-0014 / ADR-0009 / #25:
+  `n_concurrent > 1` → n investigation chats (one per fault) + a master chat that synthesizes.
+  The emulator sets it from how many `/labels` faults overlap the window (`prediction` seam).
+
 ### 3.4 `GET /v1/explain/{alert_id}` — response (arrives later)
 
 ```jsonc
@@ -287,6 +305,8 @@ splits accordingly:
   response reflects that same discipline.
 - **Natural-language text** — only a `pending` pointer; the LLM composition is async per the latency
   budget in `09`.
-- **Drift/model-health status** — that's a separate signal (`R0`–`R5` ladder, `07` §7.4), not per-alert.
-  It belongs on something like `GET /v1/health/drift`, polled or pushed independently of any single
-  prediction.
+- **Drift/model-health status** — for the **real PA** that's a separate signal (`R0`–`R5` ladder,
+  `07` §7.4), on something like `GET /v1/health/drift`, independent of any single prediction, so the
+  latency-budgeted `/v1/predict` stays lean. **This does not bind the copilot seam** (ADR-0003): the
+  emulator/copilot record is ONE object, so it folds a `health.drift_state` scalar in (see §3.3.1) —
+  no separate endpoint to air-gap. Amended R4a; the loser of the §3.3.1 conflict.

@@ -342,6 +342,47 @@ def test_agent_loads_skill_body_via_tool():
     assert out.answer.startswith("r1 bgp flapping")
 
 
+def test_fault_type_steers_skill_selection():
+    # R4a (ADR-0012): the Prediction Record's fault_type reaches the base prompt as a soft steer
+    # for skill selection -- present with a prediction, absent without (no rigid mapping).
+    skills = {"congestion": Skill("congestion", "the congestion playbook", "M"),
+              "bgp_flap": Skill("bgp_flap", "the bgp-flap playbook", "M")}
+    llm = ScriptedLLM([final("which device?")])
+    investigate("look into it", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg(),
+                skills=skills, fault_type="congestion")
+    system = llm.calls[0][0][0]["content"]
+    assert "'congestion'" in system and "prefer the diagnostic skill" in system
+    llm2 = ScriptedLLM([final("which device?")])            # no fault_type -> no hint
+    investigate("look into it", WINDOW, llm=llm2, adapter=StubAdapter(), cfg=_cfg(), skills=skills)
+    assert "prefer the diagnostic skill" not in llm2.calls[0][0][0]["content"]
+
+
+def test_abstain_prediction_softens_the_loop_gate():
+    # R4a (ADR-0008 §Nuances): the SAME thin (1-item) cited answer blocks normally, but when the
+    # PA abstained it passes as "anomalous, no confident call". Softening is SUFFICIENCY-only:
+    # stage-2 self_judge still runs, and a CONTRADICTION verdict still blocks even under abstain.
+    one = [{"device": "r1", "ts": 150, "cpu": 99}]
+    passed = investigate("why is r1 slow?", WINDOW, adapter=StubAdapter(metrics_rows=one),
+        cfg=_cfg(), abstain=True, llm=ScriptedLLM([
+            tool_call("query_metrics", {"device": "r1"}, id="c1"),
+            final("r1 anomalous, no confident call [metrics:0]"),
+            final('{"pass": true}')]))                     # self_judge still consulted
+    assert passed.answer.startswith("r1 anomalous")
+    assert passed.of_type("gate")[0].data["ok"] is True
+    blocked = investigate("why is r1 slow?", WINDOW, adapter=StubAdapter(metrics_rows=one),
+        cfg=_cfg(gate_max_retries=0), llm=ScriptedLLM([
+            tool_call("query_metrics", {"device": "r1"}, id="c1"),
+            final("r1 anomalous, no confident call [metrics:0]")]))
+    assert blocked.answer.startswith("cannot answer") and "thin evidence" in blocked.answer
+    # abstain softens thin evidence but NOT self-contradiction (integrity kept).
+    contra = investigate("why is r1 slow?", WINDOW, adapter=StubAdapter(metrics_rows=one),
+        cfg=_cfg(gate_max_retries=0), abstain=True, llm=ScriptedLLM([
+            tool_call("query_metrics", {"device": "r1"}, id="c1"),
+            final("r1 anomalous, no confident call [metrics:0]"),
+            final('{"pass": false, "contradictions": ["cpu is both 99 and idle"]}')]))
+    assert contra.answer.startswith("cannot answer") and "contradiction" in contra.answer
+
+
 def test_history_prior_turns_reach_the_model():
     # R2a: a resumed session threads prior turns between the system prompt and the new
     # question, so the model actually sees where the chat left off (multi-turn loop entry).
@@ -398,6 +439,8 @@ def _run():
     test_manual_invoke_loads_skill_body()
     test_agent_loads_skill_body_via_tool()
     test_load_skill_unknown_is_guidance()
+    test_fault_type_steers_skill_selection()
+    test_abstain_prediction_softens_the_loop_gate()
     test_history_prior_turns_reach_the_model()
     test_no_history_is_a_fresh_single_turn()
     test_bad_event_type_rejected()

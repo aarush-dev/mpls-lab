@@ -119,6 +119,24 @@ def test_run_gate_combines_tool_calls_pre_gate_and_citation():
     assert not bad.ok and any("failed tool call" in m for m in bad.missing)
 
 
+def test_abstain_softens_sufficiency_but_not_integrity():
+    # ADR-0008 §Nuances: a Prediction Record's abstain==true makes "anomalous, no confident call,
+    # here's the evidence" a valid answer -> the SAME thin-evidence answer blocks without it, passes
+    # with it. R4a acceptance #3.
+    thin = (_c("metrics:0"),)                             # 1 item < min_evidence 2
+    q = "why is r1 slow?"
+    blocked = run_gate("r1 looks anomalous [metrics:0]", thin, window=WINDOW,
+                       question=q, min_evidence=2)
+    assert not blocked.ok and any("thin evidence" in m for m in blocked.missing)
+    softened = run_gate("r1 looks anomalous [metrics:0]", thin, window=WINDOW,
+                        question=q, min_evidence=2, abstain=True)
+    assert softened.ok, softened.missing
+    # integrity still bites under abstain: a fabricated citation is never licensed.
+    forged = run_gate("r1 is down [metrics:9]", thin, window=WINDOW,
+                      question=q, min_evidence=2, abstain=True)
+    assert not forged.ok and any("fabricated citation" in m for m in forged.missing)
+
+
 def _run():
     test_extract_entities_pulls_device_names()
     test_tool_calls_ok_flags_failed_calls()
@@ -135,6 +153,7 @@ def _run():
     test_citation_check_rejects_fabricated_id()
     test_citation_check_rejects_answer_with_no_citations()
     test_run_gate_combines_tool_calls_pre_gate_and_citation()
+    test_abstain_softens_sufficiency_but_not_integrity()
     print("copilot.agent.gate self-check OK")
 
 
