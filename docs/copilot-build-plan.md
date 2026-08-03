@@ -33,7 +33,7 @@
 | I3 | 12 | `walk_topology_graph` (BFS + `/metrics` enrich, `kg` flag) — **done** |
 | I4a | 13 | quality gate: deterministic pre-gate + citation check — **done** |
 | I4b | 14 | quality gate: self-judge + ≤2 agentic retry — **done** |
-| I5 | 15 | diagnostic skills loader (progressive disclosure, manual invoke) |
+| I5 | 15 | diagnostic skills loader (progressive disclosure, manual invoke) — **done** |
 | I6 | 26 | history compaction (config-gated) |
 
 ### Lane-Runtime (Dev 2)

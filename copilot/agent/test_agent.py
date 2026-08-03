@@ -11,6 +11,7 @@ from copilot.adapter import StubAdapter
 from copilot.agent import Event, Outcome, investigate, parse_tool_calls
 from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
+from copilot.skills import Skill
 
 WINDOW = (100, 200)
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
@@ -283,6 +284,71 @@ def test_bad_event_type_rejected():
         raise AssertionError("Event must reject non-canonical types")
 
 
+def test_skill_descriptions_sit_in_prompt():
+    # I5 (ADR-0012): name+description of every skill sit in the base prompt; the BODY does
+    # not (progressive disclosure); the load_skill tool is advertised so the agent can pull one.
+    skills = {"bgp_flap": Skill("bgp_flap", "How to chase a flapping BGP session.",
+                                "1. pull the session logs")}
+    llm = ScriptedLLM([final("which device?")])          # ask-back -> one call, gate bypassed
+    investigate("look into it", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg(),
+                skills=skills)
+    system, tools = llm.calls[0][0][0]["content"], llm.calls[0][1]
+    assert "bgp_flap" in system and "How to chase a flapping BGP session." in system
+    assert "1. pull the session logs" not in system, "body must not sit in the base prompt"
+    assert any(t["name"] == "load_skill" for t in tools), "load_skill advertised with skills"
+
+
+def test_no_skills_leaves_prompt_and_tools_unchanged():
+    # backward-compat: skills default None -> no catalog, no load_skill tool.
+    llm = ScriptedLLM([final("which device?")])
+    investigate("q", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg())
+    system, tools = llm.calls[0][0][0]["content"], llm.calls[0][1]
+    assert "Diagnostic skills" not in system
+    assert not any(t["name"] == "load_skill" for t in tools)
+
+
+def test_manual_invoke_loads_skill_body():
+    # I5: a human invokes a named skill -> its BODY is preloaded into the prompt.
+    skills = {"bgp_flap": Skill("bgp_flap", "chase a bgp flap", "STEP: pull the session logs")}
+    llm = ScriptedLLM([final("which device?")])
+    investigate("help", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg(),
+                skills=skills, invoke=["bgp_flap"])
+    system = llm.calls[0][0][0]["content"]
+    assert "STEP: pull the session logs" in system, "invoked skill body loads into context"
+
+
+def test_agent_loads_skill_body_via_tool():
+    # I5: the agent auto-selects by description -> load_skill(name) returns the body as an
+    # observation (method, no cites); then it gathers evidence + answers.
+    skills = {"bgp_flap": Skill("bgp_flap", "chase a bgp flap", "STEP: pull the session logs")}
+    logs = [{"device": "r1", "ts": 100 + i, "msg": f"bgp flap {i}"} for i in range(2)]
+    llm = ScriptedLLM([
+        tool_call("load_skill", {"name": "bgp_flap"}, id="s1"),
+        tool_call("search_logs", {"device": "r1"}, id="c1"),
+        final("r1 bgp flapping [events:0] [events:1]"),
+        final('{"pass": true}'),                          # stage-2 self-judge verdict (I4b)
+    ])
+    out = investigate("why is r1 down?", WINDOW, llm=llm,
+                      adapter=StubAdapter(events_rows=logs), cfg=_cfg(), skills=skills)
+    assert out.stopped is None
+    tr = out.of_type("tool_result")[0]
+    assert tr.data["name"] == "load_skill"
+    assert tr.data["content"] == "STEP: pull the session logs"
+    assert tr.data["n"] == 0, "a skill body is method, not cited evidence"
+    assert out.answer.startswith("r1 bgp flapping")
+
+
+def test_load_skill_unknown_is_guidance():
+    # a bad skill name comes back AS guidance (ADR-0015), never a raise.
+    skills = {"bgp_flap": Skill("bgp_flap", "d", "b")}
+    llm = ScriptedLLM([
+        tool_call("load_skill", {"name": "nope"}, id="s1"),
+        final("which device?"),
+    ])
+    out = investigate("q", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg(), skills=skills)
+    assert out.of_type("tool_result")[0].data["content"].startswith("error:")
+
+
 def _run():
     test_scripted_investigation_completes_with_query_metrics()
     test_loop_dispatches_search_logs_and_flows()
@@ -301,6 +367,11 @@ def _run():
     test_self_judge_fail_retries_then_answers()
     test_gate_retry_recovers_from_a_failed_tool_call()
     test_gate_retry_respects_the_cap()
+    test_skill_descriptions_sit_in_prompt()
+    test_no_skills_leaves_prompt_and_tools_unchanged()
+    test_manual_invoke_loads_skill_body()
+    test_agent_loads_skill_body_via_tool()
+    test_load_skill_unknown_is_guidance()
     test_bad_event_type_rejected()
     print("copilot.agent self-check OK")
 

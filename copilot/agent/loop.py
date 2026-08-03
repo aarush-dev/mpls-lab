@@ -15,6 +15,11 @@ On fail the loop re-enters to fetch the reported `missing[]`, up to cfg.gate_max
 still failing -> the `missing[]` list IS the answer (a `gate` event is emitted each fail).
 Ask-back (a clarifying question before any evidence) bypasses the gate.
 
+Diagnostic skills (ADR-0012, I5): when the caller wires `skills`, every skill's
+{name, description} sits in the base prompt (progressive disclosure) while its body loads
+on demand -- the model auto-selects one via the `load_skill` tool, or a human preloads one
+by name (`invoke`). A skill is METHOD (how to investigate), not cited evidence -> no Cite.
+
 Windowing (ADR-0002): the loop -- not the model -- passes the window's (start, end)
 into every tool call, so the agent cannot read outside its window. F3 threads a bare
 `(start, end)` epoch pair (basic form); R3 swaps in the full WindowContext {start, end,
@@ -28,6 +33,7 @@ from copilot.agent.gate import GateResult, run_gate
 from copilot.config import Config
 from copilot.llm import LLMClient, ToolCall
 from copilot.retrieval import Retriever
+from copilot.skills import Skill, catalog
 from copilot.tools import Cite, TOOL_SPECS, dispatch
 
 # canonical event enum (ADR-0009) -- ONE vocabulary for the live stream AND the
@@ -79,6 +85,17 @@ JUDGE_SYSTEM = (
     "contradictions = gathered evidence that conflicts."
 )
 
+# I5 progressive disclosure (ADR-0012): the load_skill tool is advertised only when skills
+# are wired, so the agent can auto-select a skill by its catalog description and pull the full
+# method into context. A skill body is METHOD, not cited evidence -> it yields no Cite.
+LOAD_SKILL_SPEC = {
+    "name": "load_skill",
+    "description": "Load the full method of a named diagnostic skill (see the skills list) "
+                   "into context before investigating.",
+    "parameters": {"type": "object", "required": ["name"],
+                   "properties": {"name": {"type": "string"}}},
+}
+
 # TOOL_SPECS + dispatch live in copilot.tools (the registry, I1) -- re-exported here so
 # the F3 agent API surface (copilot.agent) is unchanged. start/end are NOT advertised:
 # the loop supplies the window, the model only narrows within it (ADR-0002).
@@ -105,17 +122,37 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
 def investigate(question: str, window: tuple[int, int], *,
                 llm: LLMClient, adapter: ToolAdapter, cfg: Config,
                 retriever: Retriever | None = None,
-                kg: dict[str, str] | None = None) -> Outcome:
+                kg: dict[str, str] | None = None,
+                skills: dict[str, Skill] | None = None,
+                invoke: list[str] | None = None) -> Outcome:
     """Run the loop until the model answers, asks back, or a cap trips. `kg` is the optional
     curated-KG hint map (ADR-0007): additive, never load-bearing -- the caller passes it only
-    when cfg.kg_enabled (get_kg), so it's None here whenever the flag is off."""
+    when cfg.kg_enabled (get_kg), so it's None here whenever the flag is off.
+
+    `skills` is the I5 progressive-disclosure catalog (ADR-0012): {name: Skill}, each skill's
+    description sits in the base prompt while its body loads on demand (the agent's load_skill
+    tool). `invoke` = skill names a human manually selected -> their bodies are preloaded into
+    the system prompt up front. Both default to nothing, so the loop is unchanged when no
+    skills are wired."""
+    skills = skills or {}
     events: list[Event] = []
 
     def emit(type_: str, **data) -> None:
         events.append(Event(type_, data))
 
     emit("user_msg", content=question)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT},
+    # progressive disclosure: descriptions always; a manually-invoked skill's body up front.
+    system = SYSTEM_PROMPT
+    if skills:
+        system += "\n\n" + catalog(skills)
+    for name in (invoke or ()):
+        s = skills.get(name)
+        if s:                                            # ponytail: an unknown manual-invoke
+            system += f"\n\n[skill: {s.name}]\n{s.body}"  # name silently no-ops -- the UI picks
+        #                                                  from the catalog, so a miss is rare;
+        #                                                  add a warning event if humans hand-type it.
+    tool_specs = TOOL_SPECS + ([LOAD_SKILL_SPEC] if skills else [])
+    messages = [{"role": "system", "content": system},
                 {"role": "user", "content": question}]
     tool_calls = 0
     retries = 0                                           # agentic gate retries used (ADR-0008)
@@ -123,7 +160,7 @@ def investigate(question: str, window: tuple[int, int], *,
     tool_errors: list[str] = []                          # guidance errors from failed calls (gate)
 
     for _ in range(cfg.step_cap):
-        reply = llm.chat(messages, tools=TOOL_SPECS)
+        reply = llm.chat(messages, tools=tool_specs)
         native = reply.tool_calls
         calls = native or parse_tool_calls(reply.content)
 
@@ -171,10 +208,13 @@ def investigate(question: str, window: tuple[int, int], *,
                 return _capped(events, "tool_call_cap")
             tool_calls += 1
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
-            observation, cites = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
-            evidence.extend(cites)
-            if observation.startswith("error:"):        # guidance error -> a failed call (gate)
-                tool_errors.append(observation)
+            if tc.name == "load_skill":                  # I5: a skill body is method, not
+                observation, cites = _load_skill(skills, tc.arguments), ()  # evidence -> no
+            else:                                        # Cite, and a load miss never gate-blocks.
+                observation, cites = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
+                evidence.extend(cites)
+                if observation.startswith("error:"):    # guidance error -> a failed call (gate)
+                    tool_errors.append(observation)
             emit("tool_result", id=tc.id, name=tc.name, content=observation, n=len(cites))
             messages.append({"role": "tool", "tool_call_id": tc.id,
                              "name": tc.name, "content": observation})
@@ -205,6 +245,16 @@ def self_judge(llm: LLMClient, messages: list[dict], answer: str) -> GateResult:
     missing = [f"self-judge: {m}" for m in obj.get("missing") or []]
     missing += [f"contradiction: {c}" for c in obj.get("contradictions") or []]
     return GateResult(False, tuple(missing or ("self-judge: evidence insufficient",)))
+
+
+def _load_skill(skills: dict[str, Skill], args: dict) -> str:
+    """I5 (ADR-0012): return a named skill's body (the method), or guidance if unknown -- a
+    bad name comes back AS an observation (ADR-0015), never a raise, so the model can retry."""
+    name = args.get("name")
+    s = skills.get(name) if name else None
+    if s is None:
+        return f"error: unknown skill {name!r}; pick one from the skills list"
+    return s.body
 
 
 def _capped(events: list[Event], why: str) -> Outcome:

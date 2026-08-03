@@ -26,6 +26,7 @@ from copilot.agent import Event, Outcome, investigate
 from copilot.config import Config, load
 from copilot.llm import LLMClient
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
+from copilot.skills import Skill, load_skills
 
 app = FastAPI(title="NOC Copilot", version="1.0")
 
@@ -34,6 +35,7 @@ class ChatRequest(BaseModel):
     question: str
     start: int | None = None          # window start, epoch s (loop supplies it to tools)
     end: int | None = None            # window end, epoch s
+    skills: list[str] | None = None   # I5: skill names to manually invoke (bodies preloaded)
 
 
 def get_config() -> Config:
@@ -63,6 +65,23 @@ def get_kg(cfg: Config = Depends(get_config)) -> dict[str, str] | None:
         return None
     with open(uri) as f:
         return json.load(f)
+
+
+_SKILLS_CACHE: dict[str, dict[str, Skill]] = {}
+
+
+def get_skills(cfg: Config = Depends(get_config)) -> dict[str, Skill] | None:
+    # I5 diagnostic skills (ADR-0012): load the skills/*.md dir named by COPILOT_SKILLS_DIR
+    # (env, mirroring COPILOT_KB_URI/KG since config.py is another lane's file) -> {name: Skill}.
+    # Unset -> None -> the loop advertises no load_skill tool + adds no catalog (byte-identical
+    # to a skills-free run) until S3 seeds the content dir. Tests override this.
+    # ponytail: memoize per dir so we don't re-read the markdown every request.
+    d = os.environ.get("COPILOT_SKILLS_DIR")
+    if not d:
+        return None
+    if d not in _SKILLS_CACHE:
+        _SKILLS_CACHE[d] = load_skills(d)
+    return _SKILLS_CACHE[d]
 
 
 _KB_CACHE: dict[str, Retriever] = {}
@@ -116,7 +135,9 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
          llm: LLMClient = Depends(get_llm),
          adapter: ToolAdapter = Depends(get_adapter),
          retriever: Retriever | None = Depends(get_retriever),
-         kg: dict[str, str] | None = Depends(get_kg)) -> StreamingResponse:
+         kg: dict[str, str] | None = Depends(get_kg),
+         skills: dict[str, Skill] | None = Depends(get_skills)) -> StreamingResponse:
     outcome = investigate(req.question, _window(req, cfg),
-                          llm=llm, adapter=adapter, cfg=cfg, retriever=retriever, kg=kg)
+                          llm=llm, adapter=adapter, cfg=cfg, retriever=retriever, kg=kg,
+                          skills=skills, invoke=req.skills)
     return StreamingResponse(_sse(outcome), media_type="text/event-stream")

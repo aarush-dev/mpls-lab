@@ -16,10 +16,13 @@ from fastapi.testclient import TestClient
 
 from copilot.adapter import StubAdapter
 from copilot.agent import EVENT_TYPES, Event
-from copilot.api.app import app, get_adapter, get_config, get_kg, get_llm, get_retriever
+from copilot.api.app import (
+    app, get_adapter, get_config, get_kg, get_llm, get_retriever, get_skills,
+)
 from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
+from copilot.skills import Skill
 
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
 
@@ -252,8 +255,28 @@ def test_streamed_event_round_trips_into_an_event():
         assert ev.type == wire["type"] and ev.data == data
 
 
+def test_manual_skill_invoke_over_http():
+    # I5 acceptance: a human invokes a named skill via /chat (`skills` field) -> the catalog
+    # description sits in the base prompt AND the invoked body is preloaded, reachable over
+    # HTTP; the load_skill tool is advertised so the agent can also auto-select one.
+    app.dependency_overrides.clear()
+    skills = {"bgp_flap": Skill("bgp_flap", "chase a bgp flap", "STEP: pull the session logs")}
+    llm = ScriptedLLM([final("which device?")])          # ask-back -> one call, gate bypassed
+    app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter()
+    app.dependency_overrides[get_skills] = lambda: skills
+    resp = TestClient(app).post("/chat", json={"question": "help", "start": 100, "end": 200,
+                                               "skills": ["bgp_flap"]})
+    assert resp.status_code == 200
+    system, tools = llm.calls[0][0][0]["content"], llm.calls[0][1]
+    assert "chase a bgp flap" in system, "catalog description in the base prompt"
+    assert "STEP: pull the session logs" in system, "invoked skill body preloaded over HTTP"
+    assert any(t["name"] == "load_skill" for t in tools), "load_skill advertised over HTTP"
+
+
 def _run():
     test_chat_streams_tool_call_and_cited_answer()
+    test_manual_skill_invoke_over_http()
     test_device_question_streams_cited_log_and_flow_rows()
     test_fault_returns_cited_runbook_and_nearby_incident_over_http()
     test_walk_topology_graph_streams_enriched_blast_radius_over_http()

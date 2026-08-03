@@ -1033,6 +1033,42 @@ no new module: `self_judge` + the retry live in `copilot/agent/loop.py` beside `
   seam drives the loop, so its scripts must carry the judge verdict too — the minimum forced by
   the loop's new contract).
 
+## Copilot I5: diagnostic skills loader (progressive disclosure + manual invoke)
+
+Steers the weak model with diagnostic **method** (how to investigate), distinct from a runbook's
+cited **evidence** (ADR-0012). Loader = code (this ticket); skill **content** is seeded separately
+(S3), so a bare skills dir is normal — no steering yet, not a bug.
+
+- **Loader = a dict + markdown frontmatter, no plugin registry** (`copilot/skills/loader.py`).
+  `load_skills(dir)` reads every `*.md` with a `---`-fenced `{name, description}` YAML block + a
+  body → `{name: Skill(name, description, body)}`. A file missing name **or** description is
+  **skipped** — a half-written skill must not steer the model. `yaml` is already installed
+  (config.py), so no hand-rolled parser. `catalog(skills)` renders the name+description block for
+  the base prompt; empty in → empty out.
+- **Progressive disclosure at the `investigate()` seam.** New optional kwargs `skills` +
+  `invoke`, both default nothing → the loop is **byte-identical** when no skills are wired (every
+  existing test passes unchanged; `test_no_skills_leaves_prompt_and_tools_unchanged` pins it).
+  When `skills` is passed: the `catalog` (name+description **only**) is appended to the system
+  prompt, and `load_skill` is advertised as a tool.
+- **Body loads on demand, two paths.** (1) *Agent auto-selects by description* → calls the
+  `load_skill(name)` tool; the loop intercepts it before `dispatch` and returns the skill **body**
+  as the observation, **no `Cite`** (`n:0`) — a body is method, not evidence, so it never feeds
+  the quality gate. (2) *Human manual invoke* → `invoke=[names]` preloads those bodies into the
+  system prompt up front. Both satisfy ADR-0012's "agent-selected **or** human-invoked".
+- **Bad skill name = guidance, not a raise** (`_load_skill` → `error: unknown skill …`), matching
+  the ADR-0015 tool-error convention the registry already uses — the model can retry.
+- **HTTP wiring mirrors `get_kg`.** So the feature is reachable, not inert: `/chat` gains a
+  `get_skills` dependency (memoized `load_skills(COPILOT_SKILLS_DIR)`, env like `COPILOT_KG_URI`;
+  unset → None → a skills-free run) and `ChatRequest.skills` carries the human's manual-invoke
+  names → `investigate(skills=…, invoke=req.skills)`. This is the same convergence glue an
+  earlier Lane-Investigation feature (ADR-0007's `get_kg`) already put in `app.py`; the loader +
+  loop stay in `copilot/{agent,skills}`. Tested at both seams: `investigate()` (stub LLM+adapter,
+  spec §Testing) and `POST /chat` (`test_manual_skill_invoke_over_http`).
+- **Testing.** `copilot/skills/test_skills.py` (assert self-check): frontmatter parse, half-written
+  skip, empty dir, catalog lists descriptions not bodies. `test_agent.py` adds four loop tests:
+  descriptions-in-prompt + `load_skill` advertised, no-skills-unchanged, manual-invoke-loads-body,
+  agent-loads-body-via-tool (body as observation, `n:0`), and unknown-skill-is-guidance.
+
 ## Real fault injection from the UI + Loki fix + plugin live-wiring
 
 ### rsyslog `omfwd` fix — why Loki was empty
