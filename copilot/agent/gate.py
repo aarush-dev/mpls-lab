@@ -32,6 +32,24 @@ WINDOWED_SOURCES = frozenset({"metrics", "events", "flows"})
 ENTITY_RE = re.compile(r"\b(?:rr|r|pe|p|ce|asbr)\d+\b", re.IGNORECASE)
 CITE_RE = re.compile(r"\[([^\[\]]+)\]")
 
+# #43: gpt-oss compresses cites into ranges, often with a unicode hyphen. Normalize unicode
+# hyphens (U+2010..U+2013) to ASCII, then expand `src:lo-hi` -> {src:lo .. src:hi} before the
+# fabricated-id check. Model-agnostic (a plain id is unchanged) and can't rubber-stamp -- every
+# expanded id must still be a real evidence id.
+_HYPHENS = str.maketrans({"‐": "-", "‑": "-", "‒": "-", "–": "-"})
+_RANGE_RE = re.compile(r"^(.+):(\d+)-(\d+)$")
+
+
+def _expand_cite(tok: str) -> set[str]:
+    tok = tok.translate(_HYPHENS)
+    m = _RANGE_RE.match(tok)
+    if not m:
+        return {tok}
+    src, lo, hi = m.group(1), int(m.group(2)), int(m.group(3))
+    if hi < lo or hi - lo > 64:          # ponytail: cap absurd ranges -> left literal, then blocked
+        return {tok}
+    return {f"{src}:{n}" for n in range(lo, hi + 1)}
+
 # ADR-0003 model-health degradation ladder (research/07): R0 healthy .. R5 fully degraded.
 # ponytail: a frozen 6-rung taxonomy, mirrored (not shared) across gate/emulator/config -- config
 # can't import this (config <- gate <- tools <- retrieval <- embedder <- config cycle), and the
@@ -92,7 +110,8 @@ def citation_check(answer: str, valid_ids) -> GateResult:
     """Cheap deterministic citation check (ADR-0008): every claim maps to a real evidence id."""
     cited = set(CITE_RE.findall(answer))
     missing = []
-    unknown = cited - set(valid_ids)
+    expanded = {eid for tok in cited for eid in _expand_cite(tok)}
+    unknown = expanded - set(valid_ids)
     if unknown:
         missing.append(f"fabricated citation(s): {sorted(unknown)}")
     for sent in _sentences(answer):

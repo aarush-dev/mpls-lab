@@ -104,6 +104,20 @@ def test_citation_check_rejects_fabricated_id():
     assert not r.ok and any("fabricated" in m for m in r.missing)
 
 
+def test_citation_check_expands_range_and_unicode_citations():
+    # #43: gpt-oss compresses cites into ranges, often with a unicode hyphen (U+2011). The gate
+    # expands [metrics:3-5] -> {metrics:3,4,5} before the fabricated-id check, so a correct answer
+    # is not withheld -- but a range whose ids are real is required.
+    valid = {"metrics:3", "metrics:4", "metrics:5"}
+    ascii_r = citation_check("r1 cpu climbing [metrics:3-5]", valid)
+    assert ascii_r.ok and ascii_r.missing == ()
+    uni_r = citation_check("r1 cpu climbing [metrics:3‑5]", valid)   # U+2011 non-breaking hyphen
+    assert uni_r.ok and uni_r.missing == ()
+    # a range reaching a non-existent id can't be rubber-stamped
+    over = citation_check("r1 cpu climbing [metrics:3-9]", valid)
+    assert not over.ok and any("fabricated" in m for m in over.missing)
+
+
 def test_citation_check_rejects_answer_with_no_citations():
     r = citation_check("everything looks fine", set())
     assert not r.ok
@@ -166,6 +180,7 @@ def _run():
     test_citation_check_passes_fully_cited_answer()
     test_citation_check_rejects_uncited_claim()
     test_citation_check_rejects_fabricated_id()
+    test_citation_check_expands_range_and_unicode_citations()
     test_citation_check_rejects_answer_with_no_citations()
     test_run_gate_combines_tool_calls_pre_gate_and_citation()
     test_abstain_softens_sufficiency_but_not_integrity()

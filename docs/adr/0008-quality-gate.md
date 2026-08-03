@@ -36,6 +36,9 @@ the gate catches the bluff. Split cheap-deterministic from the one judgment call
 - The retry loop reuses the agent loop (ADR-0005). Retry cap + tool-call cap prevent runaway.
 - `abstain==true` from the Prediction Record softens the gate — "anomalous, no confident call, here's
   the evidence" is a valid answer.
+- #43: `citation_check` normalizes unicode hyphens and expands a range cite (`[metrics:3-5]` →
+  `metrics:3/4/5`) before the fabricated-id check — tolerates gpt-oss's compressed citation style
+  without licensing fake ids (every expanded id must still be real).
 
 ## Consequences
 
