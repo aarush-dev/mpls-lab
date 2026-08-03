@@ -1,6 +1,5 @@
 import React, { createContext, Dispatch, PropsWithChildren, useContext, useEffect, useReducer } from 'react';
 import { AppAction, AppState, appReducer, initialAppState } from './reducer';
-import { MOCK_BUCKET_META } from '../data/MockDataClient';
 
 interface AppContextValue {
   state: AppState;
@@ -9,24 +8,29 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
-// Single global demo clock. Every page reads `state.cursor` and is a pure function of it, so all
-// pages always show the same "live" moment (locked decision #3/#5 in the plan). Autoplay defaults
-// on + loops; pause/scrub/speed are user-driven overrides. The interval only ever dispatches TICK
-// — it never reads wall-clock time, keeping playback deterministic.
+/** Live refresh cadence: pull fresh data from the backend every 5s while in live mode. */
+export const LIVE_REFRESH_MS = 5000;
+
+// Global time context. In live mode a 5s interval dispatches TICK{nowMs}, sliding the window to
+// [now-liveWindow, now] and bumping refreshTick so every page refetches. In history mode the
+// interval is idle and the window is whatever the user picked. Wall-clock time is read HERE (not in
+// the reducer) so the reducer stays pure/deterministic.
 export function AppProvider({ children }: PropsWithChildren<{}>) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
-  const { playing, speed, bucketCount } = state;
+  const { mode } = state;
+
+  // Fill the initial range from the real clock on mount (initialState.range is 0/0).
+  useEffect(() => {
+    dispatch({ type: 'TICK', payload: { nowMs: Date.now() } });
+  }, []);
 
   useEffect(() => {
-    if (!playing || bucketCount <= 0) {
+    if (mode !== 'live') {
       return undefined;
     }
-    // Real-time playback: one bucket of data takes one bucket's wall-clock time (30s/bucket).
-    // speed stays a multiplier (2x -> 15s/bucket).
-    const intervalMs = MOCK_BUCKET_META.bucketMs / Math.max(speed, 0.01);
-    const id = setInterval(() => dispatch({ type: 'TICK' }), intervalMs);
+    const id = setInterval(() => dispatch({ type: 'TICK', payload: { nowMs: Date.now() } }), LIVE_REFRESH_MS);
     return () => clearInterval(id);
-  }, [playing, speed, bucketCount]);
+  }, [mode]);
 
   return <AppContext.Provider value={{ state, dispatch }}>{children}</AppContext.Provider>;
 }

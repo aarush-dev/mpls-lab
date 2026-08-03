@@ -10,7 +10,7 @@ import { useDataClient } from '../data/DataClientContext';
 import { Incident, Prediction } from '../data/types';
 
 export function IncidentsPage() {
-  const { cursor, filters } = useAppState();
+  const { refreshTick, range, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [incidents, setIncidents] = useState<Incident[] | null>(null);
@@ -23,7 +23,8 @@ export function IncidentsPage() {
     let cancelled = false;
     setError(false);
 
-    Promise.all([dataClient.getIncidents(filters), dataClient.getPredictions(filters)])
+    const withRange = { ...filters, timeRange: { fromMs: range.fromMs, toMs: range.toMs } };
+    Promise.all([dataClient.getIncidents(withRange), dataClient.getPredictions(withRange)])
       .then(([incidentsResult, predictionsResult]) => {
         if (cancelled) {
           return;
@@ -40,7 +41,7 @@ export function IncidentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, filters, attempt]);
+  }, [dataClient, refreshTick, range.fromMs, range.toMs, filters, attempt]);
 
   return (
     <PluginPage>

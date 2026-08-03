@@ -668,8 +668,13 @@ def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
 
 
 def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
-                 dry_run=False):
-    """Execute one scenario end-to-end and write a label row. Returns the row."""
+                 dry_run=False, cancel=None):
+    """Execute one scenario end-to-end and write a label row. Returns the row.
+
+    cancel: optional threading.Event. If set during the hold window the scenario
+    stops waiting and proceeds straight to the try/finally revert -- the
+    guaranteed-revert path is unchanged, we just wake early. Used by the data-API
+    /faults/revert route to cut a fault short."""
     if name not in SCENARIOS:
         raise SystemExit(f"unknown scenario '{name}'. choices: {list(SCENARIOS)}")
     spec = SCENARIOS[name](target, severity, duration)
@@ -716,7 +721,9 @@ def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
         elapsed = time.time() - t_start.timestamp()
         remaining = duration - elapsed
         if remaining > 0 and not dry_run:
-            time.sleep(remaining)
+            # cancellable hold: cancel.wait wakes early on early-revert, else it
+            # is just a sleep. finally below still reverts either way.
+            cancel.wait(remaining) if cancel is not None else time.sleep(remaining)
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
         print(json.dumps({"event": "scenario_error", "scenario_id": scenario_id,

@@ -25,7 +25,7 @@ const FEED_LABELS: Partial<Record<DataSourceKind, string>> = {
 
 export function StatusPage() {
   const styles = useStyles2(getStyles);
-  const { cursor } = useAppState();
+  const { refreshTick } = useAppState();
   const dataClient = useDataClient();
 
   const [caps, setCaps] = useState<Capabilities | null>(null);
@@ -51,7 +51,7 @@ export function StatusPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, nonce]);
+  }, [dataClient, refreshTick, nonce]);
 
   if (error) {
     return (

@@ -1,8 +1,8 @@
 # API_CONTRACT.md
 
-The `DataClient` interface (`frontend/plugin/src/data/DataClient.ts`) is the contract between UI and data layer. Domain types live in `frontend/plugin/src/data/types.ts`.
+The `DataClient` interface (`plugin/src/data/DataClient.ts`) is the contract between UI and data layer. Domain types live in `plugin/src/data/types.ts`.
 
-Only implementation today: `MockDataClient` (`frontend/plugin/src/data/MockDataClient.ts`), reads bundled fixture JSON. No HTTP client exists.
+Two implementations: `MockDataClient` (`plugin/src/data/MockDataClient.ts`, bundled fixture JSON) and `HttpDataClient` (`plugin/src/data/HttpDataClient.ts`, live `dataapi`), selected by `config.ts` (`mode`, defaults `'api'`).
 
 ## Interface
 
@@ -23,7 +23,7 @@ interface DataClient {
 }
 ```
 
-`MockDataClient` also exposes `setCursor(n)`, called every demo-clock tick by `App.tsx` to move the mock "now". Not part of `DataClient` — a real `HttpDataClient` has its own server-side notion of "now" and doesn't need it. Callers that want it should feature-detect: `if ('setCursor' in client) ...`.
+`MockDataClient` also exposes `setCursor(n)` to move its mock "now" over the fixture tape. Nothing calls it since the old demo-clock auto-play was replaced by `TimeControl` (see README "Data modes") — `MockDataClient` now stays pinned at cursor 0 unless a caller sets it explicitly. Not part of `DataClient`; `HttpDataClient` has no equivalent (a live backend has its own notion of "now"). Callers that want it should feature-detect: `if ('setCursor' in client) ...`.
 
 ## Shared types (`types.ts`)
 
@@ -36,36 +36,36 @@ interface DataClient {
 ### `getCapabilities(): Promise<Capabilities>`
 No request args.
 Response: `Capabilities { sources: Record<string, boolean>; datasetWindow: TimeRange }`.
-Future backend: no matching endpoint in `dataapi/app.py`. Would need to be synthesized frontend-side or added.
+`HttpDataClient`: no matching endpoint. Derived by probing `/metrics` (`vector(1)`), `/events`, `/flows` in parallel; `sources.measured/simulated/modelled` all track VM reachability, `ground_truth`/`prediction` are always `true`, `mock` always `false`. `datasetWindow` is `[now - 30d, now]` (VM's retention). Drives the header `LabStatusBadge`.
 
 ### `getOverview(filters: Filters): Promise<Overview>`
 Response: `Overview { reportingDevices, expectedDevices, degradedDevices, totalTunnels, degradedTunnels, activeIncidents: number; highestRisk?: { deviceId: string; score: number }; nearestTimeToImpactSeconds?: number | null }`.
-Future backend: no matching endpoint. Would be derived client-side from `/topology`, `/labels`, `/metrics`, not a direct passthrough.
+`HttpDataClient`: derived client-side, no direct endpoint. `expectedDevices` from `/topology` node count; `reportingDevices`/`totalTunnels`/`degradedTunnels` from instant PromQL scalars against `/metrics`; `degradedDevices`/`activeIncidents` from devices with an active `/labels` row; `highestRisk`/`nearestTimeToImpactSeconds` from `getPredictions`.
 
 ### `getTopology(filters: Filters): Promise<TopologyGraph>`
 Response: `TopologyGraph { nodes: TopologyNode[]; links: TopologyLink[] }` where `TopologyNode { id, role, siteType?, pop?, parent?, vrfs? }` and `TopologyLink { source, target, sourceIf?, targetIf?, kind?: 'physical' | 'tunnel' }`.
-Future backend: `GET /topology` in `dataapi/app.py` returns `sources.topology_graph()` — direct match by name and shape.
+`HttpDataClient`: `GET /topology` (`sources.topology_graph()`), direct match by name/shape. `state` (red/amber/green, not part of the base type but read by the UI as `TopologyNodeLive`) is derived from active `/labels` rows at request time; `pop` is derived from the device id (`p1-4`→`pop1`, `p5-8`→`pop2`, `pe1-2`→`pop1`, etc — `popOf()`).
 
 ### `getTelemetry(request: TelemetryRequest): Promise<MetricSeries[]>`
 Request: `TelemetryRequest { deviceId?: string; keys?: string[]; timeRange?: TimeRange }`.
 Response: array of `MetricSeries { key, label, unit?, source: DataSourceKind; points: MetricPoint[] }`, `MetricPoint { tMs: number; value: number | null }`.
-Future backend: `GET /metrics` in `dataapi/app.py` — PromQL passthrough to VictoriaMetrics (`sources.vm_query` / `vm_query_range`). Response shape differs (`{ result: ... }` raw PromQL result); an `HttpDataClient` would need to translate.
+`HttpDataClient`: one `GET /metrics` range query per descriptor in `data/metricCatalog.ts` (11 metric groups, 29 metrics), run in parallel, PromQL templated with `$dev` → `request.deviceId`. `request.keys` is not used to filter — all catalog metrics are always queried; a metric absent on a given device role just returns an empty series. `step` is fixed at 30s. A per-metric fetch failure yields an empty series rather than failing the whole call.
 
 ### `getEvents(filters: Filters): Promise<NetworkEvent[]>`
 Response: `NetworkEvent { tsMs, device?, app?, severity?, line: string }`.
-Future backend: `GET /events` in `dataapi/app.py` — Loki log rows (`sources.events_rows`), returns `{ rows: [...] }`.
+`HttpDataClient`: `GET /events` (Loki log rows, `sources.events_rows`), `{ rows: [...] }`, filtered by `filters.device`/`timeRange`, sorted newest-first.
 
 ### `getFlows(filters: Filters): Promise<FlowRecord[]>`
 Response: `FlowRecord { tsMs, device?, ipSrc?, ipDst?, portSrc?, portDst?, proto?, bytes?, packets? }`.
-Future backend: `GET /flows` in `dataapi/app.py` — nfacctd flow records (`sources.flow_rows`), returns `{ rows: [...] }`.
+`HttpDataClient`: `GET /flows` (nfacctd flow records, `sources.flow_rows`), `{ rows: [...] }`, filtered by `filters.device`/`timeRange`, sorted newest-first.
 
 ### `getIncidents(filters: Filters): Promise<Incident[]>`
 Response: `Incident { id, status: 'open'|'active'|'resolved'|'unknown', faultType, severity: 'low'|'medium'|'high'|'unknown', source: 'ground_truth'|'prediction'|'mock', deviceIds: string[], startedAt, impactAt?, endedAt?, summary, confidence?, timeToImpactSeconds?, evidence: Evidence[], affectedScope: string[], rootCauseHypotheses: string[], recommendedActions: RecommendedAction[] }`.
-Future backend: closest is `GET /labels` in `dataapi/app.py` (ground-truth fault timeline, `sources.label_rows()`) — raw rows, not this shape. No `/incidents` endpoint exists.
+`HttpDataClient`: derived client-side from `GET /labels` (ground-truth fault timeline, `sources.label_rows()`) — no `/incidents` endpoint. Status derived from now vs. each row's `t_start`/`t_impact`/`t_end` (`open` before impact, `active` during, `resolved` after); rows not yet started are skipped. `source` is always `'ground_truth'`.
 
 ### `getPredictions(filters: Filters): Promise<Prediction[]>`
 Response: `Prediction { id, deviceId, faultType, confidence, timeToImpactSeconds, source: 'mock', issuedAtMs }`.
-Future backend: no matching endpoint. `dataapi/app.py` has no ML/prediction output; predictions are entirely fixture-fabricated today.
+`HttpDataClient`: derived client-side from `GET /labels` — no ML/prediction endpoint exists. Only rows in their pre-impact window (`t_start <= now < t_impact`) are surfaced; `confidence` ramps linearly from 0 at `t_start` to 1 at `t_impact`. These are ground-truth-derived, not model output — `source` stays `'mock'` on the shared type since no real predictor exists.
 
 ### `getConversation(id: string): Promise<Conversation>`
 ### `createConversation(request: CreateConversationRequest): Promise<Conversation>`
@@ -78,15 +78,26 @@ Future backend: no matching endpoint. `dataapi/app.py` has no ML/prediction outp
 `SendMessageResponse { message: CopilotMessage; response?: CopilotResponse }`.
 `CopilotResponse { summary, predictedIssue?, confidence?, timeToImpactSeconds?, affectedScope: string[], evidence: Evidence[], rootCauseHypotheses: string[], recommendedActions: RecommendedAction[], citations: Citation[], disclaimer? }`.
 `CopilotFeedbackRequest { conversationId, messageId, rating: 'up'|'down', note? }`.
-Future backend: no matching endpoint in `dataapi/app.py` (that service is data-only, no LLM/copilot route). This whole group is unimplemented server-side; `MockDataClient` serves canned seed conversations from `fixtures/conversations.json`.
+`HttpDataClient`: no matching endpoint in `dataapi/app.py` (that service is data-only, no LLM/copilot route) — all 4 methods forward to a private `MockDataClient` instance regardless of app mode. This group is unimplemented server-side; the ML prediction + Copilot LLM backend is a separate, unbuilt component (other team).
+
+## Fault injection (`FaultInjectionPage.tsx` only — not part of `DataClient`)
+
+`HttpDataClient` exposes 4 extra methods, used only by the Fault Injection page:
+
+- `getScenarios(): Promise<FaultScenario[]>` → `GET /faults/scenarios` — the 21 scenario types, each with `valid_roles` (which device roles the scenario can target) and `default_duration`.
+- `injectFault(req: InjectFaultRequest): Promise<{ scenario_id: string }>` → `POST /faults/inject { scenario, target, severity?, duration? }` — spawns the scenario against the sim in a background thread; 404 if the scenario is unknown, 422 if `target`'s role isn't valid for it, 409 if `target` is already being injected. `duration` defaults to 90s; the fault auto-reverts when it elapses.
+- `getActiveFaults(): Promise<unknown>` → `GET /faults/active` — currently-running injections.
+- `revertFault(scenarioId): Promise<unknown>` → `POST /faults/revert/{scenario_id}` — cancels a running injection early.
+
+`MockDataClient` implements none of these; `FaultInjectionPage` feature-detects and falls back to visual-only escalation when they're absent.
 
 ## Supporting types
 
 - `Evidence { label, detail, source: DataSourceKind }`
 - `RecommendedAction { title, detail }`
 - `Citation { title, href }`
-- `ApiError { status, code, message, retryable, requestId? }` — declared in `types.ts`, not yet thrown/used by `MockDataClient`.
+- `ApiError { status, code, message, retryable, requestId? }` — declared in `types.ts`; `HttpDataClient` throws these via `errors.ts` `normalizeError` on any fetch failure (`{ detail }` FastAPI body → `message`).
 
-## `dataapi/app.py` reference (6 GET endpoints, not wired to the plugin)
+## `dataapi/app.py` reference (endpoints wired to the plugin)
 
-`GET /metrics`, `GET /events`, `GET /flows`, `GET /labels`, `GET /topology`, `GET /datasets`. FastAPI default error body on failure: `{ "detail": "<message>" }` (raised via `HTTPException`). Bound to `127.0.0.1` only, local-only offline tool. See `INTEGRATION_GUIDE.md` for how a real `HttpDataClient` would map onto these.
+`GET /metrics`, `GET /events`, `GET /flows`, `GET /labels`, `GET /topology`, `GET /datasets` (unused by the plugin), plus `GET /faults/scenarios`, `POST /faults/inject`, `GET /faults/active`, `POST /faults/revert/{id}`. FastAPI default error body on failure: `{ "detail": "<message>" }` (raised via `HTTPException`). Bound to `127.0.0.1` only; CORS allows `http://localhost:3000` + `http://127.0.0.1:3000` (the plugin's origin) — `/faults/*` routes run `docker exec` into the lab, so this allow-list is the auth boundary. Must run single-worker (`./start.sh`) — the `/faults/*` registry is in-process memory. See `INTEGRATION_GUIDE.md` for how `HttpDataClient` maps onto these.

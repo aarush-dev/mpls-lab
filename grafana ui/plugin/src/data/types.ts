@@ -178,6 +178,40 @@ export interface TelemetryRequest {
   timeRange?: TimeRange;
 }
 
+// --- HttpDataClient additions -----------------------------------------------------------------
+
+/**
+ * One metric the sim emits. `metricCatalog.ts` is the single source of truth for metric grouping;
+ * `promql` carries a `$dev` placeholder HttpDataClient substitutes with the queried device id.
+ * `entityLabel` (when set) names the Prometheus label that identifies the per-metric entity
+ * (e.g. "interface" or "tunnel") — used to disambiguate one device's many series.
+ */
+export interface MetricDescriptor {
+  name: string;
+  promql: string;
+  label: string;
+  unit?: string;
+  source: DataSourceKind;
+  group: string;
+  entityLabel?: string;
+}
+
+/** A fault scenario the backend can inject (GET /faults/scenarios). */
+export interface FaultScenario {
+  id: string;
+  label?: string;
+  description?: string;
+  [k: string]: unknown;
+}
+
+/** Request body for POST /faults/inject. */
+export interface InjectFaultRequest {
+  scenario: string;
+  target: string;
+  severity?: 'low' | 'medium' | 'high';
+  duration?: number;
+}
+
 export interface CreateConversationRequest {
   context?: Conversation['context'];
   firstMessage?: string;

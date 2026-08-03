@@ -2,6 +2,7 @@ import React, { createContext, PropsWithChildren, useContext, useMemo } from 're
 import { appConfig } from '../config';
 import type { DataClient } from './DataClient';
 import { MockDataClient } from './MockDataClient';
+import { HttpDataClient } from './HttpDataClient';
 
 const DataClientContext = createContext<DataClient | undefined>(undefined);
 
@@ -9,9 +10,7 @@ function createDataClient(): DataClient {
   if (appConfig.mode === 'mock') {
     return new MockDataClient();
   }
-  // HttpDataClient lands in a later milestone; until then `api` mode falls back to mock so the
-  // app never crashes on an unimplemented client.
-  return new MockDataClient();
+  return new HttpDataClient(appConfig.apiBaseUrl, appConfig.requestTimeoutMs);
 }
 
 /**

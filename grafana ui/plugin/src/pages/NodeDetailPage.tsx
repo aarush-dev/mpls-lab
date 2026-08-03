@@ -8,28 +8,33 @@ import { useStyles2, Link, Select } from '@grafana/ui';
 import { TimeSeriesPanel } from '../components/TimeSeriesPanel';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
+import { InterfaceTable } from '../components/InterfaceTable';
+import { FlowTable } from '../components/FlowTable';
+import { LogTerminal } from '../components/LogTerminal';
 import { nodeDetailPath } from '../constants';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
-import { Incident, MetricSeries, Prediction, TopologyGraph } from '../data/types';
+import { FlowRecord, Incident, MetricSeries, NetworkEvent, Prediction, TopologyGraph } from '../data/types';
 import { groupSeries } from '../utils/metricGroups';
 
 export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const history = useHistory();
   const styles = useStyles2(getStyles);
-  const { cursor, injectedFaults } = useAppState();
+  const { refreshTick, range, injectedFaults } = useAppState();
   const dataClient = useDataClient();
 
   const [telemetry, setTelemetry] = useState<MetricSeries[] | null>(null);
   const [topology, setTopology] = useState<TopologyGraph | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [events, setEvents] = useState<NetworkEvent[]>([]);
+  const [flows, setFlows] = useState<FlowRecord[]>([]);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
-  // Clear telemetry only when the selected device changes (not on clock ticks) so switching nodes
-  // shows a clean "Loading…" instead of the previous node's charts, without per-tick blinking.
+  // Clear telemetry only when the selected device changes (not on refresh) so switching nodes shows
+  // a clean "Loading…" instead of the previous node's charts, without per-refresh blinking.
   useEffect(() => {
     setTelemetry(null);
   }, [id]);
@@ -37,14 +42,17 @@ export function NodeDetailPage() {
   useEffect(() => {
     let cancelled = false;
     setError(false);
+    const timeRange = { fromMs: range.fromMs, toMs: range.toMs };
 
     Promise.all([
-      dataClient.getTelemetry({ deviceId: id }),
+      dataClient.getTelemetry({ deviceId: id, timeRange }),
       dataClient.getTopology({}),
       dataClient.getIncidents({ device: id }),
       dataClient.getPredictions({ device: id }),
+      dataClient.getEvents({ device: id, timeRange }),
+      dataClient.getFlows({ device: id, timeRange }),
     ])
-      .then(([telemetryResult, topologyResult, incidentsResult, predictionsResult]) => {
+      .then(([telemetryResult, topologyResult, incidentsResult, predictionsResult, eventsResult, flowsResult]) => {
         if (cancelled) {
           return;
         }
@@ -52,6 +60,8 @@ export function NodeDetailPage() {
         setTopology(topologyResult);
         setIncidents(incidentsResult);
         setPredictions(predictionsResult);
+        setEvents(eventsResult);
+        setFlows(flowsResult);
       })
       .catch(() => {
         if (!cancelled) {
@@ -62,9 +72,8 @@ export function NodeDetailPage() {
     return () => {
       cancelled = true;
     };
-    // injectedFaults: re-fetch when a fault escalates (pending->predicted->down) so the charts +
-    // status update live between demo ticks.
-  }, [dataClient, cursor, id, attempt, injectedFaults]);
+    // injectedFaults: re-fetch when a fault escalates so charts + status update live.
+  }, [dataClient, refreshTick, range.fromMs, range.toMs, id, attempt, injectedFaults]);
 
   const node = topology?.nodes.find((n) => n.id === id);
   const neighborIds = useMemo(() => {
@@ -142,13 +151,15 @@ export function NodeDetailPage() {
             </span>
           </div>
 
+          <InterfaceTable series={telemetry ?? []} />
+
           <h3 className={styles.sectionTitle}>Telemetry</h3>
           {panels.length === 0 ? (
             <EmptyState message="No telemetry feed for this device (unmonitored host/core). Pick a monitored device above." />
           ) : (
             <div className={styles.panels}>
               {panels.map((group) => (
-                <TimeSeriesPanel key={group.title} title={group.title} series={group.series} />
+                <TimeSeriesPanel key={group.title} title={group.title} series={group.series} unit={group.unit} />
               ))}
             </div>
           )}
@@ -165,6 +176,12 @@ export function NodeDetailPage() {
               ))}
             </div>
           )}
+
+          <h3 className={styles.sectionTitle}>Packets / Flows</h3>
+          <FlowTable flows={flows} />
+
+          <h3 className={styles.sectionTitle}>Logs</h3>
+          <LogTerminal events={events} />
         </>
       )}
     </PluginPage>

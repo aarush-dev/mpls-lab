@@ -2,68 +2,75 @@
 
 Grafana App Plugin (id `mplslab-noccopilot-app`, plugin folder name `noccopilot`), React + TypeScript, built with `@grafana/create-plugin` (webpack + swc + jest). Pinned to Grafana `>=11.1.0`, `react-router-dom` 5.3.4. Version 1.7.1. Built `dist/` is committed to the repo.
 
-Runs entirely on bundled mock data today (see "Mock mode" below). No live backend wired up.
+Defaults to live `api` mode against the FastAPI data API (`dataapi/`, sibling dir to this one). Mock mode still exists and is selectable (see "Mock mode" below); Copilot chat always uses the mock, even in `api` mode — the ML/Copilot backend is a separate, unbuilt component.
 
 ## Quickstart
 
-```
-cd frontend
-docker compose up -d
-```
+1. Start lab telemetry (the sim), then the data API:
+   ```
+   cd ../dataapi && ./start.sh
+   ```
+   Runs uvicorn on `127.0.0.1:8000`, single worker (the `/faults/*` in-memory registry requires it).
+2. Build the plugin:
+   ```
+   cd plugin && node ./node_modules/webpack/bin/webpack.js -c ./.config/webpack/webpack.config.ts --env production
+   ```
+3. Start Grafana:
+   ```
+   docker compose up -d
+   ```
 
-Compose file: `frontend/docker-compose.yml` (canonical). Brings up `grafana/grafana:11.1.0` on `http://localhost:3000` and `prom/alertmanager:v0.27.0` on `http://localhost:9093`, anonymous admin, unsigned-plugin loading, analytics/update-checks off (air-gapped). Mounts: `./plugin/dist` → `/var/lib/grafana/plugins/mplslab-noccopilot-app`, `./grafana/provisioning` → `/etc/grafana/provisioning`, `./grafana/dashboards` → `/var/lib/grafana/dashboards`. (`frontend/plugin/docker-compose.yaml` is the create-plugin scaffold and is not used.)
-
-First run after upgrading to v1.3.0: `docker compose up -d` then restart the `grafana` container once so it picks up the new Alertmanager datasource.
+Compose file: `docker-compose.yml` (canonical, this directory). Brings up `grafana/grafana:11.1.0` on `http://localhost:3000` and `prom/alertmanager:v0.27.0` on `http://localhost:9093`, anonymous admin, unsigned-plugin loading, analytics/update-checks off (air-gapped). Mounts: `./plugin/dist` → `/var/lib/grafana/plugins/mplslab-noccopilot-app`, `./grafana/provisioning` → `/etc/grafana/provisioning`, `./grafana/dashboards` → `/var/lib/grafana/dashboards`. (`plugin/docker-compose.yaml` is the create-plugin scaffold and is not used.) Grafana must run on port 3000 specifically — `dataapi`'s CORS allow-list is `http://localhost:3000` + `http://127.0.0.1:3000` only.
 
 Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 
 ## Pages
 
-8 pages, all under `frontend/plugin/src/pages/`:
+8 pages, all under `plugin/src/pages/`:
 
 - **Overview** (`OverviewPage.tsx`, `/`) — fleet health summary: reporting/expected devices, degraded tunnels, active incidents, highest-risk device.
-- **Topology** (`TopologyPage.tsx`, `/topology`) — cytoscape map of the network graph, node health coloring. Layout is a deterministic **preset** (not force-directed): `src/utils/topologyLayout.ts` `computePositions()` gives each node a fixed slot — pops laid on a 3×2 cluster grid, role tiers stacked top-down (p core → pe → ce → host leaves), so nodes never overlap and the map is stable across ticks. Node shape/size differ by role (`src/data/topologyStyles.ts`, keyed on the lowercase fixture roles). The ~171 tunnel (overlay) links are drawn faint by default; hovering a node lights up its incident links **and shows a mini node card** (`NodeHoverCard` in `TopologyPage.tsx`) — identity, live state, and a few headline metrics — so nodes can be inspected without clicking into each one.
-- **Node Detail** (`NodeDetailPage.tsx`, `/node/:id`) — single-device view with a device picker dropdown.
+- **Topology** (`TopologyPage.tsx`, `/topology`) — cytoscape map of the network graph, node health coloring. Layout is a deterministic **preset** (not force-directed): `src/utils/topologyLayout.ts` `computePositions()` gives each node a fixed slot — pops laid on a 3×2 cluster grid, role tiers stacked top-down (p core → pe → ce → host leaves), so nodes never overlap and the map is stable across refreshes. Node shape/size differ by role (`src/data/topologyStyles.ts`, keyed on the lowercase fixture roles). In `api` mode node `state` (red/amber/green) is derived live from active `/labels` and `pop` is derived from the device id (`HttpDataClient.popOf`). Hovering a node **shows a mini node card** (`NodeHoverCard` in `TopologyPage.tsx`) — identity, live state, and a few headline metrics.
+- **Node Detail** (`NodeDetailPage.tsx`, `/node/:id`) — single-device view with a device picker dropdown. Top to bottom: status line → `InterfaceTable` (per-interface oper status, error/discard rates, RX/TX) → telemetry panels grouped by the 11 `metricCatalog.ts` groups (Interface throughput/errors/status, Queue, Host CPU/memory, BGP control-plane, OSPF/RIB, MPLS, Tunnel, Chassis (modelled), Transceiver (modelled)) → neighbor links → `FlowTable` (5-tuple + byte/packet stats from nfacctd) → `LogTerminal` (terminal-styled, severity-colored, live syslog for the node from Loki).
 - **Telemetry** (`TelemetryPage.tsx`, `/telemetry`) — time-series metric panels.
 - **Incidents** (`IncidentsPage.tsx`, `/incidents`) — incident and prediction list, evidence, root-cause hypotheses, recommended actions.
-- **Copilot** (`CopilotPage.tsx`, `/copilot`) — chat-style assistant over incidents/telemetry.
-- **Fault Injection** (`FaultInjectionPage.tsx`, `/inject`) — demo control: pick a node + fault type and fire it. The fault **escalates on a timer** instead of dropping red instantly (`InjectedFault.phase` in `src/state/reducer.ts`, timers in `App.tsx`): `pending` (~5s, still healthy) → `predicted` (amber + a `NodeDownPredicted` alert with a deterministic 30/60/90s lead) → `down` (red + `NodeDown`). `MockDataClient.nodeStateAt` maps phase→color; `getActiveAlerts` emits the phase's alert. While a fault is live, the node's detail page grows a **Fault predictor** panel — a leading-indicator curve (`MockDataClient.predictorSeries`) that climbs toward impact (traffic faults trend "pressure" up, crash faults trend a "health score" down). Topology / Overview / Node Detail re-fetch on `injectedFaults` change so the color + charts update live between demo ticks. Clear per-node or all.
+- **Copilot** (`CopilotPage.tsx`, `/copilot`) — chat-style assistant over incidents/telemetry. Always backed by the mock (see "Data modes" below), in both `mock` and `api` mode.
+- **Fault Injection** (`FaultInjectionPage.tsx`, `/inject`) — fires a **real** fault in the lab sim via `dataapi`'s `POST /faults/inject {scenario, target, severity?, duration?}` (21 scenarios, valid target roles enforced server-side), auto-reverting after `duration`; a "Revert now" button calls `POST /faults/revert/{scenario_id}` early. Layered on top is the client-side visual escalation kept from the mock-only build, for instant feedback ahead of the real telemetry catching up (`InjectedFault.phase` in `src/state/reducer.ts`, timers in `App.tsx`): `pending` (~5s, still healthy) → `predicted` (amber + a `NodeDownPredicted` alert with a deterministic 30/60/90s lead) → `down` (red + `NodeDown`). If the real inject call fails, the optimistic visual is rolled back. Topology / Overview / Node Detail re-fetch on `injectedFaults` change so the color + charts update live. Clear per-node or all (reverts the real fault too).
 - **Status** (`StatusPage.tsx`, `/status`) — "Data & Integration Status": shows data source/capabilities state.
+
+A `LabStatusBadge` in the header (`src/components/LabStatusBadge.tsx`) polls `getCapabilities()` every 10s and shows **Lab ON** / **Lab OFF** based on VictoriaMetrics reachability. A `TimeControl` next to it (`src/components/TimeControl.tsx`) switches between **Live** (auto-refresh every 5s, window follows now) and **History** (a frozen relative range, back to VictoriaMetrics' 30d retention) — see `src/state/reducer.ts` (`AppState { mode, range, liveWindowSec, refreshTick, filters, injectedFaults }`).
 
 Every alert (node-down, T-5min prediction, or injected fault) also pops a top-right toast that auto-fades after 5s, shown on **every** page — `src/components/AlertToaster.tsx` (`AlertToasterProvider` wraps the whole app; `App.tsx` calls `notify()` for each newly-firing alert).
 
-Route list is the source of truth in `frontend/plugin/src/plugin.json` (`includes` array).
+Route list is the source of truth in `plugin/src/plugin.json` (`includes` array).
 
-## Mock mode
+## Data modes
 
-`appConfig.mode` in `frontend/plugin/src/config.ts` defaults to `'mock'`. `MockDataClient` (`frontend/plugin/src/data/MockDataClient.ts`) reads bundled JSON fixtures under `frontend/plugin/src/fixtures/` and replays them against a shared demo clock driven by `App.tsx`. Data is a recorded sample capture, not live telemetry. Predictions and Copilot responses are fabricated to look live; the UI shows no demo markers (`showDemoBadge: false`).
+`appConfig.mode` in `plugin/src/config.ts` defaults to `'api'`. `DataClientContext.tsx` picks the implementation: `'mock'` → `MockDataClient`, `'api'` → `HttpDataClient` (`plugin/src/data/HttpDataClient.ts`), both implementing the same `DataClient` interface (`API_CONTRACT.md`).
 
-Playback runs in real time: `AppProvider` (`src/state/AppContext.tsx`) paces one bucket per bucket's wall-clock width (`MOCK_BUCKET_META.bucketMs`, 30s), so 30s of data takes 30s. `speed` is a multiplier on that (`intervalMs = bucketMs / speed`): 2x → 15s/bucket, 0.5x → 60s/bucket.
+**`api` mode (default):** `HttpDataClient` talks to `dataapi` at `apiBaseUrl` (`http://127.0.0.1:8000`) — `/topology` (148 nodes), `/metrics` (PromQL range queries per `data/metricCatalog.ts`, 11 metric groups), `/events` (Loki), `/flows` (nfacctd), `/labels` (ground-truth fault timeline, used to derive incidents/predictions/topology state/overview). The 4 copilot methods (`getConversation`, `createConversation`, `sendMessage`, `submitFeedback`) forward to an internal `MockDataClient` — `dataapi` has no ML/LLM route, that's a separate, unbuilt component. `setCursor`/`getActiveAlerts` are mock-only hooks `HttpDataClient` doesn't implement; callers feature-detect (`if ('setCursor' in client)`).
 
-Two clock values, both in `AppState` (`src/state/reducer.ts`): `cursor` is the wrapped data index into the 152-bucket tape (wraps every loop); `absTick` is an ever-increasing tick that never wraps. Display (chart x-axis, `PlaybackControls` clock label, `CopilotPage` timestamps) uses `absTick` so time keeps counting up across loops instead of jumping ~76 min backward. `MockDataClient.getTelemetry` rewrites each point's `tMs` from `absTick` (monotonic) but still reads values from the wrapped `cursor` window. `curTsMs()` stays `cursor`-based — event/prediction/incident gating must not run past fixture timestamps on a loop.
-
-Telemetry covers all 148 selectable topology nodes, not just the ones with real fixture series. `src/data/telemetrySynth.ts` (`synthSeries(deviceId, role, bucketCount)`) generates deterministic, role-aware synthetic series (seeded by deviceId, no `Date.now`/`Math.random`) for any device or metric missing real data — including interface error counters and PE-router transceiver metrics, previously flat/null. `MockDataClient.telemetryFor(deviceId)` keeps real series where present and fills the rest with synth. `src/utils/metricGroups.ts` (`groupSeries()`, used by `TelemetryPage.tsx` and `NodeDetailPage.tsx`) groups panels by metric suffix so unrelated units (octets vs errors vs latency) don't share one axis.
-
-Live mode (`'api'`) exists as a config value but has no implementation — see `INTEGRATION_GUIDE.md`.
+**`mock` mode:** `MockDataClient` (`plugin/src/data/MockDataClient.ts`) reads bundled JSON fixtures under `plugin/src/fixtures/` — a recorded sample capture, not live telemetry. Predictions and Copilot responses are fabricated to look live; the UI shows no demo markers (`showDemoBadge: false`). Telemetry covers all 148 selectable topology nodes, not just the ones with real fixture series — `src/data/telemetrySynth.ts` (`synthSeries(deviceId, role, bucketCount)`) generates deterministic, role-aware synthetic series (seeded by deviceId, no `Date.now`/`Math.random`) for any device/metric missing real data. `src/utils/metricGroups.ts` (`groupSeries()`) groups panels by metric suffix so unrelated units don't share one axis. See `INTEGRATION_GUIDE.md` for how to flip back to `mock`.
 
 ## Alerting
 
-Synthetic alerts land in Grafana's native Alerting tab, backed by a real Alertmanager container (not Grafana-managed alert rules). Two kinds, recomputed every demo-clock tick from `MockDataClient.getActiveAlerts()`:
+Synthetic alerts land in Grafana's native Alerting tab, backed by a real Alertmanager container (not Grafana-managed alert rules). Two kinds, recomputed from the client-side `injectedFaults` state whenever it changes (`alerting/activeAlerts.ts` `activeAlertsFromInjected`, called from `App.tsx`):
 
-- `NodeDown` (critical) — a node whose live state is red at the current bucket.
-- `NodeDownPredicted` (warning) — an active fabricated prediction within 300s of its predicted impact.
+- `NodeDown` (critical) — an injected fault in `down` phase.
+- `NodeDownPredicted` (warning) — an injected fault in `predicted` phase.
+
+Real backend faults (from `/labels`, not manually injected) surface separately as incidents/predictions, not as Alertmanager alerts.
 
 Labels: `alertname`, `node`, `severity`, `source=noc-copilot`, `pop`. Annotations: `summary` (+ `description` with confidence for predictions). `generatorURL` deep-links to the node-detail page.
 
-Write path: the plugin POSTs directly to Alertmanager's native API (`http://<host>:9093/api/v2/alerts`), not through Grafana's datasource proxy — Grafana's AM proxy only supports reading, and returns HTTP 400 on a posted AM-native array (it expects `definitions.PostableAlerts`). Read path: Grafana reads the alerts back via the provisioned `noc-alertmanager` datasource for its native Alerting UI. `startsAt` is omitted so Alertmanager stamps receive-time; alerts auto-resolve via `resolve_timeout` once the plugin stops re-posting them (firing set only re-sent on change, see `App.tsx`). Air-gapped: `frontend/alertmanager/alertmanager.yml` has a single blackhole receiver, nothing is ever sent anywhere.
+Write path: the plugin POSTs directly to Alertmanager's native API (`http://<host>:9093/api/v2/alerts`), not through Grafana's datasource proxy — Grafana's AM proxy only supports reading, and returns HTTP 400 on a posted AM-native array (it expects `definitions.PostableAlerts`). Read path: Grafana reads the alerts back via the provisioned `noc-alertmanager` datasource for its native Alerting UI. `startsAt` is omitted so Alertmanager stamps receive-time; alerts auto-resolve via `resolve_timeout` once the plugin stops re-posting them (firing set only re-sent on change, see `App.tsx`). Air-gapped: `alertmanager/alertmanager.yml` has a single blackhole receiver, nothing is ever sent anywhere.
 
 View: Grafana → Alerting → Alert groups, source = "Alertmanager". Code: `src/alerting/alertPublisher.ts` (`buildAmAlerts`, `publishAlerts`).
 
-See `API_CONTRACT.md` for the full `DataClient` interface, `INTEGRATION_GUIDE.md` for how to wire up a real backend.
+See `API_CONTRACT.md` for the full `DataClient` interface, `INTEGRATION_GUIDE.md` for how `api` mode is wired and how to flip back to mock.
 
 ## Build / test / typecheck
 
-From `frontend/plugin/`. On WSL under `/mnt/c`, npm's `.bin` symlinks break, so invoke binaries directly with `node`:
+From `plugin/`. On WSL under `/mnt/c`, npm's `.bin` symlinks break, so invoke binaries directly with `node`:
 
 ```
 node ./node_modules/webpack/bin/webpack.js -c ./.config/webpack/webpack.config.ts --env production
@@ -72,3 +79,5 @@ node ./node_modules/jest/bin/jest.js
 ```
 
 npm scripts (`package.json`) exist for the same commands (`build`, `typecheck`, `test:ci`) but rely on the broken `.bin` symlinks in this environment.
+
+Verified: prod webpack build green, `tsc --noEmit` clean, 109 jest tests pass.

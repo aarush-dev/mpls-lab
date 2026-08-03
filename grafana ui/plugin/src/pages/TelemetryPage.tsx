@@ -11,11 +11,10 @@ import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { MetricSeries, TopologyNode } from '../data/types';
 import { groupSeries } from '../utils/metricGroups';
-import { MOCK_BUCKET_META } from '../data/MockDataClient';
 
 export function TelemetryPage() {
   const styles = useStyles2(getStyles);
-  const { cursor, absTick, filters } = useAppState();
+  const { refreshTick, range, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [nodes, setNodes] = useState<TopologyNode[]>([]);
@@ -47,8 +46,10 @@ export function TelemetryPage() {
     let cancelled = false;
     setError(false);
 
+    const timeRange = { fromMs: range.fromMs, toMs: range.toMs };
+
     dataClient
-      .getTelemetry({ deviceId: selectedDevice, keys: selectedKeys.length ? selectedKeys : undefined })
+      .getTelemetry({ deviceId: selectedDevice, keys: selectedKeys.length ? selectedKeys : undefined, timeRange })
       .then((result) => {
         if (!cancelled) {
           setSeries(result);
@@ -60,18 +61,16 @@ export function TelemetryPage() {
         }
       });
 
-    dataClient.getIncidents({ device: selectedDevice }).then((incidents) => {
+    dataClient.getIncidents({ device: selectedDevice, timeRange }).then((incidents) => {
       if (cancelled) {
         return;
       }
-      // ponytail: shift bands by the loop offset so fixed-fixture incident times track the monotonic axis.
-      const loopOffsetMs = (absTick - cursor) * MOCK_BUCKET_META.bucketMs;
       const bands: FaultOverlay[] = incidents
         .filter((i) => i.deviceIds.includes(selectedDevice))
         .map((i) => {
-          const fromMs = Date.parse(i.startedAt) + loopOffsetMs;
+          const fromMs = Date.parse(i.startedAt);
           const rawTo = Date.parse(i.endedAt ?? i.impactAt ?? i.startedAt);
-          const toMs = Number.isNaN(rawTo) ? fromMs : rawTo + loopOffsetMs;
+          const toMs = Number.isNaN(rawTo) ? fromMs : rawTo;
           return { fromMs, toMs, label: i.faultType };
         })
         .filter((b) => !Number.isNaN(b.fromMs));
@@ -81,7 +80,7 @@ export function TelemetryPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, absTick, filters, selectedDevice, selectedKeys, retryTick]);
+  }, [dataClient, refreshTick, range.fromMs, range.toMs, filters, selectedDevice, selectedKeys, retryTick]);
 
   const deviceOptions: Array<SelectableValue<string>> = useMemo(
     () => nodes.map((n) => ({ label: n.id, value: n.id })),

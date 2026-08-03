@@ -6,7 +6,7 @@ export interface AppConfig {
 }
 
 export const appConfig: AppConfig = {
-  mode: 'mock',
+  mode: 'api',
   apiBaseUrl: 'http://127.0.0.1:8000',
   requestTimeoutMs: 8000,
   showDemoBadge: false,

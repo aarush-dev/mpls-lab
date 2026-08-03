@@ -61,8 +61,9 @@ docker compose up -d
 
 ### Step 4: Start the Data API (FastAPI on localhost:8000)
 ```bash
-cd /root/LAB/dataapi
-uvicorn app:app --host 127.0.0.1 --port 8000 &
+cd /root/LAB/dataapi && ./start.sh &
+# start.sh runs single-worker (--workers 1) — the /faults/* live-injection
+# registry is in-process memory; a second worker would split it.
 # Expected: "Uvicorn running on http://127.0.0.1:8000"
 # Test: curl http://127.0.0.1:8000/
 ```
@@ -193,6 +194,18 @@ python3 orchestrator.py --scenario congestion --target ce_branch1 --severity hig
 # {"event": "inject", "scenario_id": "congestion-ce_branch1-abc12345", "t_start": "2026-06-21T...Z"}
 # {"event": "impact", "scenario_id": "...", "t_impact": "...", "observed": 45.3}
 # {"event": "revert", "scenario_id": "...", "t_end": "...Z"}
+```
+
+### Run a fault via the Data API (non-blocking, what the Grafana plugin uses)
+```bash
+curl localhost:8000/faults/scenarios                      # list 21 scenarios + valid target roles
+curl -X POST 127.0.0.1:8000/faults/inject -H 'Content-Type: application/json' \
+  -d '{"scenario":"node_failure","target":"ce_branch3","duration":45}'
+curl localhost:8000/faults/active                          # what's running now
+curl -X POST localhost:8000/faults/revert/<scenario_id>    # early revert
+```
+```bash
+# CLI orchestrator run, continued:
 # {"event": "label_written", "row": {...}}
 
 # While it runs: open Grafana, watch max(sdwan_tunnel_latency_ms{device="ce_branch1"}) climb then drop
@@ -345,7 +358,8 @@ docker exec clab-sdwan_mpls_noc-ce_branch1 ip link show wg0
 curl http://127.0.0.1:8000/
 # {
 #   "service": "noc-copilot-dataapi",
-#   "endpoints": ["/metrics", "/events", "/flows", "/labels", "/topology", "/datasets"],
+#   "endpoints": ["/metrics", "/events", "/flows", "/labels", "/topology", "/datasets",
+#                 "/faults/scenarios", "/faults/inject", "/faults/active", "/faults/revert/{id}"],
 #   "join_key": "device"
 # }
 ```
@@ -374,6 +388,7 @@ curl 'http://127.0.0.1:8000/events?device=ce_branch1' | jq '.rows | length'
 # Get all CRITICAL events
 curl 'http://127.0.0.1:8000/events?limit=100' | jq '.rows[] | select(.severity == "CRIT")'
 ```
+All 70 FRR routers now stream real syslog to Loki (`frr-node/rsyslog.conf` fix — was silently dead, `/events` used to return 0 rows always).
 
 ### /flows — Recent NetFlow records
 ```bash
@@ -950,7 +965,9 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_lsp_count%7Bdevice%3D%
 | **nfacctd** | tele-nfacctd | 2055/udp | 172.20.20.53 | IPFIX flow collector |
 | **Controller** | noc-controller | 9362 | http://172.20.20.56:9362 | SD-WAN path selection (Prometheus metrics) |
 | **Traffic Gen** | noc-trafficgen | — | (internal) | Diurnal traffic simulator (drives flows) |
-| **Data API** | (host) | 8000 | http://127.0.0.1:8000 | ML-ready endpoints: /metrics, /flows, /labels, /datasets |
+| **Data API** | (host) | 8000 | http://127.0.0.1:8000 | ML-ready endpoints: /metrics, /flows, /labels, /datasets, /faults/* (live inject) |
+| **Grafana app plugin** | (host, separate Grafana) | 3000 | http://localhost:3000/a/mplslab-noccopilot-app | Live topology map, per-node metrics/logs, real fault injection UI |
+| **Alertmanager** (plugin stack) | (host) | 9093 | http://127.0.0.1:9093 | Alerting UI, same host as the plugin Grafana |
 | **Kafka** | noc-kafka | 9092 / 29092 | 172.20.20.60:9092 (in-lab), 127.0.0.1:29092 (host) | Streaming fan-out to the predictive + copilot pipelines |
 | **Kafka bridge** | (host) | — | — | Producer: VM/Loki/labels/topology → 4 topics (`streaming/start.sh`) |
 
@@ -965,7 +982,7 @@ docker logs clab-sdwan_mpls_noc-ce_branch1 | tail -20
 # Start/stop
 cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --reconfigure
 cd /root/LAB/telemetry && docker compose up -d
-cd /root/LAB/dataapi && uvicorn app:app --host 127.0.0.1 --port 8000 &
+cd /root/LAB/dataapi && ./start.sh &
 
 # Faults
 cd /root/LAB/faults && python3 orchestrator.py --demo

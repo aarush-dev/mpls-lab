@@ -18,19 +18,33 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 import sources
 import export
+import faults_api
 
 app = FastAPI(title="NOC Copilot Clean Data API", version="1.0")
+
+# CORS: only the Grafana browser plugin origin (localhost:3000). GET+POST is all
+# the plugin needs; this allow-list IS the security boundary for /faults/* (which
+# runs docker exec) -- localhost-scoped, no auth by design (brief).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+app.include_router(faults_api.router)
 
 
 @app.get("/")
 def root():
     return {
         "service": "noc-copilot-dataapi",
-        "endpoints": ["/metrics", "/events", "/flows", "/labels", "/topology", "/datasets"],
+        "endpoints": ["/metrics", "/events", "/flows", "/labels", "/topology", "/datasets",
+                      "/faults/scenarios", "/faults/inject", "/faults/active", "/faults/revert/{id}"],
         "join_key": "device",
         "schema_docs": "dataapi/schema/",
     }

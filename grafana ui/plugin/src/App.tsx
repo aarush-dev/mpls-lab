@@ -17,8 +17,8 @@ import { AppShell } from './components/AppShell';
 import { AlertToasterProvider, useToaster } from './components/AlertToaster';
 import { AppProvider, useAppDispatch, useAppState } from './state/AppContext';
 import { DataClientProvider, useDataClient } from './data/DataClientContext';
-import { MOCK_BUCKET_META, MOCK_WINDOW_BUCKETS } from './data/MockDataClient';
-import { AlertDescriptor, publishAlerts } from './alerting/alertPublisher';
+import { publishAlerts } from './alerting/alertPublisher';
+import { activeAlertsFromInjected } from './alerting/activeAlerts';
 
 export function App(props: AppRootProps) {
   return (
@@ -35,53 +35,15 @@ export function App(props: AppRootProps) {
 function AppInner(_props: AppRootProps) {
   // Base path/url where Grafana mounted this app (/a/mplslab-noccopilot-app).
   const { path } = useRouteMatch();
-  const { cursor, absTick, injectedFaults } = useAppState();
+  const { injectedFaults } = useAppState();
   const dispatch = useAppDispatch();
   const dataClient = useDataClient();
   const { notify } = useToaster();
-
-  // Fixture bucket bounds are known statically in mock mode; wire them into the shared clock once
-  // on mount so the PlaybackControls slider/loop have the right range from the first render.
-  useEffect(() => {
-    dispatch({
-      type: 'SET_BOUNDS',
-      payload: { bucketCount: MOCK_BUCKET_META.bucketCount, windowBuckets: MOCK_WINDOW_BUCKETS },
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Every clock tick, tell the (cursor-aware) data client where "now" is. HttpDataClient (M3+)
-  // won't implement setCursor, so this is a soft feature-detect rather than a hard interface call.
-  useEffect(() => {
-    const cursorAware = dataClient as unknown as { setCursor?: (n: number) => void };
-    if (typeof cursorAware.setCursor === 'function') {
-      cursorAware.setCursor(cursor);
-    }
-  }, [dataClient, cursor]);
-
-  // Same soft feature-detect for the monotonic display clock (absTick). getTelemetry uses it to
-  // rewrite point timestamps so the chart time axis never rewinds on loop.
-  useEffect(() => {
-    const clockAware = dataClient as unknown as { setAbsTick?: (n: number) => void };
-    if (typeof clockAware.setAbsTick === 'function') {
-      clockAware.setAbsTick(absTick);
-    }
-  }, [dataClient, absTick]);
-
-  // Push manually injected faults (Fault Injection page) into the data client so nodes read their
-  // current phase (amber when predicted, red when down) and fire alerts. Runs before the alert effect.
-  useEffect(() => {
-    const injectAware = dataClient as unknown as {
-      setInjectedFaults?: (f: Array<{ node: string; faultType: string; phase: string; leadSec: number }>) => void;
-    };
-    if (typeof injectAware.setInjectedFaults === 'function') {
-      injectAware.setInjectedFaults(injectedFaults);
-    }
-  }, [dataClient, injectedFaults]);
+  void dataClient; // data reads happen per-page; kept here only for future app-level hooks.
 
   // Fault escalation timers: an injected fault stays healthy ~5s, then goes 'predicted' (amber +
-  // T-minus alert), then 'down' (red) after its leadSec. Wall-clock timers here (a live demo action,
-  // not the deterministic replay tape). Scheduled once per node; cleared when the fault is cleared.
+  // T-minus alert), then 'down' (red) after its leadSec. Instant visual feedback layered on top of
+  // the real backend state. Scheduled once per node; cleared when the fault is cleared.
   const faultTimers = useRef<Map<string, number[]>>(new Map());
   useEffect(() => {
     const timers = faultTimers.current;
@@ -119,18 +81,12 @@ function AppInner(_props: AppRootProps) {
     };
   }, []);
 
-  // Push the current firing set (node-down + T-5min predictions + injected faults) into Alertmanager
-  // so they show in the native Grafana Alerting tab, AND toast any newly-appeared alert. Only POST /
-  // toast when the set changes. Runs after the setCursor/injected effects so getActiveAlerts is fresh.
-  // ponytail: change-only push means a node red for >resolve_timeout auto-resolves in AM; the demo
-  // loops far faster than that, so no periodic re-post is needed.
+  // Push the current firing set (injected-fault predictions + downs) into Alertmanager so they show
+  // in the native Grafana Alerting tab, AND toast any newly-appeared alert. Only POST / toast when the
+  // set changes. ponytail: change-only push means a node red for >resolve_timeout auto-resolves in AM.
   const prevAlertKeys = useRef<Set<string> | null>(null);
   useEffect(() => {
-    const alertAware = dataClient as unknown as { getActiveAlerts?: () => AlertDescriptor[] };
-    if (typeof alertAware.getActiveAlerts !== 'function') {
-      return;
-    }
-    const alerts = alertAware.getActiveAlerts();
+    const alerts = activeAlertsFromInjected(injectedFaults);
     const keys = new Set(alerts.map((a) => `${a.alertname}:${a.node}`));
     const prev = prevAlertKeys.current;
 
@@ -152,10 +108,10 @@ function AppInner(_props: AppRootProps) {
     }
     prevAlertKeys.current = keys;
     publishAlerts(alerts);
-  }, [dataClient, cursor, injectedFaults, notify]);
+  }, [injectedFaults, notify]);
 
   return (
-    <AppShell meta={MOCK_BUCKET_META}>
+    <AppShell>
       <Switch>
         <Route exact path={path} component={OverviewPage} />
         <Route path={`${path}/topology`} component={TopologyPage} />

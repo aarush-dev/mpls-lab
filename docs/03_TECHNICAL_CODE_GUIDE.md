@@ -40,11 +40,11 @@ cd /root/LAB/telemetry && docker compose up -d
 # 2. Deploy the 148-container network lab
 cd /root/LAB && clab deploy -t topology/clab.yml
 
-# 3. Start the data API
-cd /root/LAB/dataapi && uvicorn app:app --host 127.0.0.1 --port 8000
+# 3. Start the data API (single worker — /faults/* registry is in-process memory)
+cd /root/LAB/dataapi && ./start.sh
 ```
 
-Grafana dashboards: `http://172.20.20.51:3000` (admin/admin). VictoriaMetrics: `http://127.0.0.1:8428`. Data API: `http://localhost:8000`.
+Grafana dashboards: `http://172.20.20.51:3000` (admin/admin). VictoriaMetrics: `http://127.0.0.1:8428`. Data API: `http://localhost:8000`. Grafana app plugin (separate Grafana instance, live-wired to the Data API): `http://localhost:3000/a/mplslab-noccopilot-app`.
 
 ---
 
@@ -58,10 +58,14 @@ The Data API (`/root/LAB/dataapi/app.py`) is a thin FastAPI wrapper. All busines
 def root():
     return {
         "service": "noc-copilot-dataapi",
-        "endpoints": ["/metrics", "/events", "/flows", "/labels", "/topology", "/datasets"],
+        "endpoints": ["/metrics", "/events", "/flows", "/labels", "/topology", "/datasets",
+                      "/faults/scenarios", "/faults/inject", "/faults/active", "/faults/revert/{id}"],
         "join_key": "device",
+        "schema_docs": "dataapi/schema/",
     }
 ```
+
+CORS is enabled for `http://localhost:3000` / `http://127.0.0.1:3000` only (the Grafana app plugin origin) — see `dataapi/app.py`. `/faults/*` runs `docker exec` into the lab; the CORS allow-list + `127.0.0.1` bind IS the auth boundary, by design (offline lab tool, no external exposure).
 
 ### /metrics — Time-Series from VictoriaMetrics
 
@@ -118,6 +122,8 @@ for row in resp.json()["rows"]:
 ```
 
 Each row has: `ts` (ISO UTC), `device`, `app`, `severity`, `line` (raw log text).
+
+FRR syslog → promtail → Loki is live on all 70 routers (`frr-node/rsyslog.conf`). Previously `module(load="omfwd")` tried to load a rsyslog *builtin* as a plugin `.so` and crashed rsyslogd at boot — no FRR syslog ever reached Loki, so `/events` always returned 0 rows. Fix: drop that line (`omfwd` is builtin; `action(type="omfwd")` alone still works). Image rebuilt, running nodes hot-patched.
 
 ### /flows — NetFlow Records
 
@@ -189,6 +195,29 @@ print(len(graph["nodes"]), "nodes,", len(graph["links"]), "links")
 ```
 
 See Section 7 for how to load this as a NetworkX graph for GNNs.
+
+### /faults — Real Fault Injection from the UI
+
+Live-injection routes for the Grafana app plugin, in `dataapi/faults_api.py` (mounted in `app.py`). Thin wrapper over `faults/orchestrator.py`: `POST /faults/inject` spawns `orchestrator.run_scenario` in a daemon thread (non-blocking) against an in-memory, Lock-guarded registry — a real `docker exec` fault, not a mock.
+
+```bash
+# List the 21 scenarios + valid target roles + default duration (90s)
+curl localhost:8000/faults/scenarios
+
+# Inject: fires a real fault, returns immediately with a scenario_id
+curl -X POST 127.0.0.1:8000/faults/inject -H 'Content-Type: application/json' \
+  -d '{"scenario":"node_failure","target":"ce_branch3","duration":45}'
+# -> {"scenario_id": "node_failure-ce_branch3-<hex8>", "status": "injecting"}
+# 404 unknown scenario | 422 target role invalid for that scenario | 409 target already active
+
+# Currently-running injections
+curl localhost:8000/faults/active
+
+# Early revert (cancels the hold; orchestrator's own finally still reverts the lab)
+curl -X POST localhost:8000/faults/revert/node_failure-ce_branch3-<hex8>
+```
+
+`run_scenario` gained an optional `cancel: threading.Event` param for this early-revert path — the guaranteed-revert `try/finally` is unchanged.
 
 ### /datasets — The Main Event: Labeled Parquet
 
@@ -1197,6 +1226,8 @@ In the live orchestrator, the hardest scenarios to predict early are `bgp_flap` 
 | `/root/LAB/dataapi/app.py` | FastAPI endpoint definitions |
 | `/root/LAB/dataapi/sources.py` | Data access: VM, Loki, flows, labels, topology |
 | `/root/LAB/dataapi/export.py` | Join logic: produces labeled Parquet |
+| `/root/LAB/dataapi/faults_api.py` | `/faults/*` routes: real UI-driven fault injection (thread over `orchestrator.run_scenario`) |
+| `/root/LAB/frr-node/rsyslog.conf` | FRR → promtail syslog forwarder (fixed: no longer loads builtin `omfwd` as a module) |
 | `/root/LAB/faults/orchestrator.py` | Fault scheduler + label writer |
 | `/root/LAB/faults/injectors.py` | Fault primitives: NetemImpair, BgpFlap, PolicyDrift, MultiLinkFault, OspfCostShift, etc. |
 | `/root/LAB/faults/labels/labels.jsonl` | Ground truth written by each fault run |

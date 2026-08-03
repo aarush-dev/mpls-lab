@@ -12,13 +12,37 @@ import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { MetricSeries, TopologyLink } from '../data/types';
 import { TopologyNodeLive } from '../data/MockDataClient';
+import { InjectedFault } from '../state/reducer';
 import { nodeDetailPath } from '../constants';
 import { stateColors } from '../data/topologyStyles';
+
+// Overlay manually-injected faults (Fault Injection page) onto the real /labels-derived node
+// state, so a fresh injection colors the node instantly instead of waiting on the next real signal.
+function applyInjectedFaults(nodes: TopologyNodeLive[], injectedFaults: InjectedFault[]): TopologyNodeLive[] {
+  if (injectedFaults.length === 0) {
+    return nodes;
+  }
+  const byNode = new Map(injectedFaults.map((f) => [f.node, f]));
+  return nodes.map((n) => {
+    const fault = byNode.get(n.id);
+    if (!fault) {
+      return n;
+    }
+    if (fault.phase === 'down') {
+      return { ...n, state: 'red' };
+    }
+    if (fault.phase === 'predicted') {
+      return { ...n, state: 'amber' };
+    }
+    // 'pending' — leave the real state as-is.
+    return n;
+  });
+}
 
 export function TopologyPage() {
   const styles = useStyles2(getStyles);
   const history = useHistory();
-  const { cursor, filters, injectedFaults } = useAppState();
+  const { refreshTick, range, filters, injectedFaults } = useAppState();
   const dataClient = useDataClient();
 
   const [nodes, setNodes] = useState<TopologyNodeLive[]>([]);
@@ -37,7 +61,7 @@ export function TopologyPage() {
       return;
     }
     let cancelled = false;
-    dataClient.getTelemetry({ deviceId: hoverId }).then((s) => {
+    dataClient.getTelemetry({ deviceId: hoverId, timeRange: { fromMs: range.fromMs, toMs: range.toMs } }).then((s) => {
       if (!cancelled) {
         setSnapshot(s);
       }
@@ -45,11 +69,11 @@ export function TopologyPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, hoverId, cursor]);
+  }, [dataClient, hoverId, refreshTick, range.fromMs, range.toMs]);
 
   useEffect(() => {
     let cancelled = false;
-    // Do NOT flip to 'loading' on cursor ticks — that unmounts the graph every second and makes it
+    // Do NOT flip to 'loading' on refresh ticks — that unmounts the graph every 5s and makes it
     // blink/re-layout. Keep the mounted graph and just replace its data; only the very first load
     // (or a manual reload) shows the loading state.
     dataClient
@@ -58,7 +82,7 @@ export function TopologyPage() {
         if (cancelled) {
           return;
         }
-        setNodes(graph.nodes as TopologyNodeLive[]);
+        setNodes(applyInjectedFaults(graph.nodes as TopologyNodeLive[], injectedFaults));
         setLinks(graph.links);
         setStatus('ready');
       })
@@ -72,7 +96,7 @@ export function TopologyPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, filters, reloadToken, injectedFaults]);
+  }, [dataClient, refreshTick, filters, reloadToken, injectedFaults]);
 
   const filteredNodes = useMemo(() => {
     const term = search.trim().toLowerCase();

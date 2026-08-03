@@ -12,14 +12,14 @@ import { count, secondsToEta } from '../utils/format';
 
 export function OverviewPage() {
   const styles = useStyles2(getStyles);
-  const { cursor, filters, injectedFaults } = useAppState();
+  const { refreshTick, filters, injectedFaults } = useAppState();
   const dataClient = useDataClient();
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
 
-  // Refetch every time the shared demo clock advances, so the whole page is a pure function of
-  // `cursor` (plan decision #3) — no local polling, no wall-clock timers here.
+  // Refetch every time the shared live/history clock advances (5s live tick or a history range
+  // pick), so the whole page is a pure function of `refreshTick` — no local polling here.
   useEffect(() => {
     let cancelled = false;
 
@@ -37,7 +37,7 @@ export function OverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor, filters, injectedFaults]);
+  }, [dataClient, refreshTick, filters, injectedFaults]);
 
   return (
     <PluginPage>

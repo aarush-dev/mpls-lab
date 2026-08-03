@@ -1,14 +1,17 @@
-// Global demo-clock state. cursor = current bucket index into the composite playback tape.
-// bucketCount/windowBuckets are populated once (SET_BOUNDS) when fixture metadata loads.
-// No wall-clock time is read here — TICK advances the cursor by exactly one bucket per call,
-// driven by a setInterval in AppContext.tsx (deterministic, testable).
+// Global time-context state for a LIVE backend (replaces the old fixture-replay tape).
+// `mode` = live (auto-refresh, window follows now) | history (static, user-picked range).
+// `range` is the active window every page passes as its telemetry timeRange. `refreshTick` is
+// bumped on every live refresh / manual refresh so data effects can key on it. The reducer stays
+// pure — wall-clock `nowMs` is passed IN via the action (AppContext supplies Date.now()), never read
+// here, so the reducer remains deterministic/testable.
 
 import type { Filters } from '../data/types';
 
 /** Lifecycle of an injected fault: healthy grace period -> predicted (amber + T-minus alert) -> down (red). */
 export type FaultPhase = 'pending' | 'predicted' | 'down';
 
-/** A manually injected fault (demo control). Escalates on a timer (see App.tsx) instead of dropping red instantly. */
+/** A manually injected fault (demo control). Escalates on a timer (see App.tsx) for instant visual feedback,
+ *  layered on top of the real /labels + live-metric state. */
 export interface InjectedFault {
   node: string;
   faultType: string;
@@ -18,47 +21,52 @@ export interface InjectedFault {
 }
 
 const FAULT_LEADS = [30, 60, 90];
-/** Deterministic 30/60/90 pick from node+faultType (no Math.random, keeps replay determinism). */
+/** Deterministic 30/60/90 pick from node+faultType (no Math.random). */
 function pickLeadSec(node: string, faultType: string): number {
   const sum = [...`${node}${faultType}`].reduce((a, c) => a + c.charCodeAt(0), 0);
   return FAULT_LEADS[sum % FAULT_LEADS.length];
 }
 
+export type ClockMode = 'live' | 'history';
+
+/** Active data window in epoch-ms. Passed to every DataClient call as timeRange. */
+export interface TimeRangeMs {
+  fromMs: number;
+  toMs: number;
+}
+
 export interface AppState {
-  cursor: number;
-  // Ever-increasing display clock (never wraps). cursor drives DATA reads (wraps on loop); absTick
-  // drives the DISPLAY time axis so the chart clock never rewinds when the tape loops (151->0).
-  absTick: number;
-  playing: boolean;
-  speed: number;
-  loop: boolean;
-  bucketCount: number;
-  windowBuckets: number;
+  mode: ClockMode;
+  range: TimeRangeMs;
+  /** Live window length in seconds (how far back "live" looks). */
+  liveWindowSec: number;
+  /** Bumped on each live refresh / manual refresh. Data effects depend on it to refetch. */
+  refreshTick: number;
   // Global operator filters (pop/siteType/device/vrf/hub). Passed to every DataClient call.
   filters: Filters;
-  // Manually injected faults (Fault Injection page). Overlaid on the replayed node states.
+  // Manually injected faults (Fault Injection page). Overlaid on real node state.
   injectedFaults: InjectedFault[];
 }
 
+export const DEFAULT_LIVE_WINDOW_SEC = 900; // 15 min
+
+// range starts empty; AppContext dispatches a TICK on mount to fill it from the real clock.
+// HttpDataClient treats an empty/zero range as "last liveWindow" so first paint is safe.
 export const initialAppState: AppState = {
-  cursor: 0,
-  absTick: 0,
-  playing: true,
-  speed: 1,
-  loop: true,
-  bucketCount: 0,
-  windowBuckets: 50,
+  mode: 'live',
+  range: { fromMs: 0, toMs: 0 },
+  liveWindowSec: DEFAULT_LIVE_WINDOW_SEC,
+  refreshTick: 0,
   filters: {},
   injectedFaults: [],
 };
 
 export type AppAction =
-  | { type: 'TICK' }
-  | { type: 'PLAY' }
-  | { type: 'PAUSE' }
-  | { type: 'SEEK'; payload: { cursor: number } }
-  | { type: 'SET_SPEED'; payload: { speed: number } }
-  | { type: 'SET_BOUNDS'; payload: { bucketCount: number; windowBuckets: number } }
+  | { type: 'TICK'; payload: { nowMs: number } }
+  | { type: 'REFRESH'; payload: { nowMs: number } }
+  | { type: 'SET_MODE'; payload: { mode: ClockMode; nowMs: number } }
+  | { type: 'SET_RANGE'; payload: { fromMs: number; toMs: number } }
+  | { type: 'SET_LIVE_WINDOW'; payload: { sec: number; nowMs: number } }
   | { type: 'SET_FILTER'; payload: { key: StringFilterKey; value: string | undefined } }
   | { type: 'CLEAR_FILTERS' }
   | { type: 'INJECT_FAULT'; payload: { node: string; faultType: string } }
@@ -69,33 +77,59 @@ export type AppAction =
 // String-valued filter keys only (excludes timeRange). SET_FILTER never touches timeRange.
 export type StringFilterKey = 'pop' | 'siteType' | 'device' | 'vrf' | 'hub';
 
+/** Slide the live window to end at nowMs. */
+function liveRange(nowMs: number, liveWindowSec: number): TimeRangeMs {
+  return { fromMs: nowMs - liveWindowSec * 1000, toMs: nowMs };
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'TICK': {
-      if (state.bucketCount <= 0) {
+      // Live refresh only; ignored while paused in history.
+      if (state.mode !== 'live') {
         return state;
       }
-      const next = state.loop
-        ? (state.cursor + 1) % state.bucketCount
-        : Math.min(state.cursor + 1, state.bucketCount - 1);
-      return { ...state, cursor: next, absTick: state.absTick + 1 };
+      return {
+        ...state,
+        range: liveRange(action.payload.nowMs, state.liveWindowSec),
+        refreshTick: state.refreshTick + 1,
+      };
     }
-    case 'PLAY':
-      return { ...state, playing: true };
-    case 'PAUSE':
-      return { ...state, playing: false };
-    case 'SEEK': {
-      if (state.bucketCount <= 0) {
-        return { ...state, cursor: Math.max(0, action.payload.cursor) };
+    case 'REFRESH':
+      return {
+        ...state,
+        range: state.mode === 'live' ? liveRange(action.payload.nowMs, state.liveWindowSec) : state.range,
+        refreshTick: state.refreshTick + 1,
+      };
+    case 'SET_MODE': {
+      if (action.payload.mode === 'live') {
+        return {
+          ...state,
+          mode: 'live',
+          range: liveRange(action.payload.nowMs, state.liveWindowSec),
+          refreshTick: state.refreshTick + 1,
+        };
       }
-      const clamped = Math.max(0, Math.min(action.payload.cursor, state.bucketCount - 1));
-      // Phase-align absTick to the scrubbed cursor within the current loop so the display clock
-      // tracks the slider without rewinding across earlier loops.
-      const absTick = Math.floor(state.absTick / state.bucketCount) * state.bucketCount + clamped;
-      return { ...state, cursor: clamped, absTick };
+      // Freeze on the current window when entering history.
+      return { ...state, mode: 'history', refreshTick: state.refreshTick + 1 };
     }
-    case 'SET_SPEED':
-      return { ...state, speed: action.payload.speed };
+    case 'SET_RANGE':
+      // A user-picked absolute range implies history (static) mode.
+      return {
+        ...state,
+        mode: 'history',
+        range: { fromMs: action.payload.fromMs, toMs: action.payload.toMs },
+        refreshTick: state.refreshTick + 1,
+      };
+    case 'SET_LIVE_WINDOW': {
+      const sec = Math.max(30, action.payload.sec);
+      return {
+        ...state,
+        liveWindowSec: sec,
+        range: state.mode === 'live' ? liveRange(action.payload.nowMs, sec) : state.range,
+        refreshTick: state.refreshTick + 1,
+      };
+    }
     case 'SET_FILTER': {
       const filters = { ...state.filters };
       if (action.payload.value) {
@@ -108,8 +142,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'CLEAR_FILTERS':
       return { ...state, filters: {} };
     case 'INJECT_FAULT': {
-      // Re-injecting the same node replaces its fault (idempotent by node). Starts in 'pending':
-      // App.tsx schedules the escalation to 'predicted' then 'down'.
+      // Re-injecting the same node replaces its fault (idempotent by node). Starts in 'pending';
+      // App.tsx schedules escalation to 'predicted' then 'down' for instant visual feedback.
       const rest = state.injectedFaults.filter((f) => f.node !== action.payload.node);
       const fault: InjectedFault = {
         node: action.payload.node,
@@ -130,12 +164,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, injectedFaults: state.injectedFaults.filter((f) => f.node !== action.payload.node) };
     case 'CLEAR_INJECTED':
       return { ...state, injectedFaults: [] };
-    case 'SET_BOUNDS': {
-      const bucketCount = Math.max(0, action.payload.bucketCount);
-      const windowBuckets = Math.max(1, action.payload.windowBuckets);
-      const cursor = bucketCount > 0 ? Math.min(state.cursor, bucketCount - 1) : 0;
-      return { ...state, bucketCount, windowBuckets, cursor };
-    }
     default:
       return state;
   }

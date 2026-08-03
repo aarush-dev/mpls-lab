@@ -989,3 +989,54 @@ agentic retry on fail are **I4b (#14)** — not built here.
 - **Deferred (I4b, #14):** the self-judge LLM call for relevance/sufficiency/consistency, and the
   bounded (`gate_max_retries`, 2) agentic retry that re-fetches `missing[]` — the gate is terminal
   until then, so a failed exploratory call blocks rather than retries.
+
+## Real fault injection from the UI + Loki fix + plugin live-wiring
+
+### rsyslog `omfwd` fix — why Loki was empty
+
+`frr-node/rsyslog.conf` had `module(load="omfwd")`. `omfwd` (network forwarding) is an rsyslog
+**builtin**, not a loadable plugin `.so` — `module(load=...)` on a builtin fails and crashed
+rsyslogd at container boot. Result: zero FRR syslog ever left any of the 70 routers; Loki was
+empty; `/events` always returned 0 rows. Nobody caught it because the pipeline degrades silently
+(no crash downstream, just no data). Fix: delete the `module(load="omfwd")` line — the existing
+`action(type="omfwd" ...)` already invokes the builtin directly, no module load needed. Rebuilt
+`frr-node:0.1`, hot-patched the 70 running nodes. Verified: `node_failure` injection produced real
+bgpd/zebra syslog lines in `/events`.
+
+### Real UI-driven fault injection (`dataapi/faults_api.py`)
+
+Grafana app plugin needs to fire faults from a browser click, not a CLI. Two options: shell out
+per-request (blocks the HTTP worker for the fault's full duration) or run it in a background
+thread. Chose **daemon thread + in-memory registry** — reuses `faults/orchestrator.run_scenario`
+as-is (no new fault-execution path to maintain), `POST /faults/inject` returns immediately with a
+`scenario_id`, `GET /faults/active` / `POST /faults/revert/{id}` read/mutate the registry.
+Registry is a plain `dict` behind a `Lock` — correct only if the process is single-worker, so
+`dataapi/start.sh` pins `--workers 1` (`uvicorn ... --workers 1`); a second worker would split the
+registry and `/faults/active` on worker B wouldn't see an injection started on worker A.
+`run_scenario` gained an optional `cancel: threading.Event` for the early-revert path; the
+existing guaranteed-revert `try/finally` is untouched. Target-role validation (422) is derived
+from `orchestrator.CAMPAIGN_POOLS` — no hardcoded device lists to drift from the topology.
+
+### CORS on dataapi
+
+Browser-origin requests (the plugin running on `localhost:3000`) get blocked by the browser
+without CORS headers, even though `dataapi` itself only binds `127.0.0.1`. Added
+`CORSMiddleware` allowing only `http://localhost:3000` / `http://127.0.0.1:3000`, `GET`+`POST`.
+This allow-list is the only auth boundary on `/faults/*` (which runs `docker exec`) — acceptable
+because this is an offline lab tool bound to loopback, not an internet-facing service.
+
+### Plugin live-integration + live/history time model
+
+The Grafana app plugin (`grafana ui/`) was mock-only; now wired to the real `dataapi` for
+topology, 11 metric groups (adds previously-ungraphed CPU/mem, errors/discards, queue, BGP churn,
+RIB/OSPF, chassis, transceiver, tunnel jitter/rekeys), per-node packet/flow table, and a
+terminal-styled live log view. Added a Lab ON/OFF badge and a Live/History time control (5s live
+poll) — replaces the old static replay-tape model now that the API is a live source, not a fixture.
+Fault Injection page calls the real `/faults/*` routes end-to-end (inject → impact → revert →
+label), not a canned response. Detail owned by the plugin's own docs under `grafana ui/`.
+
+### ML / Copilot — still stubbed
+
+None of the above touches the ML or Copilot pipeline (`copilot/`, synthetic generator, dataset
+schema). Fault injection, telemetry, and the plugin UI are infra/observability work only — no
+new model, no new retrieval behavior. Do not read this section as ML progress.

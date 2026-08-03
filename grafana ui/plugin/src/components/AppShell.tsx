@@ -5,9 +5,9 @@ import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
 
-import { PlaybackControls } from './PlaybackControls';
+import { TimeControl } from './TimeControl';
+import { LabStatusBadge } from './LabStatusBadge';
 import { FilterBar } from './FilterBar';
-import { BucketMeta } from '../utils/time';
 
 const NAV_LINKS = [
   { to: '', label: 'Overview', exact: true },
@@ -20,13 +20,8 @@ const NAV_LINKS = [
   { to: 'status', label: 'Status' },
 ];
 
-interface Props {
-  /** Bucket metadata for the demo clock, passed through to PlaybackControls for the time label. */
-  meta?: BucketMeta;
-}
-
-/** Top-level layout: title + playback controls, nav, and the routed page content. */
-export function AppShell({ meta, children }: PropsWithChildren<Props>) {
+/** Top-level layout: title + lab status + time control, nav, and the routed page content. */
+export function AppShell({ children }: PropsWithChildren<{}>) {
   const styles = useStyles2(getStyles);
   const { url } = useRouteMatch();
 
@@ -34,8 +29,9 @@ export function AppShell({ meta, children }: PropsWithChildren<Props>) {
     <div className={styles.root}>
       <div className={styles.topBar}>
         <h2 className={styles.title}>NOC Copilot</h2>
-        <div className={styles.playback}>
-          <PlaybackControls meta={meta} />
+        <div className={styles.controls}>
+          <LabStatusBadge />
+          <TimeControl />
         </div>
       </div>
       <nav className={styles.nav}>
@@ -76,9 +72,11 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin: 0;
     white-space: nowrap;
   `,
-  playback: css`
-    flex: 1;
-    min-width: 320px;
+  controls: css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing(1.5)};
+    flex-wrap: wrap;
   `,
   nav: css`
     display: flex;

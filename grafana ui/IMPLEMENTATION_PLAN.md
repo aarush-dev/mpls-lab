@@ -1,12 +1,11 @@
 # Frontend Implementation Plan — Grafana NOC Copilot App Plugin
 
-> **Scope (now): frontend + mock data only.** A modular React + TypeScript **Grafana App Plugin**
-> (`mplslab-noccopilot-app`) that runs fully offline on bundled deterministic fixtures. No ML model,
-> no copilot backend, no network lab, no telemetry backend, **no live API integration** — all
-> represented by clearly-labelled mock data.
-> **Later (not built now):** an `api` mode that connects the same DataClient to the real `dataapi`
-> endpoints. The seam for that is kept thin (see §2) so it costs little later, but nothing live is
-> implemented in this scope.
+> **Scope at plan time: frontend + mock data only** (§0–§14 below describe that build, M1–M5).
+> **Since then (M6, done — see §12):** `api` mode was built. `HttpDataClient` implements the full
+> `DataClient` interface against the live `dataapi` FastAPI service + fault-injection routes; it is
+> now the default. Mock mode still exists as a fallback. **Still not built:** the ML prediction model
+> and the Copilot LLM backend (separate, unbuilt component) — Copilot always runs against the mock,
+> in both modes, and predictions/incidents are derived from ground-truth `/labels`, not a real model.
 > Plan-first + milestone-gated per `CLAUDE.md`. Code is ground truth over docs.
 
 ---
@@ -71,13 +70,13 @@ FastAPI error shape `{ "detail": "..." }` is recorded in `errors.ts` for the fut
   interface, never on fixtures/endpoints/PromQL:
   `getCapabilities, getOverview, getTopology, getTelemetry, getEvents, getFlows, getIncidents,
   getPredictions, getConversation, createConversation, sendMessage, submitFeedback`.
-  - **`MockDataClient` (built now, default):** bundled fixtures, small deterministic delays, can
+  - **`MockDataClient` (built now):** bundled fixtures, small deterministic delays, can
     simulate success/empty/stale/partial/error; never needs a backend.
-  - **`HttpDataClient` (future, not built now):** a thin stub only — interface present so pages
-    compile against it, but no live wiring, kept out of active milestones.
+  - **`HttpDataClient` (built in M6, default since):** live `dataapi` calls — see M6 in §12.
 - **State:** React context + reducer (`state/`). No Redux, no custom design system.
-- **Query catalog** (`data/queryCatalog.ts`): the single home for PromQL, populated now from the
-  verified metric names so it is ready when api mode is built. Not executed in mock scope.
+- **Query catalog** (`data/metricCatalog.ts`, was planned as `queryCatalog.ts`): the single home for
+  PromQL per metric, populated from the verified metric names below; executed by `HttpDataClient`
+  since M6.
 - **Provenance:** `DataSourceKind = mock|measured|simulated|modelled|ground_truth|prediction`;
   `SourceBadge` on every panel; **Demo data** marker whenever mock predictions/copilot are visible.
   In this scope everything is `mock` or (for incident labels) `ground_truth` from the sample data.
@@ -128,13 +127,12 @@ future api mode, updated `/topology`) — zero UI change.
 Click node → two views of one node, time range + filters preserved:
 
 - **Primary — app page** `/a/mplslab-noccopilot-app/node/:id`: renders all panels via **DataClient**
-  (mock now). Works with **no datasource**. When api mode is built later the same page hits
-  `/metrics` etc. — page code unchanged.
-- **Secondary — provisioned dashboard** `frontend/grafana/dashboards/node-detail.json` with a
-  `$device` template var; a drawer button deep-links `/d/node-detail?var-device=<id>`. Native
-  Grafana panels. Needs a live datasource, so it is the **future** api-mode bonus — shipped as the
-  JSON file now, exercised only once api mode exists.
-- Metric panels use `@grafana/ui` timeseries; queries come from the query catalog, never inline.
+  (now `HttpDataClient` by default, see M6 §12). Works with no Grafana datasource — page code is the
+  same in mock and api mode.
+- **Secondary — provisioned dashboard** (`node-detail.json` + drawer deep-link): design only, never
+  built. Not needed — the app page covers node detail.
+- Metric panels use `@grafana/ui` timeseries; queries come from `data/metricCatalog.ts` (the query
+  catalog referenced elsewhere in this doc), never inline.
 
 ---
 
@@ -273,9 +271,27 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   instead); browser pixel-QA at 1920/1366 left for the user. **M1–M5 all DONE — frontend
   feature-complete, draft PR opened.**
 
-**Future (NOT in this scope):** api mode — build `HttpDataClient`, wire the 6 real `dataapi`
-endpoints via a Compose-service proxy, execute the query catalog, per-source live failure, live
-copilot endpoints. Kept unblocked by the DataClient seam above.
+- **M6 Live `api` mode — DONE.** `HttpDataClient` (`plugin/src/data/HttpDataClient.ts`) implements
+  all 12 `DataClient` methods against `dataapi`: `/topology` (148 nodes, live red/amber/green `state`
+  + `pop` derived from `/labels`), `/metrics` (PromQL range queries driven by `data/metricCatalog.ts`,
+  11 metric groups replacing the old query catalog), `/events` (Loki), `/flows` (nfacctd), `/labels`
+  (ground-truth timeline → `getIncidents`/`getPredictions`/`getOverview`, all derived client-side —
+  no matching endpoints). Copilot methods forward to an internal `MockDataClient` (no LLM backend).
+  `config.ts` now defaults `mode: 'api'`. Old fixture-replay tape (`cursor`/`absTick`/
+  `PlaybackControls`) removed; replaced by `TimeControl` (Live: 5s auto-refresh, window follows now;
+  History: frozen relative range back to VM's 30d retention) — `state/reducer.ts` `AppState { mode,
+  range, liveWindowSec, refreshTick, filters, injectedFaults }`. `LabStatusBadge` in the header polls
+  `getCapabilities()` every 10s for VM reachability. `NodeDetailPage` gained `InterfaceTable`,
+  `FlowTable`, `LogTerminal` panels. `FaultInjectionPage` now fires real faults via new `dataapi`
+  routes `POST /faults/inject`, `POST /faults/revert/{id}`, `GET /faults/active`, `GET
+  /faults/scenarios` (21 scenarios, role-validated); the mock-era client-side amber→red escalation
+  is kept as instant visual feedback layered on top, rolled back if the real inject fails. `dataapi`
+  gained CORS (`localhost:3000` + `127.0.0.1:3000`) and must run single-worker (`./start.sh`) for the
+  in-memory fault registry. Build green, `tsc --noEmit` clean, 109 jest tests pass.
+
+**Still not built:** the ML prediction model and the Copilot LLM backend — separate, unbuilt
+component. Predictions/incidents remain derived from ground-truth `/labels`, not a real predictor;
+Copilot remains mock in both modes. Kept unblocked by the `DataClient` seam.
 
 ---
 
@@ -292,6 +308,5 @@ config keys, mock networking, handoff, and how to add api mode later). Repo docs
 ## 14. Risks / accepted constraints
 
 - cytoscape.js = one added runtime dep (justified, wrapped, pinned, offline).
-- api mode + live backend are explicitly out of scope now; the DataClient interface + query catalog
-  + `node-detail.json` are the only forward-compatibility investments, all cheap.
-- Everything visible is mock/ground-truth-sample; no live telemetry, no real predictions.
+- ML prediction + Copilot LLM backend remain out of scope (other team); predictions/incidents are
+  ground-truth-`/labels`-derived, not model output, in both modes.

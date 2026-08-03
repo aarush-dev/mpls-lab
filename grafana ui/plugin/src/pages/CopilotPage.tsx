@@ -8,8 +8,7 @@ import { CopilotChat, ChatItem } from '../components/CopilotChat';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { Incident, CopilotMessage } from '../data/types';
-import { MOCK_BUCKET_META } from '../data/MockDataClient';
-import { bucketToTsMs, formatUtc } from '../utils/time';
+import { formatUtc } from '../utils/time';
 
 const CONV_ID = 'conv-live';
 const SUGGESTIONS = [
@@ -37,7 +36,7 @@ function topIncident(incidents: Incident[]): Incident | null {
 
 export function CopilotPage() {
   const styles = useStyles2(getStyles);
-  const { cursor, absTick } = useAppState();
+  const { refreshTick } = useAppState();
   const dataClient = useDataClient();
 
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -58,9 +57,9 @@ export function CopilotPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, cursor]);
+  }, [dataClient, refreshTick]);
 
-  const nowIso = () => formatUtc(bucketToTsMs(MOCK_BUCKET_META, absTick));
+  const nowIso = () => formatUtc(Date.now());
 
   // Runs the send state machine for one user turn. `existing` is set when retrying a failed turn
   // (reuse its id so the thread doesn't duplicate — client-generated ids, no dup on retry).
@@ -118,7 +117,7 @@ export function CopilotPage() {
         .finally(() => setSending(false));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [context, dataClient, cursor]
+    [context, dataClient, refreshTick]
   );
 
   const submit = () => {
