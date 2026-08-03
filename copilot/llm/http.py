@@ -26,19 +26,27 @@ _TIMEOUT = 120.0     # a real multi-round investigation turn on a 20B model is s
                      # healthy-but-slow completion is not cut off client-side as a false outage.
 
 
+# profile -> (base-url env, base-url default, model env, model default). Both the endpoint AND
+# the model are per-profile so flipping `llm_profile` moves traffic to the other backend (the nim
+# endpoint is NOT air-gapped; unsloth-local must be able to point elsewhere, ADR-0004) and can't
+# reuse the wrong model id (mirrors make_embedder's distinct model vars).
+_PROFILES = {
+    "nim": ("COPILOT_LLM_BASE_URL", "http://127.0.0.1:8000/v1",
+            "COPILOT_LLM_MODEL_NIM", "gpt-oss-20b"),
+    "unsloth-local": ("COPILOT_LLM_BASE_URL_LOCAL", "http://127.0.0.1:8001/v1",
+                      "COPILOT_LLM_MODEL_LOCAL", "unsloth/gpt-oss-20b"),
+}
+
+
 def make_client(cfg: Config):
-    """Return the LLMClient for the configured profile (ADR-0004). Distinct model env var per
-    profile so flipping `llm_profile` can't reuse the wrong model id (mirrors make_embedder)."""
-    base = os.environ.get("COPILOT_LLM_BASE_URL", "http://127.0.0.1:8000/v1")
-    if cfg.llm_profile == "nim":
-        model = os.environ.get("COPILOT_LLM_MODEL_NIM", "gpt-oss-20b")
-        return OpenAIClient(base, model, cfg.llm_api_key)
-    if cfg.llm_profile == "unsloth-local":
-        model = os.environ.get("COPILOT_LLM_MODEL_LOCAL", "unsloth/gpt-oss-20b")
-        # air-gapped local server (vLLM/llama.cpp OpenAI shim) needs no key.
-        return OpenAIClient(base, model, cfg.llm_api_key)
-    # config.py validates the enum; defense-in-depth if constructed raw.
-    raise ValueError(f"unknown llm_profile {cfg.llm_profile!r}")
+    """Return the LLMClient for the configured profile (ADR-0004). An empty api_key sends no
+    Authorization header, so a keyless local server just works."""
+    prof = _PROFILES.get(cfg.llm_profile)
+    if prof is None:                                    # config.py validates the enum; this is
+        raise ValueError(f"unknown llm_profile {cfg.llm_profile!r}")   # defense-in-depth if raw.
+    base_env, base_def, model_env, model_def = prof
+    return OpenAIClient(os.environ.get(base_env, base_def),
+                        os.environ.get(model_env, model_def), cfg.llm_api_key)
 
 
 class OpenAIClient:
@@ -47,11 +55,10 @@ class OpenAIClient:
     with no tools (or a backend that doesn't call) the completion text is `Reply.content` for
     the loop's owned parser."""
 
-    def __init__(self, base_url: str, model: str, api_key: str = "", timeout: float = _TIMEOUT):
+    def __init__(self, base_url: str, model: str, api_key: str = ""):
         self._url = base_url.rstrip("/")
         self._model = model
         self._key = api_key
-        self._timeout = timeout
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Reply:
         import httpx
@@ -62,7 +69,7 @@ class OpenAIClient:
             f"{self._url}/chat/completions",
             json=body,
             headers={"Authorization": f"Bearer {self._key}"} if self._key else {},
-            timeout=self._timeout,
+            timeout=_TIMEOUT,
         )
         r.raise_for_status()
         return _to_reply(r.json()["choices"][0]["message"])

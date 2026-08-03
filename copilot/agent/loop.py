@@ -284,13 +284,14 @@ def _assistant_turn(content: str | None, calls: tuple[ToolCall, ...]) -> dict:
 
 
 def _tool_call_json(text: str) -> dict | None:
-    """The tool-call object only when it's the whole turn or fenced (R1) -- never scanned from
-    inside prose. A ```json (or bare ```) fence wins; else the trimmed turn must START with `{`.
-    Prose that merely quotes JSON returns None, so it falls through to a terminal answer."""
+    """The tool-call object only when the WHOLE turn is that call -- a bare object or a lone
+    ```json fence with nothing else around it (R1). A turn that mixes prose with the JSON (an
+    answer quoting an example, or reasoning followed by a fenced block) returns None and falls
+    through to a terminal answer, so quoted/illustrative JSON is never misread as a call."""
     t = text.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", t, re.DOTALL)
-    if fence:
-        return _first_json_object(fence.group(1))
+    m = re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```", t, re.DOTALL)
+    if m:
+        return _first_json_object(m.group(1))
     if t.startswith("{"):
         return _first_json_object(t)
     return None

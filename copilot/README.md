@@ -69,8 +69,10 @@ seam + shapes (`Reply`, `ToolCall`) + `ScriptedLLM` (deterministic test double).
   `parse_tool_calls` only reads a call that is the whole turn or ```json-fenced — prose that
   quotes JSON is no longer misread as a call.
 
-Env (not secrets; kept out of the committed YAML): `COPILOT_LLM_BASE_URL`,
-`COPILOT_LLM_MODEL_NIM`, `COPILOT_LLM_MODEL_LOCAL`; key = `COPILOT_LLM_API_KEY` (`.env`).
+Env (not secrets; kept out of the committed YAML) — endpoint AND model are per-profile so a
+swap moves traffic to the other backend: `COPILOT_LLM_BASE_URL` + `COPILOT_LLM_MODEL_NIM`
+(nim), `COPILOT_LLM_BASE_URL_LOCAL` + `COPILOT_LLM_MODEL_LOCAL` (unsloth-local); key =
+`COPILOT_LLM_API_KEY` (`.env`).
 Self-check: `python3 -m copilot.llm.test_http`; live smoke (needs an endpoint):
 `COPILOT_LLM_SMOKE=1 python3 -m copilot.llm.test_http`.
 

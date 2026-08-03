@@ -1,18 +1,20 @@
 """Assert-based tests / self-check for the real LLM client + the loop fixes it forces (R1).
 
-Prior art: dataapi/check_dataset.py (assert + __main__, no framework). Covers the R1 acceptance:
-a native tool-call round trip accepted by a FAKE OpenAI-shaped server (assistant `tool_calls`
-preserved, `tool` reply matched), config-only profile swap, one wrapped tool-spec shape from one
-place, `parse_tool_calls` not misreading quoted JSON in prose, and the three recorded risks.
+Prior art: dataapi/check_dataset.py (assert + __main__, no framework); real-HTTP double like
+copilot/api/test_api.py. Covers the R1 acceptance: a native tool-call round trip accepted by a
+real (in-process) OpenAI-shaped server -- assistant `tool_calls` preserved, `tool` reply matched
+over the wire -- config-only profile swap (endpoint AND model), one wrapped tool-spec shape from
+one place, `parse_tool_calls` not misreading JSON quoted in a prose answer, and the recorded risk.
 
 Run:        python3 -m copilot.llm.test_http
 Live smoke: COPILOT_LLM_SMOKE=1 python3 -m copilot.llm.test_http   (needs a running endpoint)
 """
 import dataclasses
+import http.server
 import json
+import socketserver
+import threading
 import types
-
-import httpx
 
 from copilot.adapter import StubAdapter
 from copilot.agent import investigate, parse_tool_calls
@@ -29,65 +31,66 @@ def _cfg(**kw):
     return dataclasses.replace(Config(), **kw)
 
 
-class _FakeResp:
-    def __init__(self, payload):
-        self._p = payload
+class _OAIHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        self.server.requests.append(json.loads(self.rfile.read(n) or b"{}"))
+        self.server.auths.append(self.headers.get("Authorization"))
+        msg = self.server.replies[self.server.i]
+        self.server.i += 1
+        payload = json.dumps({"choices": [{"message": msg}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
-    def raise_for_status(self):
+    def log_message(self, *a):
         pass
 
-    def json(self):
-        return self._p
 
+class _FakeOpenAI:
+    """A real (in-process, ephemeral-port) OpenAI-shaped /chat/completions server: records every
+    request body + Authorization header and returns scripted assistant messages in order."""
 
-class _FakeServer:
-    """A fake OpenAI-shaped /chat/completions endpoint: records every request body and returns
-    scripted assistant messages in order -- the wire double the R1 acceptance calls for."""
+    def __init__(self, replies):
+        self._httpd = socketserver.TCPServer(("127.0.0.1", 0), _OAIHandler)
+        self._httpd.replies, self._httpd.i = list(replies), 0
+        self._httpd.requests, self._httpd.auths = [], []
+        self.requests, self.auths = self._httpd.requests, self._httpd.auths
+        self.url = f"http://127.0.0.1:{self._httpd.server_address[1]}/v1"
+        threading.Thread(target=self._httpd.serve_forever, daemon=True).start()
 
-    def __init__(self, messages):
-        self._msgs = list(messages)
-        self.requests = []
-        self._i = 0
+    def __enter__(self):
+        return self
 
-    def post(self, url, json=None, headers=None, timeout=None):
-        self.requests.append(json)
-        msg = self._msgs[self._i]
-        self._i += 1
-        return _FakeResp({"choices": [{"message": msg}]})
-
-
-def _with_fake_server(server, fn):
-    saved = httpx.post
-    httpx.post = server.post
-    try:
-        return fn()
-    finally:
-        httpx.post = saved
+    def __exit__(self, *a):
+        self._httpd.shutdown()
+        self._httpd.server_close()
 
 
 def test_native_round_trip_preserves_tool_calls():
-    # THE acceptance: a native call then a cited answer, driven end-to-end through the real
-    # client + the loop. The second request must carry the assistant `tool_calls` AND a `tool`
-    # message matching its id -- the R1 hard-break fix (loop was dropping tool_calls).
-    server = _FakeServer([
+    # THE acceptance, over a real socket: a native call then a cited answer, driven end-to-end
+    # through the real client + the loop. The second request must carry the assistant `tool_calls`
+    # AND a `tool` message matching its id -- the R1 hard-break fix (loop was dropping tool_calls).
+    with _FakeOpenAI([
         {"role": "assistant", "content": None, "tool_calls": [
             {"id": "c1", "type": "function",
              "function": {"name": "query_metrics", "arguments": '{"device": "r1"}'}}]},
         {"role": "assistant", "content": "r1 cpu pegged [metrics:0][metrics:1]"},
         {"role": "assistant", "content": '{"pass": true}'},          # self-judge verdict
-    ])
-    client = OpenAIClient("http://fake/v1", "gpt-oss-20b")
-    out = _with_fake_server(server, lambda: investigate(
-        "why is r1 slow?", WINDOW, llm=client, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg()))
+    ]) as srv:
+        out = investigate("why is r1 slow?", WINDOW, llm=OpenAIClient(srv.url, "gpt-oss-20b"),
+                          adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
 
     assert out.answer == "r1 cpu pegged [metrics:0][metrics:1]"
     assert out.stopped is None
     # tools were wrapped into the chat-completions function shape (the one wrapping place)
-    first = server.requests[0]
+    first = srv.requests[0]
     assert first["tools"][0]["type"] == "function"
     assert first["tools"][0]["function"]["name"] == "query_metrics"
     # the follow-up request carries the assistant tool_calls + a matched tool reply
-    follow = server.requests[1]["messages"]
+    follow = srv.requests[1]["messages"]
     asst = [m for m in follow if m["role"] == "assistant" and m.get("tool_calls")]
     assert asst and asst[0]["tool_calls"][0]["id"] == "c1"
     assert asst[0]["tool_calls"][0]["function"]["name"] == "query_metrics"
@@ -95,12 +98,14 @@ def test_native_round_trip_preserves_tool_calls():
     assert tool_msgs and tool_msgs[0]["tool_call_id"] == "c1", "tool reply matches the call id"
 
 
-def test_make_client_profile_swap_is_config_only():
+def test_make_client_profile_swap_moves_endpoint_and_model():
     nim = make_client(_cfg(llm_profile="nim"))
     local = make_client(_cfg(llm_profile="unsloth-local"))
     assert isinstance(nim, OpenAIClient) and isinstance(local, OpenAIClient)
     assert nim._model == "gpt-oss-20b" and local._model == "unsloth/gpt-oss-20b", \
         "distinct model per profile -- a swap must not reuse the wrong model id"
+    assert nim._url != local._url, \
+        "distinct endpoint per profile -- flipping to unsloth-local must not hit the nim URL"
     # defense-in-depth: an unvalidated profile (bypassing Config's enum check) is rejected
     raised = False
     try:
@@ -111,26 +116,12 @@ def test_make_client_profile_swap_is_config_only():
 
 
 def test_api_key_sent_only_when_present():
-    server = _FakeServer([{"role": "assistant", "content": "ok"}])
-    _with_fake_server(server, lambda: OpenAIClient("http://fake/v1", "m", "sk-xyz").chat(
-        [{"role": "user", "content": "hi"}]))
-    # (the fake records only the body, so assert on a keyed vs unkeyed client via a header probe)
-    got = {}
-
-    def probe(url, json=None, headers=None, timeout=None):
-        got.update(headers or {})
-        return _FakeResp({"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
-
-    saved = httpx.post
-    httpx.post = probe
-    try:
-        OpenAIClient("http://fake/v1", "m", "sk-xyz").chat([{"role": "user", "content": "hi"}])
-        assert got.get("Authorization") == "Bearer sk-xyz"
-        got.clear()
-        OpenAIClient("http://fake/v1", "m", "").chat([{"role": "user", "content": "hi"}])
-        assert "Authorization" not in got, "no key -> no Authorization header"
-    finally:
-        httpx.post = saved
+    with _FakeOpenAI([{"role": "assistant", "content": "ok"},
+                      {"role": "assistant", "content": "ok"}]) as srv:
+        OpenAIClient(srv.url, "m", "sk-xyz").chat([{"role": "user", "content": "hi"}])
+        OpenAIClient(srv.url, "m", "").chat([{"role": "user", "content": "hi"}])
+        assert srv.auths[0] == "Bearer sk-xyz"
+        assert srv.auths[1] is None, "no key -> no Authorization header"
 
 
 def test_as_function_wraps_flat_and_is_idempotent():
@@ -152,19 +143,23 @@ def test_to_reply_parses_calls_and_degrades_bad_args():
     assert bad.tool_calls[0].arguments == {}
 
 
-def test_parse_tool_calls_ignores_json_quoted_in_prose():
-    # R1 hardening: a real model quoting a call inside a prose ANSWER is not a tool call.
+def test_parse_tool_calls_only_when_the_whole_turn_is_the_call():
+    # R1 hardening: a real model quoting a call inside a prose ANSWER is not a tool call -- and
+    # neither is reasoning followed by a fenced block. Only a whole-turn call parses.
     prose = 'I checked and the call would be {"name": "query_metrics", "arguments": ' \
             '{"device": "r1"}} but r1 is fine [metrics:0].'
     assert parse_tool_calls(prose) == (), "embedded JSON in prose must not be read as a call"
-    # a bare call, or one in a ```json fence, still parses
+    reasoning_then_fence = 'First I will pull metrics:\n```json\n{"name": "flows", ' \
+                           '"arguments": {}}\n```'
+    assert parse_tool_calls(reasoning_then_fence) == (), \
+        "reasoning + a fenced block is a prose answer, not a call"
+    # a bare call, or a LONE fence that is the whole turn, still parses
     assert parse_tool_calls('{"name": "flows", "arguments": {"device": "r1"}}')[0].name == "flows"
-    fenced = 'reasoning first, then:\n```json\n{"name": "flows", "arguments": {}}\n```'
-    assert parse_tool_calls(fenced)[0].name == "flows", "fenced call parses"
+    assert parse_tool_calls('```json\n{"name": "flows", "arguments": {}}\n```')[0].name == "flows"
 
 
 def test_recorded_risk_self_judge_fails_open_on_prose():
-    # RISK (recorded, docs/SPEC-NOTES.md R1): a real weak model emitting prose instead of the
+    # RISK 1 (recorded in the R1 commit message): a real weak model emitting prose instead of the
     # verdict JSON must NOT wedge an in-window cited answer -> self_judge fails open. The
     # deterministic pre-gate stays the hard guarantee. Outcome: unchanged, by design.
     from copilot.agent.loop import self_judge
@@ -177,19 +172,18 @@ def _smoke():
     """One live smoke call (R1 acceptance) -- opt-in, needs a running endpoint. Proves the
     client speaks the wire protocol; NOT a full investigation."""
     from copilot.config import load
-    client = make_client(load())
-    reply = client.chat([{"role": "user", "content": "Reply with the single word: ok"}])
+    reply = make_client(load()).chat([{"role": "user", "content": "Reply with the word: ok"}])
     assert reply.content is not None, "live endpoint returned no completion"
     print(f"live smoke OK -- endpoint replied: {reply.content!r}")
 
 
 def _run():
     test_native_round_trip_preserves_tool_calls()
-    test_make_client_profile_swap_is_config_only()
+    test_make_client_profile_swap_moves_endpoint_and_model()
     test_api_key_sent_only_when_present()
     test_as_function_wraps_flat_and_is_idempotent()
     test_to_reply_parses_calls_and_degrades_bad_args()
-    test_parse_tool_calls_ignores_json_quoted_in_prose()
+    test_parse_tool_calls_only_when_the_whole_turn_is_the_call()
     test_recorded_risk_self_judge_fails_open_on_prose()
     print("copilot.llm.http self-check OK")
 
