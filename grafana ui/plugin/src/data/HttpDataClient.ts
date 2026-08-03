@@ -240,11 +240,43 @@ export class HttpDataClient implements DataClient {
       }
     }
 
+    // Live /topology gives no pop/parent — derive both from the physical adjacency:
+    // p/pe anchor on popOf(id); ce -> its uplink PE (parent) + that PE's pop; host -> its
+    // single CE (parent) + that CE's pop. Redundant PEs share a pop, so lowest-id is deterministic.
+    const adj = new Map<string, string[]>();
+    for (const l of topo.links) {
+      (adj.get(l.source) ?? adj.set(l.source, []).get(l.source)!).push(l.target);
+      (adj.get(l.target) ?? adj.set(l.target, []).get(l.target)!).push(l.source);
+    }
+    const roleById = new Map(topo.nodes.map((n) => [n.id, n.role]));
+    const popById = new Map<string, string | undefined>();
+    const parentById = new Map<string, string | undefined>();
+    for (const n of topo.nodes) {
+      if (n.role === 'p' || n.role === 'pe') {
+        popById.set(n.id, popOf(n.id));
+      }
+    }
+    for (const n of topo.nodes) {
+      if (n.role.startsWith('ce')) {
+        const pe = Array.from(new Set((adj.get(n.id) ?? []).filter((x) => roleById.get(x) === 'pe'))).sort()[0];
+        parentById.set(n.id, pe);
+        popById.set(n.id, pe ? popById.get(pe) : popOf(n.id));
+      }
+    }
+    for (const n of topo.nodes) {
+      if (n.role === 'host') {
+        const ce = (adj.get(n.id) ?? []).find((x) => (roleById.get(x) ?? '').startsWith('ce'));
+        parentById.set(n.id, ce);
+        popById.set(n.id, ce ? popById.get(ce) : popOf(n.id));
+      }
+    }
+
     let nodes: TopologyNodeLive[] = topo.nodes.map((n) => ({
       id: n.id,
       role: n.role,
       siteType: n.site_type,
-      pop: popOf(n.id),
+      pop: popById.get(n.id) ?? popOf(n.id),
+      parent: parentById.get(n.id),
       vrfs: n.vrfs,
       state: state.get(n.id) ?? 'green',
     }));

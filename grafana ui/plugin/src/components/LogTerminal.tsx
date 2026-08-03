@@ -8,7 +8,11 @@ import { NetworkEvent } from '../data/types';
 interface Props {
   events: NetworkEvent[];
   height?: number;
+  isHost?: boolean;
 }
+
+const VISIBLE_ROWS = 20;
+const ROW_HEIGHT_PX = 21;
 
 const SEVERITY_OPTIONS: Array<SelectableValue<string>> = [
   { label: 'All', value: 'all' },
@@ -45,7 +49,7 @@ function hhmmss(tsMs: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
 }
 
-export function LogTerminal({ events, height = 320 }: Props) {
+export function LogTerminal({ events, height = VISIBLE_ROWS * ROW_HEIGHT_PX, isHost }: Props) {
   const styles = useStyles2(getStyles);
   const [severity, setSeverity] = useState<string>('all');
   const [query, setQuery] = useState('');
@@ -82,7 +86,9 @@ export function LogTerminal({ events, height = 320 }: Props) {
         <Input placeholder="filter message…" value={query} onChange={(e) => setQuery(e.currentTarget.value)} width={40} />
       </div>
       <div className={styles.terminal} style={{ maxHeight: height }} ref={scrollRef}>
-        {rows.length === 0 && <div className={styles.dim}>no logs in window</div>}
+        {rows.length === 0 && (
+          <div className={styles.dim}>{isHost ? 'no syslog agent — traffic host' : 'no logs in window'}</div>
+        )}
         {rows.map((e, i) => {
           const bucket = severityBucket(e.severity);
           return (
@@ -110,13 +116,13 @@ const getStyles = (theme: GrafanaTheme2) => ({
     border-radius: ${theme.shape.radius.default};
     padding: ${theme.spacing(1)};
     overflow-y: auto;
+    overflow-x: auto;
     font-family: ${theme.typography.fontFamilyMonospace};
     font-size: ${theme.typography.bodySmall.fontSize};
   `,
   line: css`
-    white-space: pre-wrap;
-    word-break: break-word;
-    line-height: 1.5;
+    white-space: nowrap;
+    line-height: ${ROW_HEIGHT_PX}px;
   `,
   ts: css`
     color: #6b7280;

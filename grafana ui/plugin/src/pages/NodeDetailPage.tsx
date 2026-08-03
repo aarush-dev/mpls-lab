@@ -21,7 +21,7 @@ export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const history = useHistory();
   const styles = useStyles2(getStyles);
-  const { refreshTick, range, injectedFaults } = useAppState();
+  const { mode, refreshTick, range, injectedFaults } = useAppState();
   const dataClient = useDataClient();
 
   const [telemetry, setTelemetry] = useState<MetricSeries[] | null>(null);
@@ -43,13 +43,17 @@ export function NodeDetailPage() {
     let cancelled = false;
     setError(false);
     const timeRange = { fromMs: range.fromMs, toMs: range.toMs };
+    // Routers log a boot/convergence burst then go quiet; widen the live log window to 60m so
+    // it doesn't empty out as the 900s metric window slides past the burst.
+    const eventsTimeRange =
+      mode === 'live' ? { fromMs: (range.toMs || Date.now()) - 3600_000, toMs: range.toMs || Date.now() } : timeRange;
 
     Promise.all([
       dataClient.getTelemetry({ deviceId: id, timeRange }),
       dataClient.getTopology({}),
       dataClient.getIncidents({ device: id }),
       dataClient.getPredictions({ device: id }),
-      dataClient.getEvents({ device: id, timeRange }),
+      dataClient.getEvents({ device: id, timeRange: eventsTimeRange }),
       dataClient.getFlows({ device: id, timeRange }),
     ])
       .then(([telemetryResult, topologyResult, incidentsResult, predictionsResult, eventsResult, flowsResult]) => {
@@ -73,7 +77,7 @@ export function NodeDetailPage() {
       cancelled = true;
     };
     // injectedFaults: re-fetch when a fault escalates so charts + status update live.
-  }, [dataClient, refreshTick, range.fromMs, range.toMs, id, attempt, injectedFaults]);
+  }, [dataClient, refreshTick, range.fromMs, range.toMs, mode, id, attempt, injectedFaults]);
 
   const node = topology?.nodes.find((n) => n.id === id);
   const neighborIds = useMemo(() => {
@@ -181,7 +185,7 @@ export function NodeDetailPage() {
           <FlowTable flows={flows} />
 
           <h3 className={styles.sectionTitle}>Logs</h3>
-          <LogTerminal events={events} />
+          <LogTerminal events={events} isHost={id.startsWith('h_')} />
         </>
       )}
     </PluginPage>

@@ -1,14 +1,13 @@
 import React, { useCallback } from 'react';
 import { css } from '@emotion/css';
-import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { Button, RadioButtonGroup, Select, useStyles2 } from '@grafana/ui';
+import { dateTime, GrafanaTheme2, SelectableValue, TimeRange } from '@grafana/data';
+import { Button, RadioButtonGroup, Select, TimeRangePicker, useStyles2 } from '@grafana/ui';
 import { useAppDispatch, useAppState } from '../state/AppContext';
 import { ClockMode } from '../state/reducer';
 
 // Global time control (header). Live = auto-refresh every 5s, window follows now. History = frozen
-// window ending now, picked from the range select (back to VictoriaMetrics' 30d retention).
-// ponytail: relative ranges cover "view any recent window"; a full absolute date picker
-//   (@grafana/ui TimeRangePicker) is the upgrade path if arbitrary start/end is ever needed.
+// absolute span picked via TimeRangePicker (relative quick-ranges + absolute from/to calendar).
+const noop = () => undefined;
 
 const RANGES: Array<SelectableValue<number>> = [
   { label: 'Last 5m', value: 300 },
@@ -63,17 +62,38 @@ export function TimeControl() {
 
   const onRefresh = useCallback(() => dispatch({ type: 'REFRESH', payload: { nowMs: Date.now() } }), [dispatch]);
 
+  const onAbsoluteRange = useCallback(
+    (tr: TimeRange) => dispatch({ type: 'SET_RANGE', payload: { fromMs: tr.from.valueOf(), toMs: tr.to.valueOf() } }),
+    [dispatch]
+  );
+
   return (
     <div className={styles}>
       <RadioButtonGroup options={MODES} value={mode} onChange={onMode} size="sm" />
-      <div className={selectWrap}>
-        <Select<number>
-          options={RANGES}
-          value={RANGES.find((r) => r.value === selectedSec) ?? { label: `${selectedSec}s`, value: selectedSec }}
-          onChange={onRange}
-          isSearchable={false}
+      {mode === 'history' ? (
+        <TimeRangePicker
+          value={{
+            from: dateTime(range.fromMs),
+            to: dateTime(range.toMs),
+            raw: { from: dateTime(range.fromMs), to: dateTime(range.toMs) },
+          }}
+          onChange={onAbsoluteRange}
+          onChangeTimeZone={noop}
+          timeZone="browser"
+          onMoveBackward={noop}
+          onMoveForward={noop}
+          onZoom={noop}
         />
-      </div>
+      ) : (
+        <div className={selectWrap}>
+          <Select<number>
+            options={RANGES}
+            value={RANGES.find((r) => r.value === selectedSec) ?? { label: `${selectedSec}s`, value: selectedSec }}
+            onChange={onRange}
+            isSearchable={false}
+          />
+        </div>
+      )}
       <Button
         variant="secondary"
         fill="outline"

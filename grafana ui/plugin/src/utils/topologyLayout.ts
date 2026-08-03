@@ -34,9 +34,10 @@ function tierOf(role: string): number {
   return TIER_BY_ROLE[role] ?? 2;
 }
 
-// Sort key within a tier: hosts cluster under their parent CE, everything else by id. Deterministic.
+// Sort key within a tier: a node with a parent clusters under it (host under its CE, CE under its
+// uplink PE) so children track their parent horizontally; parentless nodes sort by id. Deterministic.
 function slotKey(n: TopologyNode): string {
-  return n.role === 'host' ? `${n.parent ?? ''}|${n.id}` : n.id;
+  return n.parent ? `${n.parent}|${n.id}` : n.id;
 }
 
 /**

@@ -29,6 +29,20 @@ describe('computePositions', () => {
     expect(ce).toBeLessThan(host);
   });
 
+  it('aligns a CE under its uplink PE (x-near parent)', () => {
+    // Two PEs, two CEs each homing a distinct PE: the CE tier is ordered by parent PE so each CE
+    // lands in the same cluster column as its uplink.
+    const n: TopologyNode[] = [
+      { id: 'pe1', role: 'pe', pop: 'pop1' },
+      { id: 'pe2', role: 'pe', pop: 'pop1' },
+      { id: 'ce_a', role: 'ce_branch', pop: 'pop1', parent: 'pe1' },
+      { id: 'ce_b', role: 'ce_branch', pop: 'pop1', parent: 'pe2' },
+    ];
+    const pos = computePositions(n);
+    expect(pos.get('ce_a')!.x).toBeCloseTo(pos.get('pe1')!.x, 5);
+    expect(pos.get('ce_b')!.x).toBeCloseTo(pos.get('pe2')!.x, 5);
+  });
+
   it('is deterministic — two calls produce identical positions', () => {
     const a = computePositions(nodes);
     const b = computePositions(nodes);

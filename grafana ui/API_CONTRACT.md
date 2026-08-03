@@ -44,7 +44,7 @@ Response: `Overview { reportingDevices, expectedDevices, degradedDevices, totalT
 
 ### `getTopology(filters: Filters): Promise<TopologyGraph>`
 Response: `TopologyGraph { nodes: TopologyNode[]; links: TopologyLink[] }` where `TopologyNode { id, role, siteType?, pop?, parent?, vrfs? }` and `TopologyLink { source, target, sourceIf?, targetIf?, kind?: 'physical' | 'tunnel' }`.
-`HttpDataClient`: `GET /topology` (`sources.topology_graph()`), direct match by name/shape. `state` (red/amber/green, not part of the base type but read by the UI as `TopologyNodeLive`) is derived from active `/labels` rows at request time; `pop` is derived from the device id (`p1-4`→`pop1`, `p5-8`→`pop2`, `pe1-2`→`pop1`, etc — `popOf()`).
+`HttpDataClient`: `GET /topology` (`sources.topology_graph()`), direct match by name/shape. `state` (red/amber/green, not part of the base type but read by the UI as `TopologyNodeLive`) is derived from active `/labels` rows at request time. Live `/topology` has no `pop`/`parent` — both are derived from link adjacency: `p`/`pe` get `pop` from the device id (`p1-4`→`pop1`, `p5-8`→`pop2`, `pe1-2`→`pop1`, etc — `popOf()`); `ce` gets `parent` = its uplink `pe` (lowest id if redundant) and inherits that `pe`'s `pop`; `host` gets `parent` = its `ce` and inherits that `ce`'s `pop`.
 
 ### `getTelemetry(request: TelemetryRequest): Promise<MetricSeries[]>`
 Request: `TelemetryRequest { deviceId?: string; keys?: string[]; timeRange?: TimeRange }`.

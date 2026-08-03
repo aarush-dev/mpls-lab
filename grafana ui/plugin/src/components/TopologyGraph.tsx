@@ -1,13 +1,19 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import cytoscape, { Core, ElementDefinition } from 'cytoscape';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2 } from '@grafana/ui';
+import { useStyles2, RadioButtonGroup } from '@grafana/ui';
 
 import { TopologyLink } from '../data/types';
 import { TopologyNodeLive } from '../data/MockDataClient';
 import { styleForRole, colorForState } from '../data/topologyStyles';
-import { computePositions } from '../utils/topologyLayout';
+import { computePositions, Point } from '../utils/topologyLayout';
+
+type LayoutMode = 'grouped' | 'auto';
+const LAYOUT_OPTIONS: Array<{ label: string; value: LayoutMode }> = [
+  { label: 'Grouped', value: 'grouped' },
+  { label: 'Auto', value: 'auto' },
+];
 
 interface Props {
   nodes: TopologyNodeLive[];
@@ -23,7 +29,7 @@ function edgeId(l: TopologyLink, i: number): string {
   return `${l.source}->${l.target}::${i}`;
 }
 
-function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[]): ElementDefinition[] {
+function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[], positions: Map<string, Point>): ElementDefinition[] {
   const pops = new Set<string>();
   nodes.forEach((n) => n.pop && pops.add(n.pop));
 
@@ -31,7 +37,6 @@ function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[]): Elemen
     data: { id: POP_PREFIX + pop, label: pop, isPop: true },
   }));
 
-  const positions = computePositions(nodes);
   const realNodes: ElementDefinition[] = nodes.map((n) => {
     const style = styleForRole(n.role);
     return {
@@ -65,11 +70,34 @@ function nodeSetKey(nodes: TopologyNodeLive[], links: TopologyLink[]): string {
   return `${nodes.map((n) => n.id).join(',')}|${links.map((l) => `${l.source}-${l.target}`).join(',')}`;
 }
 
+// Grouped = tidy preset positions (computePositions); auto = Cytoscape's built-in cose (force-directed
+// crossing-minimizer, in core — no extra dependency), seeded non-random from the current positions so
+// it's stable/repeatable. Preset restores the grouped positions explicitly, so a toggle round-trips.
+function applyLayout(cy: Core, mode: LayoutMode, positions: Map<string, Point>) {
+  if (cy.elements().length === 0) {
+    return;
+  }
+  const layout =
+    mode === 'auto'
+      ? cy.layout({ name: 'cose', randomize: false, animate: false, fit: true } as cytoscape.LayoutOptions)
+      : cy.layout({
+          name: 'preset',
+          fit: true,
+          positions: (n: cytoscape.NodeSingular) => positions.get(n.id()),
+        } as cytoscape.LayoutOptions);
+  layout.run();
+  cy.fit(undefined, 30);
+}
+
 export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props) {
   const styles = useStyles2(getStyles);
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const setKeyRef = useRef<string>('');
+  const positionsRef = useRef<Map<string, Point>>(new Map());
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('grouped');
+  const layoutModeRef = useRef(layoutMode);
+  layoutModeRef.current = layoutMode;
   const onSelectRef = useRef(onSelectNode);
   onSelectRef.current = onSelectNode;
   const onHoverRef = useRef(onHoverNode);
@@ -192,12 +220,9 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
 
     if (setChanged) {
       cy.elements().remove();
-      cy.add(buildElements(nodes, links));
-      // Preset: use the deterministic positions baked into each node (computePositions). No physics,
-      // so nodes never overlap and the map is stable across ticks.
-      const layout = cy.layout({ name: 'preset', fit: true } as cytoscape.LayoutOptions);
-      layout.run();
-      cy.fit(undefined, 30);
+      positionsRef.current = computePositions(nodes);
+      cy.add(buildElements(nodes, links, positionsRef.current));
+      applyLayout(cy, layoutModeRef.current, positionsRef.current);
       setKeyRef.current = key;
     } else {
       // Same topology shape: just recolor nodes/edges for the new cursor tick.
@@ -218,10 +243,39 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
     }
   }, [nodes, links]);
 
-  return <div ref={containerRef} className={styles.container} />;
+  // Re-run the chosen layout when the toggle flips (element set unchanged).
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (cy) {
+      applyLayout(cy, layoutMode, positionsRef.current);
+    }
+  }, [layoutMode]);
+
+  return (
+    <div className={styles.wrap}>
+      <div className={styles.toggle}>
+        <RadioButtonGroup
+          size="sm"
+          options={LAYOUT_OPTIONS}
+          value={layoutMode}
+          onChange={(v) => v && setLayoutMode(v)}
+        />
+      </div>
+      <div ref={containerRef} className={styles.container} />
+    </div>
+  );
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
+  wrap: css`
+    position: relative;
+  `,
+  toggle: css`
+    position: absolute;
+    top: ${theme.spacing(1)};
+    right: ${theme.spacing(1)};
+    z-index: 1;
+  `,
   container: css`
     width: 100%;
     min-height: 560px;

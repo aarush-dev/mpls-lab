@@ -11,6 +11,8 @@ interface Props {
 }
 
 const MAX_ROWS = 200;
+const VISIBLE_ROWS = 20;
+const ROW_H = 34;
 
 export function humanBytes(n: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -71,30 +73,32 @@ export function FlowTable({ flows }: Props) {
         <MetricCard label="Total packets" value={String(totalPackets)} />
         <MetricCard label="Top talker" value={topTalker} />
       </div>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Src</th>
-            <th>Dst</th>
-            <th>Proto</th>
-            <th className={styles.num}>Packets</th>
-            <th className={styles.num}>Bytes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((f, i) => (
-            <tr key={i}>
-              <td>{hhmmss(f.tsMs)}</td>
-              <td className={styles.mono}>{addr(f.ipSrc, f.portSrc)}</td>
-              <td className={styles.mono}>{addr(f.ipDst, f.portDst)}</td>
-              <td>{f.proto ?? '—'}</td>
-              <td className={styles.num}>{f.packets ?? '—'}</td>
-              <td className={styles.num}>{f.bytes != null ? humanBytes(f.bytes) : '—'}</td>
+      <div className={styles.scroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Src</th>
+              <th>Dst</th>
+              <th>Proto</th>
+              <th className={styles.num}>Packets</th>
+              <th className={styles.num}>Bytes</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((f, i) => (
+              <tr key={i}>
+                <td>{hhmmss(f.tsMs)}</td>
+                <td className={styles.mono}>{addr(f.ipSrc, f.portSrc)}</td>
+                <td className={styles.mono}>{addr(f.ipDst, f.portDst)}</td>
+                <td>{f.proto ?? '—'}</td>
+                <td className={styles.num}>{f.packets ?? '—'}</td>
+                <td className={styles.num}>{f.bytes != null ? humanBytes(f.bytes) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -106,18 +110,31 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: ${theme.spacing(1)};
     margin-bottom: ${theme.spacing(2)};
   `,
+  scroll: css`
+    max-height: ${ROW_H + VISIBLE_ROWS * ROW_H}px;
+    overflow-y: auto;
+    overflow-x: auto;
+  `,
   table: css`
     width: 100%;
     border-collapse: collapse;
 
     th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      height: ${ROW_H}px;
+      white-space: nowrap;
       text-align: left;
       padding: ${theme.spacing(1)};
+      background: ${theme.colors.background.primary};
       color: ${theme.colors.text.secondary};
       border-bottom: 1px solid ${theme.colors.border.weak};
       font-weight: ${theme.typography.fontWeightMedium};
     }
     td {
+      height: ${ROW_H}px;
+      white-space: nowrap;
       padding: ${theme.spacing(1)};
       border-bottom: 1px solid ${theme.colors.border.weak};
     }
