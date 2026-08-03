@@ -1,0 +1,32 @@
+{
+  "question": "What traffic flows are moving through ce_branch16 right now, and how big are they?",
+  "elapsed_s": 72.2,
+  "crashed": null,
+  "stopped": null,
+  "answer": "On **ce_branch16** there are two currently active IPv6\u2011ICMP flows: one packet (56\u202fbytes) originating from **fe80::42:acff:fe14:14cb** and directed to the all\u2011nodes multicast address *ff02::2*, and a second packet (56\u202fbytes) from **fe80::42:acff:fe14:14df** to the same multicast address. Each flow consists of a single packet. [flows:0] [flows:1]",
+  "events": [
+    {
+      "type": "user_msg",
+      "content": "What traffic flows are moving through ce_branch16 right now, and how big are they?"
+    },
+    {
+      "type": "tool_call",
+      "name": "flows",
+      "arguments": {
+        "device": "ce_branch16"
+      },
+      "id": "chatcmpl-tool-95eb9d174c26b75f"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-95eb9d174c26b75f",
+      "name": "flows",
+      "content": "[flows:0] <<evidence>>\nts=1785760951 device=ce_branch16 ip_src=fe80::42:acff:fe14:14cb ip_dst=ff02::2 port_src=0 port_dst=0 proto=ipv6-icmp bytes=56 packets=1\n<<end-evidence>>\n[flows:1] <<evidence>>\nts=1785761491 device=ce_branch16 ip_src=fe80::42:acff:fe14:14df ip_dst=ff02::2 port_src=0 port_dst=0 proto=ipv6-icmp bytes=56 packets=1\n<<end-evidence>>",
+      "n": 2
+    },
+    {
+      "type": "assistant_msg",
+      "content": "On **ce_branch16** there are two currently active IPv6\u2011ICMP flows: one packet (56\u202fbytes) originating from **fe80::42:acff:fe14:14cb** and directed to the all\u2011nodes multicast address *ff02::2*, and a second packet (56\u202fbytes) from **fe80::42:acff:fe14:14df** to the same multicast address. Each flow consists of a single packet. [flows:0] [flows:1]"
+    }
+  ]
+}

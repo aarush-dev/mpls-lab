@@ -168,6 +168,32 @@ Self-checks (fixture corpus, `HashEmbedder`): `python3 -m copilot.retrieval.test
 Not built yet: the KB corpus is a test fixture — real content is S1/S2 seeding.
 `add` is append-only (no upsert-on-id) until the seeder lands.
 
+## End-to-end harness (E1, #42)
+
+`copilot/e2e/harness.py` is the real end-to-end integration + verification harness — the first
+run with **zero doubles**: the config-selected `OpenAIClient` (R1) on the `nim` profile →
+NVIDIA-hosted `openai/gpt-oss-20b`, the real `HttpAdapter` (A1) over the live dataapi, the real
+nim embedder (`nvidia/nv-embedqa-e5-v5`) over a freshly-seeded LanceDB of `ragcorpus/` (S1/S2),
+and the real S3 skills. It drives 7 scripted questions, captures every trace event, and writes
+`copilot/e2e/REPORT.md` + `traces/*.json` (the recorded manual-E2E pass).
+
+```bash
+# secrets + hosted-nim endpoints in copilot/.env (gitignored; see .env.example)
+python3 -m copilot.e2e.harness                    # self-check: profiles resolve, dataapi live, KB seeds, model smoke
+COPILOT_E2E_LIVE=1 python3 -m copilot.e2e.harness # full run (burns NIM tokens) -> REPORT.md
+```
+
+gpt-oss is a reasoning model: `COPILOT_LLM_REASONING_EFFORT=high` (env → the client's
+`reasoning_effort`). Its text lands in `content` (reasoning rides `reasoning_content`, ignored).
+Latest run: 3 cited answers (flows, topology, runbook), 1 correct ask-back, the rest safely
+gated/capped — all read/KB tools returned real rows, no crash.
+
+**Regressions filed against the real backend** (not silently patched, #42 mandate): #43 gpt-oss
+range/unicode citations the gate rejects; #44 embedder query/passage asymmetry (E1 uses a
+symmetric approximation); #45 harmony `<|channel|>` token leaking into tool-call names; #46 the
+all-None-node retrieval crash (**fixed here** — `store.py` pins a pyarrow schema so the node
+prefilter is valid on a real seeded corpus; the fixture never reproduced it).
+
 ## Where the rest of the system slots in
 
 The copilot shares this repo with the network sim + the (future) PA stack + the

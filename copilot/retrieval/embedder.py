@@ -37,13 +37,25 @@ class NimEmbedder:
         self._cfg = cfg
         self._url = os.environ.get("COPILOT_EMBED_BASE_URL", "http://127.0.0.1:8080/v1")
         self._model = os.environ.get("COPILOT_EMBED_MODEL_NIM", "bge-large-en-v1.5")
+        # NVIDIA-hosted retrieval embedders (nv-embedqa-*) REJECT the plain OpenAI /embeddings
+        # body -- they require input_type (+truncate). Env-gated so a plain OpenAI/local server
+        # gets the unmodified body. ponytail: single input_type for both add() and search() --
+        # nv-embedqa is asymmetric (query vs passage differ), so this is a symmetric approximation
+        # good enough at N=15; proper query/passage split is a contract change (filed ticket).
+        self._input_type = os.environ.get("COPILOT_EMBED_INPUT_TYPE", "")
+        self._truncate = os.environ.get("COPILOT_EMBED_TRUNCATE", "")
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         import httpx
         key = self._cfg.embed_api_key
+        body = {"model": self._model, "input": list(texts)}
+        if self._input_type:
+            body["input_type"] = self._input_type
+        if self._truncate:
+            body["truncate"] = self._truncate
         r = httpx.post(
             f"{self._url}/embeddings",
-            json={"model": self._model, "input": list(texts)},
+            json=body,
             headers={"Authorization": f"Bearer {key}"} if key else {},
             timeout=30,
         )

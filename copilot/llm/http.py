@@ -46,7 +46,8 @@ def make_client(cfg: Config):
         raise ValueError(f"unknown llm_profile {cfg.llm_profile!r}")   # defense-in-depth if raw.
     base_env, base_def, model_env, model_def = prof
     return OpenAIClient(os.environ.get(base_env, base_def),
-                        os.environ.get(model_env, model_def), cfg.llm_api_key)
+                        os.environ.get(model_env, model_def), cfg.llm_api_key,
+                        os.environ.get("COPILOT_LLM_REASONING_EFFORT", ""))
 
 
 class OpenAIClient:
@@ -55,16 +56,19 @@ class OpenAIClient:
     with no tools (or a backend that doesn't call) the completion text is `Reply.content` for
     the loop's owned parser."""
 
-    def __init__(self, base_url: str, model: str, api_key: str = ""):
+    def __init__(self, base_url: str, model: str, api_key: str = "", reasoning_effort: str = ""):
         self._url = base_url.rstrip("/")
         self._model = model
         self._key = api_key
+        self._effort = reasoning_effort   # gpt-oss reasoning tier (low|medium|high); "" -> omit
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Reply:
         import httpx
         body = {"model": self._model, "messages": messages}
         if tools:
             body["tools"] = [_as_function(t) for t in tools]
+        if self._effort:                  # gpt-oss burns tokens on reasoning -> tier it explicitly;
+            body["reasoning_effort"] = self._effort   # unset (default) keeps the plain OpenAI body.
         r = httpx.post(
             f"{self._url}/chat/completions",
             json=body,

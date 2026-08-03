@@ -130,8 +130,20 @@ so the gate's numeric compare never `TypeError`s. `/metrics` PromQL → selector
 recorded). Transport faults → `AdapterError` → tool observation (`registry.dispatch`). See
 `docs/SPEC-NOTES.md §Copilot A1`. Self-check: `python3 -m copilot.adapter.test_http`.
 
-**Not done:** the real LLM client (R1/#16), the end-to-end `/chat` gate (E1/#42), upsert-on-id +
-real KB corpus (S1/S2), skills content (S3); default `/chat` KB needs a seeded `COPILOT_KB_URI`.
+**E1 (#42) landed — `/chat` answers end to end for real.** `copilot/e2e/harness.py` runs the
+whole stack with **zero doubles**: real gpt-oss-20b (NVIDIA-hosted nim profile,
+`COPILOT_LLM_REASONING_EFFORT=high`) + live dataapi (A1) + real nv-embedqa KB seeded from
+`ragcorpus/` (S1/S2) + S3 skills. It drives 7 scripted questions, writes `copilot/e2e/REPORT.md`
++ `traces/`. Latest pass: 3 cited answers, 1 correct ask-back, rest safely gated/capped; all
+read/KB tools returned real rows, no crash. Two env-gated client fixes made the real backend work
+(`reasoning_effort`, embedder `input_type`/`truncate` for NVIDIA-hosted embeddings) + a prompt fix
+teaching the exact `[metrics:0]` citation token. **Regressions filed** (#42 mandate — file, don't
+patch): #43 (range/unicode citations), #44 (embedder query/passage asymmetry), #45 (harmony leak),
+#46 (all-None-node retrieval crash — **fixed** here: `store.py` pins the pyarrow schema).
+
+**Not done:** memory (R2a/b), emulator (R4a/b), trust gate (T1), forensic chain (R5–R6), C1;
+Milestone B. Seeder does not set `node` on incidents, so `search_incidents`-by-device narrows to
+empty (S1 follow-up, noted in #46). Default `/chat` KB still needs a seeded `COPILOT_KB_URI`.
 
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.

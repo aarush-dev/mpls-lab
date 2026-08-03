@@ -1,0 +1,17 @@
+{
+  "question": "Is the network ok?",
+  "elapsed_s": 1.4,
+  "crashed": null,
+  "stopped": null,
+  "answer": "Could you specify which part of the network (e.g., a specific device, VLAN, or service) and time period you\u2019d like me to check?",
+  "events": [
+    {
+      "type": "user_msg",
+      "content": "Is the network ok?"
+    },
+    {
+      "type": "assistant_msg",
+      "content": "Could you specify which part of the network (e.g., a specific device, VLAN, or service) and time period you\u2019d like me to check?"
+    }
+  ]
+}

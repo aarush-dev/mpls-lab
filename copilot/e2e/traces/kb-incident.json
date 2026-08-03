@@ -1,0 +1,134 @@
+{
+  "question": "Have we seen tunnel degradation before? Show similar past incidents near ce_branch1.",
+  "elapsed_s": 62.7,
+  "crashed": null,
+  "stopped": "step_cap",
+  "answer": "stopped: step_cap reached before a conclusion",
+  "events": [
+    {
+      "type": "user_msg",
+      "content": "Have we seen tunnel degradation before? Show similar past incidents near ce_branch1."
+    },
+    {
+      "type": "tool_call",
+      "name": "search_incidents",
+      "arguments": {
+        "query": "tunnel degradation",
+        "k": 10,
+        "device": "ce_branch1"
+      },
+      "id": "chatcmpl-tool-96d51045d5c7de35"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-96d51045d5c7de35",
+      "name": "search_incidents",
+      "content": "no matches",
+      "n": 0
+    },
+    {
+      "type": "tool_call",
+      "name": "search_logs",
+      "arguments": {
+        "device": "ce_branch1",
+        "pattern": "tunnel degradation",
+        "limit": 10
+      },
+      "id": "chatcmpl-tool-be336f92b5a5a362"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-be336f92b5a5a362",
+      "name": "search_logs",
+      "content": "no rows",
+      "n": 0
+    },
+    {
+      "type": "gate",
+      "ok": false,
+      "missing": [
+        "thin evidence: 0 item(s) < required 2",
+        "fabricated citation(s): ['metrics:0']"
+      ],
+      "retry": 0
+    },
+    {
+      "type": "tool_call",
+      "name": "search_incidents",
+      "arguments": {
+        "query": "tunnel",
+        "k": 10,
+        "device": "ce_branch1"
+      },
+      "id": "chatcmpl-tool-b63645a6cdcb9a93"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-b63645a6cdcb9a93",
+      "name": "search_incidents",
+      "content": "no matches",
+      "n": 0
+    },
+    {
+      "type": "tool_call",
+      "name": "search_logs",
+      "arguments": {
+        "pattern": "tunnel degradation",
+        "limit": 20
+      },
+      "id": "chatcmpl-tool-bf0957bdad32246b"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-bf0957bdad32246b",
+      "name": "search_logs",
+      "content": "no rows",
+      "n": 0
+    },
+    {
+      "type": "tool_call",
+      "name": "search_runbooks",
+      "arguments": {
+        "query": "tunnel degradation",
+        "k": 5
+      },
+      "id": "chatcmpl-tool-bf924a941a68d408"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-bf924a941a68d408",
+      "name": "search_runbooks",
+      "content": "[runbook-tunnel-latency-high] # Runbook \u2014 SD-WAN tunnel latency / loss high\n\n> RAG seed. Ties to fault scenarios `congestion`, `tunnel_degrade`,\n> `asymmetric_loss`, `brownout`, `hub_spoke_congest`.\n\n## Symptom\n\nA WireGuard SD-WAN tunnel shows rising latency, jitter, and/or packet loss;\nVoIP (EF/VOICE VRF) quality degrades first. Often a **slow buildup** \u2014 the\npredictive signal the copilot must catch before user impact.\n\n## Telemetry signature\n\n- **Metrics are SIMULATED, not measured.** `sdwan_tunnel_latency_ms` /\n  `_jitter_ms` / `_loss_pct` (gauges) = a measured wg0 RTT/loss term plus a\n  modelled congestion term plus the netem impairment read back from the\n  site's `eth1` qdisc config \u2014 the wg0 ping itself never crosses the\n  impaired path, so nothing here is a direct measurement of the fault.\n  `sdwan_tunnel_rekeys_total` (counter) is real cumulative WireGuard rekeys.\n  Labels: `device`, `tunnel`, `site`, `site_type`, `hub`. `tunnel_degrade`\n  additionally shows rekey clustering. `sdwan_path_changes_total` is\n  fabric-wide, unlabelled, and RNG-driven (not attributable to a device) \u2014\n  do not use it as fault evidence.\n- **Dataset rows**: `entity_type=tunnel`, `is_fault=true` over the window;\n  `lead_time_s` is the precursor window (latency/jitter creep before loss);\n  `time_to_impact_s` counts down to first observable impact.\n- **Pattern by scenario**:\n  - `congestion` \u2014 latency+jitter creep first, then loss as the ramp saturates.\n  - `tunnel_degrade` \u2014 jitter+loss climb + rekey clustering.\n  - `asymmetric_loss` \u2014 loss% up while latency stays normal (one-directional).\n  - `brownout` \u2014 queueing latency climbs under a rate cap; loss arrives late.\n  - `hub_spoke_congest` \u2014 netem ramp on a **hub** uplink (`ce_hub{1..6}` eth1),\n    so every spoke routed through that hub degrades at once. Modelled, **not**\n    tunnel-observable: the controller folds netem only from the spoke's eth1, so\n    the hub-side cap shows in no tunnel gauge \u2014 classify by the shared-hub\n    fan-out (many spokes degrade together) and the label, not a metric crossing.\n\n## Triage\n\n1. `GET /metrics?query=sdwan_tunnel_latency_ms{device=\"<CE>\"}` (range) \u2014 confirm\n   the climb and which tunnel(s) (`ce_branchX-ce_hubY`).\n2. Check loss vs latency split to classify (asymmetric vs congestion vs brownout).\n3. Inspect rekeys for `tunnel_degrade`.\n4. On the CE: `tc qdisc show dev eth1` (uplink) \u2014 netem impairment shows here\n   in the lab; `wg show` for handshake health.\n5. Bound the window via `/labels` (`t_start`/`t_impact`/`t_end`/\n   `lead_time`; use `lead_time_s`/`time_to_impact_s`/`is_fault` if querying\n   the joined `/datasets` output instead \u2014 those `_s`-suffixed and boolean\n   fields exist only there, not on raw `/labels` rows).\n\n## Resolution\n\nThe contributing impairment is on the CE uplink. In the lab, fault injectors\nrevert at `t_end` (netem cleared, QoS HTB root restored). In production:\nre-route over the second hub (dual-hub overlay), shed best-effort (GUEST/BE)\ntraffic, or escalate the underlay congestion.\n (source=runbook node=None ts=None score=0.41)\n[runbook-ospf-core] # Runbook \u2014 OSPF backbone instability (core / area-0)\n\n> RAG seed. Ties to fault scenarios `p_node_failure`, `pop_isolation`,\n> `core_partition`, `srlg_cut`, `core_congestion`, `ospf_area_flap`,\n> `path_asymmetry`, and `gray_failure`.\n\n## Symptom\n\nA provider-core event perturbs OSPF: a whole P router dies, a POP is cut off,\nthe backbone splits, an SRLG conduit drops both its links at once, a backbone\nlink congests, an inter-POP adjacency flaps, path costs skew one direction, or\na link quietly loses packets with no down event. Customer VPNv4 usually survives\n(redundant POP mesh + PE dual-homing) but transit latency and path selection\nmove.\n\n## Telemetry signature\n\n- **Metrics** (P/PE nodes): `ospf_neighbor_state{device}` = 0 for the affected\n  peers \u2014 **all at once** for `p_node_failure` (every peer of the node),\n  every **inter-area** peer for `pop_isolation`/`core_partition`,\n  a correlated **pair** for `srlg_cut`. `ospf_spf_last_executed_ms` jumps on\n  repeated SPF runs (`ospf_area_flap`). `mpls_lsp_count` shifts as LSPs reroute.\n  `core_congestion` and `gray_failure` leave OSPF **up** \u2014 they degrade transit\n  without a neighbor-down.\n- **Events** (`/events`): bursts of OSPF neighbor-down + SPF-recalc lines\n  (fan-out width tells node-loss from single-link). `gray_failure` logs\n  **nothing** \u2014 absence of an event is the signature.\n- **Dataset rows**: all eight are `impact_method=modelled` (`probe=null`) \u2014\n  including `gray_failure`, whose sub-BFD loss has no clean single metric *and*\n  no event, so the label is its only reliable signal (the core loss is not read\n  into SD-WAN tunnel telemetry). `device` is the real epicenter node (the P\n  router that failed, or the POP ABR at the cut).\n  `pop_isolation`/`core_partition`/`srlg_cut` are **named tests**, excluded from\n  the Poisson campaign.\n\n## Triage\n\n1. Read the OSPF event fan-out (`/events?device=`): one peer = single link;\n   all peers of a node = `p_node_failure`; all inter-area peers of a POP =\n   `pop_isolation`; a split area-0 = `core_partition`.\n2. On an epicenter/neighbour: `vtysh -c \"show ip ospf neighbor\"` +\n   `vtysh -c \"show ip route ospf\"` \u2014 which adjacencies dropped, which IA routes\n   withdrew.\n3. Latency climb with **no** neighbor-down \u2192 `core_congestion` (a P-P link\n   ramp) or `gray_failure` (sub-BFD loss); split forward/return latency \u2192\n   `path_asymmetry` (one-directional OSPF cost shift).\n4. Repeated SPF runs / ECMP oscillation \u2192 `ospf_area_flap`.\n5. Bound the window from `/labels`; for `gray_failure` the label is the only\n   dependable evidence.\n\n## Likely causes (lab scenarios)\n\n- **`p_node_failure`** \u2014 `MultiLinkFault` downs every core iface of one P router.\n- **`pop_isolation`** \u2014 cuts all inter-POP links of one POP; the region isolates.\n- **`core_partition`** \u2014 cuts the ring edge cut-set; area-0 splits into two islands.\n- **`srlg_cut`** \u2014 both links of one SRLG conduit drop simultaneously (correlated).\n- **`core_congestion`** \u2014 netem delay+loss ramp on a P-P backbone link; no down.\n- **`ospf_area_flap`** \u2014 an inter-POP area-0 adjacency flapped repeatedly.\n- **`path_asymmetry`** \u2014 OSPF cost raised in one direction only; paths diverge.\n- **`gray_failure`** \u2014 0.5\u20132 % sub-BFD loss on a backbone link, no down event.\n\n## Resolution\n\nStructural cuts (`p_node_failure`, `pop_isolation`, `core_partition`,\n`srlg_cut`) self-restore at `t_end`; confirm `ospf_neighbor_state` and\n`mpls_lsp_count` return to baseline on the neighbours. `core_congestion` /\n`gray_failure` clear when netem is removed. In production, `gray_failure` needs\nper-link backbone loss counters (not link-state, not tunnel metrics) to catch at\nall; `path_asymmetry` needs cost audit on both link ends.\n (source=runbook node=None ts=None score=0.35)\n[runbook-rr-bgp-cascade] # Runbook \u2014 RR failure & BGP cascade (catastrophic control-plane)\n\n> RAG seed. Ties to fault scenarios `rr_failure` and `bgp_cascade`. Both are\n> **exclusive** (run alone, never overlapped) \u2014 higher blast radius than the\n> transient `bgp_flap` in the BGP-adjacency runbook.\n\n## Symptom\n\nA control-plane event with wide reach: a Route Reflector's `bgpd` dies and\nevery client PE loses one of its two RR sessions \u2014 VPNv4 redundancy collapses\ncluster-wide (the surviving RR keeps reflecting) until watchfrr respawns it; or a hub CE\ntakes repeated BGP session clears in a row, thrashing the RIB and forcing many\npath-switches on every spoke sitting behind that hub. Neither leaves a clean\nsingle-metric crossing \u2014 both are `modelled`; the Loki ADJCHANGE stream plus\nthe label are the evidence.\n\n## Telemetry signature\n\n- **Metrics** (PE nodes only):\n  - `rr_failure` \u2014 `bgp_peer_established{device}` dips **cluster-wide**: each\n    client PE peers with both RRs (`pe1`+`pe2`), so one RR's death drops every\n    client's Established count by one (not to zero \u2014 the surviving RR holds the\n    mesh). A full VPNv4 propagation stall needs both RRs down.\n  - `bgp_cascade` \u2014 no attributable metric. `sdwan_path_changes_total` is\n    fabric-wide, unlabelled and RNG-driven \u2014 **do not** use it as evidence.\n    The signal is the ADJCHANGE burst count on the hub CE.\n- **Events** (`/events`): `rr_failure` shows a `bgpd` process gap on the RR\n  then a watchfrr restart line. `bgp_cascade` shows a burst of `BGP ADJCHANGE`\n  clears on the hub CE (`count` = 1 / 3 / 5 for low / medium / high, ~8 s apart).\n- **Dataset rows**: `is_fault=true`, `impact_method=modelled`, `probe=null`.\n  `rr_failure` `device` \u2208 {`pe1`, `pe2`} (the RRs), `lead_time\u22483`,\n  `severity_inert` (process kill ignores severity). `bgp_cascade` `device` \u2208\n  `ce_hub{1..6}`, `lead_time\u22482`.\n\n## Triage\n\n1. Scope the blast radius from the ADJCHANGE fan-out (`/events?device=`): one\n   RR's `bgpd` gap collapsing peers **cluster-wide** = `rr_failure`; repeated\n   clears on a single **hub CE** = `bgp_cascade`.\n2. `rr_failure`: on the RR, `pidof bgpd` (did watchfrr respawn it?) and\n   `vtysh -c \"show bgp summary\"`; on a client PE, confirm\n   `bgp_peer_established` recovered after the RR came back.\n3. `bgp_cascade`: on the hub CE, `vtysh -c \"show bgp vrf <VRF> summary\"` \u2014\n   confirm sessions re-established and the RIB settled (no residual churn).\n4. Bound the window from `/labels`.\n\n## Likely causes (lab scenarios)\n\n- **`rr_failure`** \u2014 `ProcessKill` on the RR's `bgpd`; VPNv4 propagation\n  stalls cluster-wide until watchfrr restarts it (~seconds), then re-converges.\n- **`bgp_cascade`** \u2014 `BgpFlap` clears the hub CE's session N times (severity\n  scales `count`); each clear forces a path re-select and RIB re-walk.\n\n## Resolution\n\nBoth self-recover in the lab (watchfrr respawns `bgpd` / the flap sequence\nends). In production: for a dead RR, confirm watchfrr restarted `bgpd`\n(`pidof bgpd`) and that clients re-established \u2014 a wedged RR is a full FRR\nrestart; a second RR should have absorbed the mesh (verify redundancy). For a\ncascading hub CE, stop the source of the clears, then confirm the RIB settled\nand dependent spokes re-homed.\n (source=runbook node=None ts=None score=0.35)\n[runbook-mpls-ldp] # Runbook \u2014 MPLS underlay / LDP session instability\n\n> RAG seed. Ties to fault scenarios `mpls_underlay_failure` and\n> `ldp_session_flap`.\n\n## Symptom\n\nA provider-core (P/PE) LDP label-distribution session tears down or flaps, or a\nP-router core interface goes down. Transit LSPs re-signal over a secondary path;\nVPNv4 customer traffic keeps flowing (dual-homing + BFD-assisted reroute) but\nsees a brief gap during reconvergence. No customer-facing BGP event \u2014 this is an\nunderlay problem, one layer below the L3VPN.\n\n## Telemetry signature\n\n- **Metrics** (P/PE nodes): `ospf_neighbor_state{device}` for the affected peer\n  flips `1 \u2192 0` in FRR on a hard `mpls_underlay_failure` (link down), but the\n  LDP/BGP metrics pusher polls every 30 s while the fault window is 15\u201345 s and\n  reconvergence is ~1 s \u2014 so the drop often falls between samples and is not a\n  dependable crossing (hence `impact_method=modelled`). `mpls_lsp_count` shifts\n  on the neighbouring P routers as LSPs re-signal. `ldp_session_flap` is\n  transient and self-recovering \u2014 it leaves no clean single-metric mark either.\n- **Events** (`/events`): Loki `ldp_event=Down/Up` lines for `ldp_session_flap`;\n  an OSPF neighbor down/up bracket for `mpls_underlay_failure`.\n- **Dataset rows**: `is_fault=true` on the affected `device`; both are\n  `impact_method=modelled` (no clean single-metric observable \u2014 confirm via the\n  event stream). `mpls_underlay_failure` targets a **non-ABR** P router (ABRs\n  have no P-PE link and are rejected by the injector).\n\n## Triage\n\n1. From the Loki lines (`/events?device=`) identify the P router + interface (or\n   LDP neighbor) and whether it is a **flap** (repeated Down/Up, self-recovers)\n   or a **hard link down** (single Down, held until revert).\n2. On the device: `vtysh -c \"show mpls ldp neighbor\"` and\n   `vtysh -c \"show mpls ldp binding\"` \u2014 confirm the session state + label bindings.\n3. `vtysh -c \"show ip ospf neighbor\"` \u2014 did the underlay adjacency drop\n   (link failure) or stay up (pure LDP flap)?\n4. Bound the window from `/labels` (`t_start`/`t_impact`/`t_end`).\n\n## Likely causes (lab scenarios)\n\n- **`mpls_underlay_failure`** \u2014 `ip link set <iface> down` on a P-router\n  P-PE-facing interface; LDP/OSPF reconverge to a secondary path (~1 s with\n  BFD), then the injector restores the link at `t_end`.\n- **`ldp_session_flap`** \u2014 `vtysh clear mpls ldp neighbor` N times (severity\n  scales the count); the session is torn and re-established each cycle and\n  self-recovers.\n\n## Resolution\n\nBoth self-clear in the lab (injector reverts at `t_end`). For a stuck LDP\nsession in production: verify the underlay OSPF adjacency first (LDP rides on\nIGP reachability), then `clear mpls ldp neighbor <ip>`. For a dead core link,\nconfirm the interface came back and LSP counts returned to baseline on the\nneighbouring P routers.\n (source=runbook node=None ts=None score=0.34)\n[runbook-bgp-adjacency-down] # Runbook \u2014 BGP adjacency down / flapping\n\n> RAG seed. Ties to fault scenarios `bgp_flap` and `node_failure`.\n\n## Symptom\n\nBGP session to a neighbor drops or flaps; prefixes withdrawn then relearned;\nrouting table churn. In a VRF this means a customer site loses (then regains)\nreachability across the L3VPN.\n\n## Telemetry signature (what the model / on-call sees)\n\n- **Loki events** (`/events`): bursts of `bgp` app log lines with\n  `BGP ADJCHANGE` / neighbor Up/Down; for `node_failure` also a `bgpd` process\n  gap until watchfrr respawns it.\n- **Metrics** (`/metrics`, PE nodes only \u2014 not emitted for CE):\n  `bgp_peer_established{device}` (distinct Established peer count on the\n  default instance) drops; an RR (`pe1`/`pe2`) failure collapses it\n  cluster-wide. `bgp_vrf_prefix_count{device,vrf}` (summed per-AFI/SAFI RIB\n  entries) drops for the affected VRF.\n- **Dataset rows**: `is_fault=true`, `fault_type=bgp_flap` (or `node_failure`)\n  on the affected `device` window; `impact_method=modelled` (no single clean\n  metric \u2014 confirm via the event stream).\n- Transient prefix withdrawal can show as a brief reachability/flow dip on\n  dependent sites.\n\n## Triage\n\n1. Identify device + neighbor from the Loki ADJCHANGE lines (`/events?device=`).\n2. On the device: `vtysh -c \"show bgp summary\"` (default instance) and\n   `vtysh -c \"show bgp vrf <VRF> summary json\"` (per-VRF; CE/PE BGP runs\n   inside `vrf_CORP`/`vrf_VOICE`/`vrf_GUEST`, not the default instance).\n3. Check whether it is a flap (self-recovering, repeated ADJCHANGE) vs a hard\n   `bgpd` failure (process gap \u2192 `node_failure`).\n4. Correlate `t_start`/`t_impact` from `/labels` to bound the impact window.\n\n## Likely causes (lab scenarios)\n\n- **`bgp_flap`** \u2014 repeated `clear bgp` churn; self-recovers in seconds.\n- **`node_failure`** \u2014 `bgpd` killed; watchfrr polls for respawn up to 60 s,\n  then forces a restart (total window observed ~60-90 s).\n- **`policy_drift`** \u2014 not a down event but a local-pref change causing\n  route-selection drift (see the policy-drift runbook).\n\n## Resolution\n\nFlaps self-clear. For a stuck session: `vtysh -c \"clear bgp vrf <VRF>\n<neighbor>\"` (a bare `clear bgp <neighbor>` with no VRF clause is a no-op \u2014\nCE and per-VRF PE sessions do not run on the default BGP instance). For a\ndead daemon, confirm watchfrr restarted it (`pidof bgpd`); if not, restart\nFRR. Lab fault injectors revert automatically at `t_end`.\n (source=runbook node=None ts=None score=0.31)",
+      "n": 5
+    },
+    {
+      "type": "gate",
+      "ok": false,
+      "missing": [
+        "fabricated citation(s): ['search_incidents:0', 'search_logs:0']"
+      ],
+      "retry": 1
+    },
+    {
+      "type": "tool_call",
+      "name": "search_incidents",
+      "arguments": {
+        "query": "tunnel degradation",
+        "k": 10,
+        "device": "ce_branch1"
+      },
+      "id": "chatcmpl-tool-bd07047c2bda821a"
+    },
+    {
+      "type": "tool_result",
+      "id": "chatcmpl-tool-bd07047c2bda821a",
+      "name": "search_incidents",
+      "content": "no matches",
+      "n": 0
+    },
+    {
+      "type": "assistant_msg",
+      "content": "stopped: step_cap reached before a conclusion"
+    }
+  ]
+}

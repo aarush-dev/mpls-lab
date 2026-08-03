@@ -99,8 +99,17 @@ def test_native_round_trip_preserves_tool_calls():
 
 
 def test_make_client_profile_swap_moves_endpoint_and_model():
-    nim = make_client(_cfg(llm_profile="nim"))
-    local = make_client(_cfg(llm_profile="unsloth-local"))
+    # tests the documented FALLBACK defaults -> clear any env override (a real copilot/.env sets
+    # COPILOT_LLM_MODEL_NIM/BASE_URL, which load() bleeds into os.environ during the suite).
+    import os
+    saved = {k: os.environ.pop(k, None) for k in
+             ("COPILOT_LLM_BASE_URL", "COPILOT_LLM_MODEL_NIM",
+              "COPILOT_LLM_BASE_URL_LOCAL", "COPILOT_LLM_MODEL_LOCAL")}
+    try:
+        nim = make_client(_cfg(llm_profile="nim"))
+        local = make_client(_cfg(llm_profile="unsloth-local"))
+    finally:
+        os.environ.update({k: v for k, v in saved.items() if v is not None})
     assert isinstance(nim, OpenAIClient) and isinstance(local, OpenAIClient)
     assert nim._model == "gpt-oss-20b" and local._model == "unsloth/gpt-oss-20b", \
         "distinct model per profile -- a swap must not reuse the wrong model id"
@@ -113,6 +122,17 @@ def test_make_client_profile_swap_moves_endpoint_and_model():
     except ValueError:
         raised = True
     assert raised, "unknown profile must raise, not silently pick a default"
+
+
+def test_reasoning_effort_rides_body_only_when_set():
+    # gpt-oss is a reasoning model: E1 needs the tier explicit (env COPILOT_LLM_REASONING_EFFORT).
+    # Set -> body carries reasoning_effort; unset ("") -> the body stays plain OpenAI shape.
+    with _FakeOpenAI([{"role": "assistant", "content": "ok"},
+                      {"role": "assistant", "content": "ok"}]) as srv:
+        OpenAIClient(srv.url, "m", "", "high").chat([{"role": "user", "content": "hi"}])
+        OpenAIClient(srv.url, "m", "").chat([{"role": "user", "content": "hi"}])
+    assert srv.requests[0].get("reasoning_effort") == "high"
+    assert "reasoning_effort" not in srv.requests[1], "unset effort -> plain body, no extra key"
 
 
 def test_api_key_sent_only_when_present():
@@ -209,6 +229,7 @@ def _smoke():
 def _run():
     test_native_round_trip_preserves_tool_calls()
     test_make_client_profile_swap_moves_endpoint_and_model()
+    test_reasoning_effort_rides_body_only_when_set()
     test_api_key_sent_only_when_present()
     test_as_function_wraps_flat_and_is_idempotent()
     test_to_reply_parses_calls_and_degrades_bad_args()

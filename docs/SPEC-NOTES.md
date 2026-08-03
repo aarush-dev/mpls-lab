@@ -1167,3 +1167,31 @@ label), not a canned response. Detail owned by the plugin's own docs under `graf
 None of the above touches the ML or Copilot pipeline (`copilot/`, synthetic generator, dataset
 schema). Fault injection, telemetry, and the plugin UI are infra/observability work only — no
 new model, no new retrieval behavior. Do not read this section as ML progress.
+
+## Copilot E1 (#42): the real end-to-end run — what real gpt-oss forced
+
+The first run with **zero doubles** (real gpt-oss-20b on NVIDIA-hosted nim + live dataapi + real
+nv-embedqa KB). Standing up the real backend forced three small env-gated seam fixes and surfaced
+four findings (three filed, one fixed). Harness + record: `copilot/e2e/harness.py`, `REPORT.md`.
+
+- **`reasoning_effort` (env `COPILOT_LLM_REASONING_EFFORT`)** — gpt-oss is a reasoning model; its
+  answer lands in `content`, reasoning in `reasoning_content` (ignored). The client
+  (`copilot/llm/http.py`) sends `reasoning_effort` when the env is set, plain OpenAI body when not.
+- **Embedder `input_type`/`truncate` (env)** — NVIDIA-hosted `nv-embedqa-e5-v5` **rejects** the
+  plain OpenAI `/embeddings` body (HTTP 500); it needs `input_type` + `truncate`. `NimEmbedder`
+  adds them only when the env is set (a local/plain server still gets the plain body). nv-embedqa
+  is *asymmetric* (query vs passage) but our Embedder is one `encode()`, so E1 uses a single
+  input_type — a symmetric approximation, fine at N=13 docs. Proper split = **#44**.
+- **Citation format in `SYSTEM_PROMPT`** — the I4a gate requires `[source:id]` tokens; the prompt
+  only said "cite the evidence ids". A real model needs the literal shown ("e.g. [metrics:0] …
+  list each id separately, NEVER a range"). This flipped answers from gate-blocked → cited.
+- **Retrieval crash on an all-None-node corpus (FIXED)** — the S1/S2 seeder sets no `node`, so a
+  real corpus is `node=None` on every doc; lancedb inferred a **Null-typed** `node` column and
+  `search_incidents`' `node IN (...)` prefilter crashed. The fixture set `node=` so it never
+  reproduced. `store.py` now pins a pyarrow schema (`node=string, ts=int64, vector=list<f32,dim>`).
+  Filed + fixed as **#46**; the seeder populating `node` so incident-by-device narrowing returns
+  rows is the open S1 follow-up.
+- **Filed, not patched (#42 mandate):** **#43** gpt-oss compresses citations to ranges
+  (`[metrics:3-5]`, unicode hyphen) the gate rejects as fabricated; **#45** a harmony
+  `<|channel|>commentary` token leaks into a tool-call name (registry safely rejects it — no crash
+   — but a step is wasted).

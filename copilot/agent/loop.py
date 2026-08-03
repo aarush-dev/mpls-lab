@@ -73,8 +73,11 @@ SYSTEM_PROMPT = (
     "tools (search_runbooks, search_incidents) to find the matching runbook and similar "
     "past incidents (pass a device to search_incidents to focus on nearby topology). Use "
     "walk_topology_graph to see the blast-radius / downstream devices of a fault and their "
-    "live status. Cite the evidence ids you rely on. If the request is too vague to "
-    "investigate, ask one clarifying question instead of calling a tool."
+    "live status. Cite evidence by its bracketed id EXACTLY as it appears in the tool "
+    "results (e.g. [metrics:0], [events:2]) -- list each id separately, NEVER a range like "
+    "[metrics:3-5]. Every sentence that names a device MUST "
+    "carry such a citation, or it is rejected as unsupported. If the request is too vague "
+    "to investigate, ask one clarifying question instead of calling a tool."
 )
 
 JUDGE_SYSTEM = (

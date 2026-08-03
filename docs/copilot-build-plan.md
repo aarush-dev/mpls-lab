@@ -170,8 +170,13 @@ with anything it shares a row with.
 2. **#19 (R3)** — WindowContext, before the adapter so the adapter is written once.
 3. **#40 (A1)** — the real adapter. First time any copilot code touches `dataapi`.
 4. **#16 (R1)** — real client + the loop fixes it forces (fake-server + 1 smoke; not gated on the lab).
-5. **#34–#36 (S1–S3)** — seed the corpora so retrieval and skills stop being inert.
-6. **#42 (E1)** — the real end-to-end run. **`/chat` works end to end here.** Needs R1 + A1 + X1 + seeds.
+5. **#34–#36 (S1–S3)** — seed the corpora so retrieval and skills stop being inert. **DONE.**
+6. **#42 (E1) — DONE.** The real end-to-end run: `copilot/e2e/harness.py` drives real gpt-oss-20b
+   (NVIDIA-hosted nim) + live dataapi + real nv-embedqa KB, **zero doubles**. `/chat` answers end
+   to end. Record: `copilot/e2e/REPORT.md` + `traces/`. Regressions filed, not patched: **#43**
+   (gpt-oss range/unicode citations the gate rejects), **#44** (embedder query/passage asymmetry),
+   **#45** (harmony `<|channel|>` leak into tool-call names), **#46** (all-None-node retrieval
+   crash — **fixed** in the E1 commit: `store.py` pins the pyarrow schema).
 7. **#17 → #18** (memory), then **#20 → #21** (emulator) → **#41 (T1, trust gate)**.
 8. **#22 → #23 → #24 → #25** (forensic chain — the long pole).
 9. **#26 (I6)** any time after #17. **#27 (C1)** after #25.
