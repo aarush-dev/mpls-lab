@@ -110,6 +110,17 @@ was caused by the missing **adapter** ticket alone. I1–I5 are real logic that 
 canned rows; the one exception is I2a: `LanceRetriever` runs against a genuine embedded LanceDB (its
 embedder is the `HashEmbedder` double). I4a's gate is pure functions with no doubles at all.
 
+**R2a (#17) landed.** Session Store (`copilot/memory/session.py` `SessionStore`):
+`sessions/<id>/{events.jsonl, meta.json}`, append + read-back, resumable across process restart.
+`events.jsonl` reuses F4's exact `event_wire` schema (relocated to `copilot/agent/loop.py` so both
+`api` and `memory` import it — one vocabulary, ADR-0009). Three loop changes rode with it: `Event`
+now self-stamps an **emit-time** ISO-UTC `ts` at construction (was F4 send-time); `investigate(…,
+history=)` threads a resumed session's prior turns between the system prompt and the new question
+(multi-turn loop entry — resume was unreachable before); a `gate` event is now emitted on **pass**
+too (`ok=True`), not only on fail. `POST /chat` gained `session_id` — set it to resume/persist, omit
+for a stateless one-off. Self-check: `python3 -m copilot.memory.test_session` (+ new resume/session
+cases in `agent`/`api` suites). Unblocks **R2b (#18)**, which reuses the emit-time schema + gate-on-pass.
+
 **Plan repaired 2026-08-03, audited same day.** Repair created **#38** (codependency rule + graph
 repair), **#39** (redeploy lab + verify dataapi live), **#40** (real HTTP tool adapter); #16–#27
 rewritten with `Modifies` + `Consumes stub` sections + corrected `blocked_by`; #9–#15 closed. The

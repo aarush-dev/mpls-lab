@@ -1,11 +1,12 @@
 """copilot.api.app -- FastAPI chat service, local-only (ADR-0010). Convergence (F4).
 
 Drives the F3 agent loop (copilot.agent.investigate) and STREAMS the canonical
-ADR-0009 trace events -- `user_msg | think | tool_call | tool_result | assistant_msg`
-(gate/artifact land later) -- as Server-Sent Events, each stamped with an ISO-UTC `ts`.
-Stream and store share ONE schema (`event_wire`): every streamed event round-trips into
-`events.jsonl` unchanged (ADR-0009/0010; the store is R2). SSE = the native browser
-primitive the C1 demo consumes via EventSource.
+ADR-0009 trace events -- `user_msg | think | tool_call | tool_result | gate |
+assistant_msg` -- as Server-Sent Events, each carrying its own emit-time ISO-UTC `ts`
+(R2a moved the stamp from send-time here to occurrence-time in the loop). Stream and
+store share ONE schema (`event_wire`): every streamed event round-trips into
+`events.jsonl` unchanged. A `session_id` on the request resumes/persists via the R2a
+`SessionStore`. SSE = the native browser primitive the C1 demo consumes via EventSource.
 
 Run:  uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100
 
@@ -17,16 +18,16 @@ not as a startup 503. The live end-to-end run on a real model + seeded corpora i
 import json
 import os
 import time
-from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from copilot.adapter import HttpAdapter, ToolAdapter
-from copilot.agent import Event, Outcome, investigate
+from copilot.agent import Outcome, event_wire, investigate
 from copilot.config import Config, load
 from copilot.llm import LLMClient, make_client
+from copilot.memory import SessionStore
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
 from copilot.window import WindowContext
@@ -39,6 +40,7 @@ class ChatRequest(BaseModel):
     start: int | None = None          # window start, epoch s (loop supplies it to tools)
     end: int | None = None            # window end, epoch s
     skills: list[str] | None = None   # I5: skill names to manually invoke (bodies preloaded)
+    session_id: str | None = None     # R2a: resume this session; None = a one-off, unpersisted chat
 
 
 def get_config() -> Config:
@@ -112,29 +114,25 @@ def get_retriever(cfg: Config = Depends(get_config)) -> Retriever | None:
     return _KB_CACHE[uri]
 
 
+def get_sessions() -> SessionStore:
+    # R2a (ADR-0009): the file-backed session store. Root from env (COPILOT_SESSIONS_DIR),
+    # else ./sessions -- mirrors the env-override pattern the other backends use. Tests
+    # override with a tmpdir. A None session_id on a request skips it entirely (one-off chat).
+    return SessionStore(os.environ.get("COPILOT_SESSIONS_DIR", "sessions"))
+
+
 def _window(req: ChatRequest, cfg: Config) -> WindowContext:
     # R3 (ADR-0002): Query when the request names a period, else rolling Live (now-X..now).
     # Forensic (frozen) windows are built by the case layer (R5b), not from a chat request.
     return WindowContext.query(req.start, req.end, cfg, int(time.time()))
 
 
-def event_wire(e: Event, ts: str) -> dict:
-    """Canonical wire/store shape (ADR-0009): type + ts + the event's payload. ONE
-    schema for the live stream and the persisted events.jsonl (R2 reuses this). The
-    payload owns no `type`/`ts` key, so the round-trip is lossless -- guard it."""
-    assert "type" not in e.data and "ts" not in e.data, \
-        f"event payload must not shadow type/ts (round-trip would clobber): {e.data!r}"
-    return {"type": e.type, "ts": ts, **e.data}
-
-
 def _sse(outcome: Outcome):
-    # ponytail: the loop is synchronous -> we stream its completed event tuple, each
-    # stamped as it goes out (send-time ~= occurrence-time when one LLM round-trip
-    # blocks). Live flush + true per-step ts need the loop to yield (Lane-Investigation
-    # change; F3 deferred ts-stamping to F4 by design) -- not worth it yet.
+    # ponytail: the loop is synchronous -> stream its completed event tuple. Each event now
+    # carries its own occurrence-time ts (R2a: stamped by the loop at emit, not here at send),
+    # so `event_wire` reads e.ts -- stream and events.jsonl serialize the SAME shape.
     for e in outcome.events:
-        ts = datetime.now(timezone.utc).isoformat()
-        yield f"data: {json.dumps(event_wire(e, ts))}\n\n"
+        yield f"data: {json.dumps(event_wire(e))}\n\n"
 
 
 @app.post("/chat")
@@ -143,8 +141,16 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
          adapter: ToolAdapter = Depends(get_adapter),
          retriever: Retriever | None = Depends(get_retriever),
          kg: dict[str, str] | None = Depends(get_kg),
-         skills: dict[str, Skill] | None = Depends(get_skills)) -> StreamingResponse:
+         skills: dict[str, Skill] | None = Depends(get_skills),
+         sessions: SessionStore = Depends(get_sessions)) -> StreamingResponse:
+    # R2a: a session_id resumes the conversation -- prior turns are reconstructed from the
+    # session's events.jsonl and threaded into the loop, and this turn's events are appended
+    # back (write-through). No session_id -> a stateless one-off chat, nothing persisted.
+    sid = req.session_id
+    history = sessions.history(sid) if sid else None
     outcome = investigate(req.question, _window(req, cfg),
                           llm=llm, adapter=adapter, cfg=cfg, retriever=retriever, kg=kg,
-                          skills=skills, invoke=req.skills)
+                          skills=skills, invoke=req.skills, history=history)
+    if sid:
+        sessions.append(sid, outcome.events)
     return StreamingResponse(_sse(outcome), media_type="text/event-stream")

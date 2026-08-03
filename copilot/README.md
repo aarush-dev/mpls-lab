@@ -30,7 +30,7 @@ copilot/
 
   # Lane-Runtime (Dev 2) — disjoint ownership
   llm/        OpenAI-compatible client, profile-selected               (F1,R1)
-  memory/     Session Store + Event Ledger (events.jsonl, cases)       (R2)
+  memory/     Session Store (sessions/<id>/events.jsonl+meta.json, resumable) (R2a); Event Ledger next (R2b)
   window/     WindowContext live/query/forensic                        (R3)
   emulator/   PA-emulator: /labels ground truth → Prediction Record    (R4)
   forensic/   forensic trigger: predict loop, dedup, case creation     (R5,R6)
@@ -79,8 +79,11 @@ Self-check: `python3 -m copilot.llm.test_http`; live smoke (needs an endpoint):
 ## Chat endpoint (F4)
 
 `POST /chat` drives the F3 loop and **streams** the canonical ADR-0009 trace events
-(`user_msg|think|tool_call|tool_result|assistant_msg`) as SSE, each stamped an
-ISO-UTC `ts` — one schema for the live stream and the persisted `events.jsonl`.
+(`user_msg|think|tool_call|tool_result|gate|assistant_msg`) as SSE, each carrying its
+own **emit-time** ISO-UTC `ts` (R2a: stamped in the loop at occurrence, not at send) —
+one schema (`event_wire`) for the live stream and the persisted `events.jsonl`. Pass a
+`session_id` to resume: prior turns are replayed into the loop and this turn is appended
+back (R2a `SessionStore`); omit it for a stateless one-off chat.
 
 ```bash
 uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only

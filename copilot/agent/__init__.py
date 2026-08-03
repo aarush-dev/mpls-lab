@@ -8,11 +8,11 @@ trace events (ADR-0009
 Owner lane builds here; do not edit from the other lane.
 """
 from copilot.agent.loop import (
-    EVENT_TYPES, SYSTEM_PROMPT, TOOL_SPECS, Event, Outcome, investigate,
-    parse_tool_calls,
+    EVENT_TYPES, SYSTEM_PROMPT, TOOL_SPECS, Event, Outcome, event_wire,
+    investigate, parse_tool_calls,
 )
 
 __all__ = [
-    "investigate", "Event", "Outcome", "parse_tool_calls",
+    "investigate", "Event", "Outcome", "event_wire", "parse_tool_calls",
     "EVENT_TYPES", "SYSTEM_PROMPT", "TOOL_SPECS",
 ]

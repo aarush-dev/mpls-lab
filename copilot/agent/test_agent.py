@@ -35,7 +35,7 @@ def test_scripted_investigation_completes_with_query_metrics():
     assert out.answer == "r1 cpu is pegged [metrics:0]"
     assert out.stopped is None
     assert [e.type for e in out.events] == \
-        ["user_msg", "tool_call", "tool_result", "assistant_msg"]
+        ["user_msg", "tool_call", "tool_result", "gate", "assistant_msg"]
     # the window the loop passed, not the model, scoped the query -> rows observed;
     # the observation shows real evidence ids (metrics:N) the answer can cite.
     tr = out.of_type("tool_result")[0]
@@ -117,7 +117,7 @@ def test_think_event_emitted_with_reasoning():
     out = investigate("why slow?", WINDOW,
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
     assert [e.type for e in out.events] == \
-        ["user_msg", "think", "tool_call", "tool_result", "assistant_msg"]
+        ["user_msg", "think", "tool_call", "tool_result", "gate", "assistant_msg"]
     assert out.of_type("think")[0].data["content"] == "checking r1 metrics first"
 
 
@@ -133,7 +133,7 @@ def test_owned_parser_handles_non_native_toolcall():
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
     assert out.stopped is None
     assert [e.type for e in out.events] == \
-        ["user_msg", "tool_call", "tool_result", "assistant_msg"]
+        ["user_msg", "tool_call", "tool_result", "gate", "assistant_msg"]
     # plain prose must NOT be mistaken for a tool call
     assert parse_tool_calls("r1 cpu is high, no json here") == ()
     assert parse_tool_calls('{"name": "query_metrics", "arguments": {}}')[0].name \
@@ -141,7 +141,8 @@ def test_owned_parser_handles_non_native_toolcall():
 
 
 def test_gate_passes_cited_sufficient_answer():
-    # I4a: enough in-window, on-topic, cited evidence -> the answer flows through, no gate block.
+    # I4a: enough in-window, on-topic, cited evidence -> the answer flows through. R2a: a
+    # passing gate is now itself a visible event (ok=True), emitted before the answer.
     llm = ScriptedLLM([
         tool_call("query_metrics", {"device": "r1"}, id="c1"),
         final("r1 cpu pegged [metrics:0][metrics:1]"),
@@ -149,7 +150,8 @@ def test_gate_passes_cited_sufficient_answer():
     ])
     out = investigate("why is r1 slow?", WINDOW,
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
-    assert out.of_type("gate") == (), "a passing answer emits no gate block"
+    g = out.of_type("gate")
+    assert len(g) == 1 and g[0].data["ok"] is True, "a passing answer emits a gate ok=True event"
     assert out.answer == "r1 cpu pegged [metrics:0][metrics:1]"
 
 
@@ -236,9 +238,10 @@ def test_self_judge_fail_retries_then_answers():
                       adapter=StubAdapter(metrics_rows=ROWS, events_rows=logs), cfg=_cfg())
     assert out.stopped is None
     assert out.answer == "r1 cpu pegged [metrics:0] and bgp flapping [events:0]"
-    g = out.of_type("gate")                                     # exactly one retry fired
-    assert len(g) == 1 and g[0].data["ok"] is False and g[0].data["retry"] == 0
-    assert any("r1 bgp logs" in m for m in g[0].data["missing"])
+    fails = [e for e in out.of_type("gate") if e.data["ok"] is False]
+    assert len(fails) == 1 and fails[0].data["retry"] == 0, "exactly one retry fired"
+    assert any("r1 bgp logs" in m for m in fails[0].data["missing"])
+    assert [e.data["ok"] for e in out.of_type("gate")] == [False, True], "then a passing gate"
 
 
 def test_gate_retry_recovers_from_a_failed_tool_call():
@@ -256,8 +259,8 @@ def test_gate_retry_recovers_from_a_failed_tool_call():
                       adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
     assert out.stopped is None
     assert out.answer == "r1 cpu pegged [metrics:0][metrics:1]"
-    g = out.of_type("gate")
-    assert len(g) == 1 and any("failed tool call" in m for m in g[0].data["missing"])
+    fails = [e for e in out.of_type("gate") if e.data["ok"] is False]
+    assert len(fails) == 1 and any("failed tool call" in m for m in fails[0].data["missing"])
 
 
 def test_gate_retry_respects_the_cap():
@@ -339,6 +342,28 @@ def test_agent_loads_skill_body_via_tool():
     assert out.answer.startswith("r1 bgp flapping")
 
 
+def test_history_prior_turns_reach_the_model():
+    # R2a: a resumed session threads prior turns between the system prompt and the new
+    # question, so the model actually sees where the chat left off (multi-turn loop entry).
+    history = [{"role": "user", "content": "why is r1 slow?"},
+               {"role": "assistant", "content": "r1 cpu pegged [metrics:0]"}]
+    llm = ScriptedLLM([final("still pegged, same cause as before?")])   # ask-back, one turn
+    investigate("and now?", WINDOW, llm=llm, adapter=StubAdapter(metrics_rows=ROWS),
+                cfg=_cfg(), history=history)
+    sent = llm.calls[0][0]                                  # the messages list of the first call
+    assert sent[0]["role"] == "system"
+    assert sent[1:3] == history, "prior turns sit between system and the new question"
+    assert sent[3] == {"role": "user", "content": "and now?"}, "new question comes last"
+
+
+def test_no_history_is_a_fresh_single_turn():
+    # backward-compat: history default None -> system + the one question, unchanged from F3.
+    llm = ScriptedLLM([final("which device?")])
+    investigate("q", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg())
+    sent = llm.calls[0][0]
+    assert [m["role"] for m in sent] == ["system", "user"]
+
+
 def test_load_skill_unknown_is_guidance():
     # a bad skill name comes back AS guidance (ADR-0015), never a raise.
     skills = {"bgp_flap": Skill("bgp_flap", "d", "b")}
@@ -373,6 +398,8 @@ def _run():
     test_manual_invoke_loads_skill_body()
     test_agent_loads_skill_body_via_tool()
     test_load_skill_unknown_is_guidance()
+    test_history_prior_turns_reach_the_model()
+    test_no_history_is_a_fresh_single_turn()
     test_bad_event_type_rejected()
     print("copilot.agent self-check OK")
 

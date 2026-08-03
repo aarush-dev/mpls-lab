@@ -78,7 +78,7 @@ def test_chat_streams_tool_call_and_cited_answer():
     assert resp.headers["content-type"].startswith("text/event-stream")
     evs = _events(resp)
     assert [e["type"] for e in evs] == \
-        ["user_msg", "tool_call", "tool_result", "assistant_msg"]
+        ["user_msg", "tool_call", "tool_result", "gate", "assistant_msg"]
     # a visible tool_call event + a final cited answer (acceptance)
     assert evs[1]["name"] == "query_metrics"
     assert evs[-1]["content"] == "r1 cpu is pegged [metrics:0]"
@@ -118,9 +118,9 @@ def test_device_question_streams_cited_log_and_flow_rows():
                                                "start": 100, "end": 200})
     evs = _events(resp)
     assert [e["type"] for e in evs] == \
-        ["user_msg", "tool_call", "tool_call", "tool_result", "tool_result", "assistant_msg"] or \
+        ["user_msg", "tool_call", "tool_call", "tool_result", "tool_result", "gate", "assistant_msg"] or \
         [e["type"] for e in evs] == \
-        ["user_msg", "tool_call", "tool_result", "tool_call", "tool_result", "assistant_msg"]
+        ["user_msg", "tool_call", "tool_result", "tool_call", "tool_result", "gate", "assistant_msg"]
     names = [e["name"] for e in evs if e["type"] == "tool_call"]
     assert names == ["search_logs", "flows"]
     trs = [e for e in evs if e["type"] == "tool_result"]
@@ -234,7 +234,7 @@ def test_think_event_streams_before_tool_call():
                                       "start": 100, "end": 200})
     evs = _events(resp)
     assert [e["type"] for e in evs] == \
-        ["user_msg", "think", "tool_call", "tool_result", "assistant_msg"]
+        ["user_msg", "think", "tool_call", "tool_result", "gate", "assistant_msg"]
     assert evs[1]["content"] == "checking r1 metrics first"
 
 
@@ -274,8 +274,69 @@ def test_manual_skill_invoke_over_http():
     assert any(t["name"] == "load_skill" for t in tools), "load_skill advertised over HTTP"
 
 
+def test_session_persists_and_resumes_over_http():
+    # R2a acceptance: chat with a session_id, reload the session (a fresh store == a process
+    # restart), continue -> prior turns reach the model AND this turn's events land in
+    # events.jsonl, append-only.
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=ROWS)
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM([
+        tool_call("query_metrics", {"device": "r1"}, id="c1"),
+        final("r1 cpu pegged [metrics:0]"),
+        final('{"pass": true}'),                          # I4b stage-2 self-judge verdict
+    ])
+    r1 = TestClient(app).post("/chat", json={"question": "why is r1 slow?",
+                                             "start": 100, "end": 200, "session_id": "s1"})
+    assert r1.status_code == 200
+
+    # a fresh store instance (the restart) recovers turn 1 from events.jsonl
+    reopened = SessionStore(d)
+    wire = reopened.read("s1")
+    assert wire[0]["type"] == "user_msg"
+    assert any(w["type"] == "assistant_msg" and w["content"] == "r1 cpu pegged [metrics:0]"
+               for w in wire), "the answer landed in events.jsonl"
+
+    # turn 2: resume -> the prior user+assistant turns reach the model
+    resumed = ScriptedLLM([final("is it still the same cause?")])   # ask-back, one turn
+    app.dependency_overrides[get_sessions] = lambda: reopened
+    app.dependency_overrides[get_llm] = lambda: resumed
+    r2 = TestClient(app).post("/chat", json={"question": "and now?",
+                                             "start": 100, "end": 200, "session_id": "s1"})
+    assert r2.status_code == 200
+    contents = [m["content"] for m in resumed.calls[0][0]]          # messages of the resumed loop
+    assert "why is r1 slow?" in contents and "r1 cpu pegged [metrics:0]" in contents, \
+        "prior user+assistant turns reached the model on resume"
+    assert contents[-1] == "and now?", "the new question comes last"
+    assert len(reopened.read("s1")) > len(wire), "turn 2 appended, turn 1 not clobbered"
+
+
+def test_no_session_id_persists_nothing():
+    # a stateless one-off chat: no session_id -> the store is never touched.
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=ROWS)
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM([final("which device?")])
+    TestClient(app).post("/chat", json={"question": "hi", "start": 100, "end": 200})
+    import os
+    assert os.listdir(d) == [], "no session_id -> nothing written"
+
+
 def _run():
     test_chat_streams_tool_call_and_cited_answer()
+    test_session_persists_and_resumes_over_http()
+    test_no_session_id_persists_nothing()
     test_manual_skill_invoke_over_http()
     test_device_question_streams_cited_log_and_flow_rows()
     test_fault_returns_cited_runbook_and_nearby_incident_over_http()

@@ -67,6 +67,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | R3 | 19 | `WindowContext` (live / query / forensic) + the forensic freeze guard |
 | A1 | 40 | **real HTTP tool adapter over dataapi** (replaces `StubAdapter`) |
 | R1 | 16 | real LLM backend profiles **+ the loop message-assembly fix** (narrow: fake-server + 1 smoke, not live-lab) |
+| R2a | 17 | session store (`sessions/<id>/{events.jsonl,meta.json}`) + multi-turn loop entry (`history`) + emit-time event ts + gate-on-pass |
 | E1 | 42 | **end-to-end: real chat on real model + real dataapi + seeded KB** |
 
 **#42 (E1) closing is the first moment `/chat` answers a real question end to end** — not #16. R1 is
@@ -76,8 +77,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 ### Remaining Milestone A
 | Code | # | Delivers |
 |---|---|---|
-| R2a | 17 | session store + `events.jsonl` + multi-turn loop entry |
-| R2b | 18 | Event Ledger (append-only records store, incl. gate outcomes) |
+| R2b | 18 | Event Ledger (append-only records store, incl. gate outcomes) — now unblocked (#17 landed the emit-time `event_wire` schema + gate-on-pass it reuses) |
 | R4a | 20 | PA-emulator core: ground-truth → §3.3 record (oracle) + `abstain`→gate + `fault_type`→skills |
 | R4b | 21 | emulator `error_profile` + drift/health knobs |
 | R5a | 22 | forensic trigger: 10 s loop, alert, episode dedup, restart-safe |

@@ -12,7 +12,8 @@ structured `Cite`s gathered from tool calls: stage 1 is the I4a deterministic pr
 (copilot.agent.gate: sufficiency / in-window / on-topic + citation check); over its
 survivors stage 2 is the I4b `self_judge` LLM call (relevance / sufficiency / consistency).
 On fail the loop re-enters to fetch the reported `missing[]`, up to cfg.gate_max_retries;
-still failing -> the `missing[]` list IS the answer (a `gate` event is emitted each fail).
+still failing -> the `missing[]` list IS the answer (a `gate` event is emitted for each
+outcome, pass and fail -- R2a makes gate outcomes user-visible generally, ADR-0009).
 Ask-back (a clarifying question before any evidence) bypasses the gate.
 
 Diagnostic skills (ADR-0012, I5): when the caller wires `skills`, every skill's
@@ -27,6 +28,7 @@ frozen}` into every tool call, so the agent cannot read outside its window. When
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from copilot.adapter import ToolAdapter
 from copilot.agent.gate import GateResult, run_gate
@@ -46,14 +48,19 @@ EVENT_TYPES = frozenset({
 
 @dataclass(frozen=True)
 class Event:
-    """One trace event. `data` is the type-specific payload (F4 stamps the ISO-8601
-    ts + session id when it persists/streams -- the loop owns type + payload only)."""
+    """One trace event, stamped at occurrence (R2a, ADR-0009). `data` is the type-specific
+    payload; `ts` is auto-set to the ISO-8601 UTC construction time unless one is passed --
+    events are built exactly when they occur, so this IS occurrence time (not F4's old
+    send-time stamp). `event_wire` serializes {type, ts, **data} for stream AND events.jsonl."""
     type: str
     data: dict
+    ts: str = ""
 
     def __post_init__(self):
         assert self.type in EVENT_TYPES, \
             f"unknown event type {self.type!r} (not an ADR-0009 canonical type)"
+        if not self.ts:
+            object.__setattr__(self, "ts", datetime.now(timezone.utc).isoformat())
 
 
 @dataclass(frozen=True)
@@ -64,6 +71,15 @@ class Outcome:
 
     def of_type(self, t: str) -> tuple[Event, ...]:
         return tuple(e for e in self.events if e.type == t)
+
+
+def event_wire(e: Event) -> dict:
+    """Canonical wire/store shape (ADR-0009): type + occurrence ts + the event's payload.
+    ONE schema for the live SSE stream (F4) AND the persisted events.jsonl (R2a). The
+    payload owns no `type`/`ts` key, so the round-trip is lossless -- guard it."""
+    assert "type" not in e.data and "ts" not in e.data, \
+        f"event payload must not shadow type/ts (round-trip would clobber): {e.data!r}"
+    return {"type": e.type, "ts": e.ts, **e.data}
 
 
 SYSTEM_PROMPT = (
@@ -134,7 +150,8 @@ def investigate(question: str, window: WindowContext, *,
                 retriever: Retriever | None = None,
                 kg: dict[str, str] | None = None,
                 skills: dict[str, Skill] | None = None,
-                invoke: list[str] | None = None) -> Outcome:
+                invoke: list[str] | None = None,
+                history: list[dict] | None = None) -> Outcome:
     """Run the loop until the model answers, asks back, or a cap trips. `kg` is the optional
     curated-KG hint map (ADR-0007): additive, never load-bearing -- the caller passes it only
     when cfg.kg_enabled (get_kg), so it's None here whenever the flag is off.
@@ -143,7 +160,12 @@ def investigate(question: str, window: WindowContext, *,
     description sits in the base prompt while its body loads on demand (the agent's load_skill
     tool). `invoke` = skill names a human manually selected -> their bodies are preloaded into
     the system prompt up front. Both default to nothing, so the loop is unchanged when no
-    skills are wired."""
+    skills are wired.
+
+    `history` (R2a, ADR-0009) is the prior conversation turns of a resumed session --
+    {"role","content"} messages the SessionStore reconstructs from a session's events.jsonl
+    -- inserted between the system prompt and the new question so the model sees where the
+    chat left off. None (default) = a fresh single-turn run."""
     skills = skills or {}
     events: list[Event] = []
 
@@ -162,8 +184,9 @@ def investigate(question: str, window: WindowContext, *,
         #                                                  from the catalog, so a miss is rare;
         #                                                  add a warning event if humans hand-type it.
     tool_specs = TOOL_SPECS + ([LOAD_SKILL_SPEC] if skills else [])
-    messages = [{"role": "system", "content": system},
-                {"role": "user", "content": question}]
+    messages = [{"role": "system", "content": system}]
+    messages += history or []              # R2a: prior turns reach the model on resume (ADR-0009)
+    messages.append({"role": "user", "content": question})
     tool_calls = 0
     retries = 0                                           # agentic gate retries used (ADR-0008)
     evidence: list[Cite] = []                            # structured cites gathered, for the gate
@@ -205,6 +228,7 @@ def investigate(question: str, window: WindowContext, *,
                 msg = "cannot answer yet: " + "; ".join(missing)
                 emit("assistant_msg", content=msg)
                 return Outcome(answer=msg, events=tuple(events))
+            emit("gate", ok=True, missing=[], retry=retries)  # R2a: gate outcome visible on pass too
             emit("assistant_msg", content=text)
             return Outcome(answer=text, events=tuple(events))
 
