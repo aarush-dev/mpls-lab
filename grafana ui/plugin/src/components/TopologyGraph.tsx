@@ -1,19 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import cytoscape, { Core, ElementDefinition } from 'cytoscape';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2, RadioButtonGroup } from '@grafana/ui';
+import { useStyles2 } from '@grafana/ui';
 
 import { TopologyLink } from '../data/types';
 import { TopologyNodeLive } from '../data/MockDataClient';
 import { styleForRole, colorForState } from '../data/topologyStyles';
 import { computePositions, Point } from '../utils/topologyLayout';
-
-type LayoutMode = 'grouped' | 'auto';
-const LAYOUT_OPTIONS: Array<{ label: string; value: LayoutMode }> = [
-  { label: 'Grouped', value: 'grouped' },
-  { label: 'Auto', value: 'auto' },
-];
 
 interface Props {
   nodes: TopologyNodeLive[];
@@ -70,32 +64,14 @@ function nodeSetKey(nodes: TopologyNodeLive[], links: TopologyLink[]): string {
   return `${nodes.map((n) => n.id).join(',')}|${links.map((l) => `${l.source}-${l.target}`).join(',')}`;
 }
 
-// Grouped = tidy preset positions (computePositions). Auto = Cytoscape's built-in cose (force-directed
-// crossing-minimizer, in core — no extra dependency), seeded non-random from current positions so it's
-// stable/repeatable. cose corrupts to NaN on a COMPOUND graph, so Auto first detaches the pop parents
-// (and hides the now-empty pop boxes); Grouped re-parents nodes to their pop + snaps positions back, so
-// a toggle round-trips exactly. parentById maps node id -> its pop parent id (POP_PREFIX + pop).
-export function applyLayout(cy: Core, mode: LayoutMode, positions: Map<string, Point>, parentById: Map<string, string>) {
+// Grouped preset: place every node at its computed slot. buildElements bakes positions into the element
+// defs, but cy.add does not reliably honor them for compound (pop-parented) children, so set them
+// explicitly here — this is what tiers the graph.
+export function applyLayout(cy: Core, positions: Map<string, Point>) {
   if (cy.elements().length === 0) {
     return;
   }
-  if (mode === 'auto') {
-    cy.nodes('[!isPop]').move({ parent: null }); // detach: cose NaNs on compounds
-    cy.nodes('[?isPop]').addClass('cy-hidden'); // hide the emptied pop boxes
-    cy.layout({ name: 'cose', randomize: false, animate: false, fit: true } as cytoscape.LayoutOptions).run();
-    cy.fit(undefined, 30);
-    return;
-  }
-  // Grouped: restore pop membership + exact slots. cose leaves nodes detached/moved; re-parent and set
-  // positions directly (preset's positions-function doesn't reliably restore a round-trip).
-  cy.nodes('[?isPop]').removeClass('cy-hidden');
   cy.batch(() => {
-    parentById.forEach((par, id) => {
-      const el = cy.getElementById(id);
-      if (el.nonempty()) {
-        el.move({ parent: par }); // idempotent if already parented
-      }
-    });
     positions.forEach((pt, id) => {
       const el = cy.getElementById(id);
       if (el.nonempty()) {
@@ -112,18 +88,10 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
   const cyRef = useRef<Core | null>(null);
   const setKeyRef = useRef<string>('');
   const positionsRef = useRef<Map<string, Point>>(new Map());
-  const parentByIdRef = useRef<Map<string, string>>(new Map());
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('grouped');
-  const layoutModeRef = useRef(layoutMode);
-  layoutModeRef.current = layoutMode;
   const onSelectRef = useRef(onSelectNode);
   onSelectRef.current = onSelectNode;
   const onHoverRef = useRef(onHoverNode);
   onHoverRef.current = onHoverNode;
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const linksRef = useRef(links);
-  linksRef.current = links;
 
   // Init cytoscape once.
   useEffect(() => {
@@ -201,11 +169,6 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
           selector: 'edge.state-amber',
           style: { 'line-color': colorForState('amber') },
         },
-        {
-          // Auto mode detaches nodes from pops; hide the emptied pop boxes so they don't float.
-          selector: '.cy-hidden',
-          style: { display: 'none' },
-        },
       ],
       layout: { name: 'grid' },
     });
@@ -248,11 +211,8 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
     if (setChanged) {
       cy.elements().remove();
       positionsRef.current = computePositions(nodes);
-      parentByIdRef.current = new Map(
-        nodes.filter((n) => n.pop).map((n) => [n.id, POP_PREFIX + n.pop])
-      );
       cy.add(buildElements(nodes, links, positionsRef.current));
-      applyLayout(cy, layoutModeRef.current, positionsRef.current, parentByIdRef.current);
+      applyLayout(cy, positionsRef.current);
       setKeyRef.current = key;
     } else {
       // Same topology shape: just recolor nodes/edges for the new cursor tick.
@@ -273,52 +233,10 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
     }
   }, [nodes, links]);
 
-  // Toggle flips. Auto: detach compounds + run cose. Grouped: REBUILD elements from scratch — the same
-  // path a fresh load takes (which lays out correctly). In-place position-restore after cose proved
-  // unreliable in the rendered graph (re-parented but never re-arranged), so replace the elements
-  // outright with the tidy positions baked in.
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) {
-      return;
-    }
-    if (layoutMode === 'grouped') {
-      // Mirror the fresh-load path EXACTLY: rebuild elements, then applyLayout, whose explicit
-      // el.position() calls are what actually place compound children into tiers (cy.add alone does
-      // not reliably honor element-definition positions for compound nodes in the rendered graph).
-      cy.elements().remove();
-      cy.add(buildElements(nodesRef.current, linksRef.current, positionsRef.current));
-      applyLayout(cy, 'grouped', positionsRef.current, parentByIdRef.current);
-    } else {
-      applyLayout(cy, 'auto', positionsRef.current, parentByIdRef.current);
-    }
-  }, [layoutMode]);
-
-  return (
-    <div className={styles.wrap}>
-      <div className={styles.toggle}>
-        <RadioButtonGroup
-          size="sm"
-          options={LAYOUT_OPTIONS}
-          value={layoutMode}
-          onChange={(v) => v && setLayoutMode(v)}
-        />
-      </div>
-      <div ref={containerRef} className={styles.container} />
-    </div>
-  );
+  return <div ref={containerRef} className={styles.container} />;
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  wrap: css`
-    position: relative;
-  `,
-  toggle: css`
-    position: absolute;
-    top: ${theme.spacing(1)};
-    right: ${theme.spacing(1)};
-    z-index: 1;
-  `,
   container: css`
     width: 100%;
     min-height: 560px;
