@@ -284,6 +284,11 @@ The §3.3 example predates two fields the copilot seam needs. R4a's PA-emulator
   window this record covers. Absent from §3.3 but load-bearing for ADR-0014 / ADR-0009 / #25:
   `n_concurrent > 1` → n investigation chats (one per fault) + a master chat that synthesizes.
   The emulator sets it from how many `/labels` faults overlap the window (`prediction` seam).
+- **`concurrent_faults` (top-level, `list[{device, cause}]`, len == `n_concurrent`)** — enumerates
+  EACH concurrently-active fault, not just the count (#49). Element 0 = the primary (record's
+  `device`/top cause). R6b freezes each fault's OWN device window and investigates it per sub-chat,
+  so a count alone was not enough — the other faults' devices must be named. `cause` is the reported
+  cause (post-error-profile confusion). A lone record self-enumerates (one entry).
 
 ### 3.4 `GET /v1/explain/{alert_id}` — response (arrives later)
 

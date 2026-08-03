@@ -122,9 +122,17 @@ def _incidence_curve(conf: float) -> list[dict]:
             for h in _HORIZONS_S]
 
 
+def _fault_ref(label: dict, profile: str) -> dict:
+    """A {device, cause} handle for one concurrently-active fault -- device + the REPORTED cause
+    (post-`_confuse`, honest to the error profile). The per-fault detail R6b's fan-out investigates
+    over that fault's OWN device window (#49); a count alone could not name the other devices."""
+    dev = label.get("device") or (label.get("target") or {}).get("device")
+    return {"device": dev, "cause": _confuse(label, profile, str(label.get("type", "unknown")))}
+
+
 def emulate_record(label: dict, *, error_profile: str = "light",
                    n_concurrent: int = 1, now: str | None = None,
-                   drift_tick: int = 0) -> dict:
+                   drift_tick: int = 0, concurrent_faults: list[dict] | None = None) -> dict:
     """One ground-truth fault `label` -> a full §3.3 Prediction Record (ADR-0003).
 
     `label` is a `/labels` row (dataapi): {type, target, severity, t_start, t_impact, t_end,
@@ -156,6 +164,9 @@ def emulate_record(label: dict, *, error_profile: str = "light",
         "window_end_ts": now or label.get("t_impact") or label.get("t_start"),
         "model_version": _MODEL_VERSION,
         "n_concurrent": max(1, int(n_concurrent)),      # invented field (b); >=1 (ADR-0014/0009)
+        # #49: enumerate every concurrently-active fault (device + cause), not just the count. The
+        # seam supplies the list; a lone record self-enumerates so consumers need no n==1 branch.
+        "concurrent_faults": concurrent_faults or [{"device": dev, "cause": ftype}],
         # ---- 1. risk (hazard head, §3.3) -- one curve, everything below reads off it ----
         "risk": {
             "fault_types": [{
@@ -271,7 +282,8 @@ def prediction(cfg, labels: list[dict], *, now: str | None = None,
     if not active:
         return None
     return emulate_record(active[0], error_profile=cfg.error_profile,
-                          n_concurrent=len(active), now=now, drift_tick=drift_tick)
+                          n_concurrent=len(active), now=now, drift_tick=drift_tick,
+                          concurrent_faults=[_fault_ref(lb, cfg.error_profile) for lb in active])
 
 
 def fetch_labels(base_url: str, *, fetch=None) -> list[dict]:

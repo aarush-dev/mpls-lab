@@ -169,6 +169,16 @@ def test_prediction_seam_counts_concurrent_faults():
     r = prediction(_cfg(emulate_pa=True, error_profile="oracle"), [LABEL, other],
                    now="2026-06-21T14:55:30Z")
     assert r["n_concurrent"] == 2                          # both active in the window
+    # #49: the record ENUMERATES all n concurrently-active faults (device + cause), not just a count.
+    cf = r["concurrent_faults"]
+    assert [(f["device"], f["cause"]) for f in cf] == [("ce_branch1", "congestion"), ("pe1", "bgp_flap")]
+
+
+def test_single_fault_record_self_enumerates():
+    # a lone fault still carries a 1-entry concurrent_faults (its own device+cause) so the field is
+    # always present and consumers need no special-case for n==1.
+    r = emulate_record(LABEL, error_profile="oracle")
+    assert r["concurrent_faults"] == [{"device": "ce_branch1", "cause": "congestion"}]
 
 
 def test_prediction_seam_emulate_pa_false_takes_the_real_pa_path():
@@ -238,6 +248,7 @@ def _run():
     test_drift_state_accessor_reads_the_resolved_location()
     test_prediction_seam_emulate_pa_true_returns_a_record()
     test_prediction_seam_counts_concurrent_faults()
+    test_single_fault_record_self_enumerates()
     test_prediction_seam_emulate_pa_false_takes_the_real_pa_path()
     test_fetch_labels_reads_the_ground_truth_rows()
     test_record_persists_to_the_event_ledger()

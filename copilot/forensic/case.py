@@ -117,12 +117,15 @@ def _snapshot_topology(adapter, device: str | None, window: WindowContext) -> di
     return {"hops": hops, "walk": walk}
 
 
-def snapshot_window(live_adapter, record: dict, window: WindowContext, window_dir: str) -> None:
+def snapshot_window(live_adapter, record: dict, window: WindowContext, window_dir: str,
+                    device: str | None = None) -> None:
     """Freeze the concerned observability window to `window_dir` from the LIVE adapter (ADR-0014).
     Device-scoped to the fault entity; each source drained to exhaustion; topology blast-radius
-    captured. After this the case reads only disk -- no live backend (ADR-0002 freeze)."""
+    captured. After this the case reads only disk -- no live backend (ADR-0002 freeze).
+    `device` overrides the scope (defaults to the record's primary) so R6b can freeze each
+    concurrently-active fault's OWN device window (#49)."""
     os.makedirs(window_dir, exist_ok=True)
-    device = record.get("device")
+    device = device or record.get("device")
     for source in _SOURCES:
         _dump(os.path.join(window_dir, f"{source}.json"),
               _drain(getattr(live_adapter, source), device, window))
@@ -279,9 +282,24 @@ def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
         _verdict_to_kb(record, md, cid, window, retriever, cfg)
     # R6b: concurrent faults -> n per-fault chats + a master synthesis (ADR-0014). Single-fault
     # cases stop at the initial chat above. Function-local import: synthesis imports from here.
-    if int(record.get("n_concurrent", 1)) > 1:
+    n = int(record.get("n_concurrent", 1))
+    if n > 1:
         from copilot.forensic.synthesis import synthesize_concurrent
-        synthesize_concurrent(case_dir, record, window, replay, primary=outcome, llm=llm, cfg=cfg,
+        # #49: freeze each co-active fault's OWN device window so its sub-chat investigates real
+        # evidence, not the primary device's. replays[0] = the primary (already frozen); a co-fault
+        # on the primary device reuses it (no redundant snapshot).
+        faults = record.get("concurrent_faults") or [{"device": record.get("device")}] * n
+        primary_dev = record.get("device")
+        replays = [replay]
+        for i in range(1, n):
+            dev = (faults[i] or {}).get("device") if i < len(faults) else primary_dev
+            if dev and dev != primary_dev:
+                wd = os.path.join(case_dir, f"window-{i}")
+                snapshot_window(live_adapter, record, window, wd, device=dev)
+                replays.append(ReplayAdapter(wd))
+            else:
+                replays.append(replay)
+        synthesize_concurrent(case_dir, record, window, replays, primary=outcome, llm=llm, cfg=cfg,
                               retriever=retriever, skills=skills, kg=kg)
     return case_dir
 
