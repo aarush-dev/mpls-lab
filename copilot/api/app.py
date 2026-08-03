@@ -27,6 +27,7 @@ from copilot.config import Config, load
 from copilot.llm import LLMClient
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
+from copilot.window import WindowContext
 
 app = FastAPI(title="NOC Copilot", version="1.0")
 
@@ -103,12 +104,10 @@ def get_retriever(cfg: Config = Depends(get_config)) -> Retriever | None:
     return _KB_CACHE[uri]
 
 
-def _window(req: ChatRequest, cfg: Config) -> tuple[int, int]:
-    if req.start is not None and req.end is not None:
-        return (req.start, req.end)
-    # ponytail: bare live window (now - X min .. now); R3 swaps in WindowContext (ADR-0002).
-    end = int(time.time())
-    return (end - cfg.window_x_min * 60, end)
+def _window(req: ChatRequest, cfg: Config) -> WindowContext:
+    # R3 (ADR-0002): Query when the request names a period, else rolling Live (now-X..now).
+    # Forensic (frozen) windows are built by the case layer (R5b), not from a chat request.
+    return WindowContext.query(req.start, req.end, cfg, int(time.time()))
 
 
 def event_wire(e: Event, ts: str) -> dict:

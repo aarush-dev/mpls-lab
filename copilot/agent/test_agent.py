@@ -12,8 +12,9 @@ from copilot.agent import Event, Outcome, investigate, parse_tool_calls
 from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.skills import Skill
+from copilot.window import WindowContext
 
-WINDOW = (100, 200)
+WINDOW = WindowContext(100, 200)
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
 
 

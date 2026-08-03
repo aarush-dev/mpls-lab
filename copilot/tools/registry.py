@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from copilot.adapter import FilterError, Filters, MAX_LIMIT, Result, ToolAdapter, sanitize
 from copilot.retrieval import Hit, Retriever
+from copilot.window import WindowContext
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ TOOL_SPECS = [{
 
 
 def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
-             window: tuple[int, int], retriever: Retriever | None = None,
+             window: WindowContext, retriever: Retriever | None = None,
              kg: dict[str, str] | None = None) -> tuple[str, tuple[Cite, ...]]:
     """Run one tool call: narrow -> validate -> read -> render. Returns
     (observation_text, cites) -- the structured `Cite`s feed the I4a quality gate
@@ -93,15 +94,15 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
     """
     if name == "walk_topology_graph":                    # I3: topology walk, not a windowed read
         return _walk(arguments, adapter, window, kg)
-    if name in RETRIEVAL_TOOLS:                          # I2b: KB search, not a windowed read
+    # I2b: KB search is NOT windowed -- KB ts is historical (ADR-0002 §Nuances).
+    if name in RETRIEVAL_TOOLS:
         return _retrieve(name, arguments, retriever, adapter)
     entry = TOOLS.get(name)
     if entry is None:                                    # unknown tool -> guidance, no crash
         return f"error: unknown tool {name!r}", ()
     method, _ = entry
-    # ponytail: window is a bare (start,end) pair (F3 basic form); R3 swaps in the full
-    # WindowContext {start,end,frozen} + the forensic end-freeze guard (ADR-0002).
-    start, end = window
+    # R3: the window is a WindowContext {start,end,frozen}; frozen/t_snapshot ride into
+    # Filters so the forensic freeze guard (ADR-0002) fires at the adapter, one place.
     # coerce args first: a non-int limit/offset from a weak model is guidance, not a
     # crash (ADR-0015). Caught narrowly so a real read error (R1's HTTP adapter) still
     # surfaces instead of masquerading as filter guidance.
@@ -110,7 +111,8 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
         for k in ("limit", "offset"):                    # let Filters own the defaults
             if k in arguments:
                 narrow[k] = int(arguments[k])
-        filters = Filters(start=start, end=end, **narrow)
+        filters = Filters(start=window.start, end=window.end,
+                          t_snapshot=window.t_snapshot, **narrow)
     except ValueError as e:
         return f"error: {e}", ()
     try:
@@ -165,7 +167,7 @@ def _retrieve(name: str, args: dict, retriever: Retriever | None,
     return _render_hits(hits), cites
 
 
-def _walk(args: dict, adapter: ToolAdapter, window: tuple[int, int],
+def _walk(args: dict, adapter: ToolAdapter, window: WindowContext,
           kg: dict[str, str] | None) -> tuple[str, tuple[Cite, ...]]:
     """I3 topology walk (ADR-0007): BFS the real edges from a focus `device` + per-node live
     status (the adapter owns the topology+/metrics join). The curated KG, if enabled, only

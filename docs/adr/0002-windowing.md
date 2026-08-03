@@ -36,6 +36,12 @@ Every backend tool already takes `start`/`end` epoch params (`dataapi/app.py` â€
   (â‰¥7d, ADR-0009) OR the case snapshots the window to disk at capture time. We do **both**: retention
   floor + Case Archive materializes a frozen copy (ADR-0009).
 - Same sliding-window idea is reused for chat history compaction (ADR-0015).
+- **KB retrieval is exempt from windowing.** `search_runbooks`/`search_incidents` (ADR-0006) take
+  **no** window: a runbook/past-incident `ts` is **historical**, not a live-telemetry timestamp, so
+  the quality gate already excludes those sources from its in-window check (ADR-0008;
+  `gate.py` `WINDOWED_SOURCES` = metrics/events/flows only). Threading a window into KB search would
+  wrongly hide relevant history. So "*every* tool call is threaded" means every **windowed** (live-
+  telemetry) tool call; `registry._retrieve` intentionally takes no window. Decided in R3.
 
 ## Consequences
 

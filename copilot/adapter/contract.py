@@ -13,6 +13,8 @@ with guidance. Results are capped, carry per-item provenance, and a paging handl
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from copilot.window import WindowContext
+
 # ponytail: hard cap lives here as a constant, not in config -- ADR-0015 wants a
 # *low* ceiling by design and copilot/config.py is another lane's file (F0). Lift
 # it to config only if an operator ever needs to tune it.
@@ -39,12 +41,20 @@ class Filters:
     pattern: str | None = None
     limit: int = 10
     offset: int = 0
+    t_snapshot: int | None = None   # forensic pin (ADR-0002); None => not frozen, no cap on end
 
     def validate(self, max_limit: int = MAX_LIMIT) -> None:
         if self.start is None or self.end is None:
             raise FilterError("window required: pass start and end (epoch seconds)")
         if self.start >= self.end:
             raise FilterError("invalid window: start must be < end")
+        # forensic freeze guard (ADR-0002): a frozen case is pinned at T_snapshot; reading past
+        # it leaks live data into forensic reproduction. On the loop path end == t_snapshot, so
+        # this defends the case layer (R5b/#40) that builds Filters directly with a wider end.
+        if self.t_snapshot is not None and self.end > self.t_snapshot:
+            raise FilterError(
+                f"forensic window frozen at T_snapshot={self.t_snapshot}: end={self.end} "
+                f"would read live data; pass end <= {self.t_snapshot}")
         if not (self.device or self.pattern):
             raise FilterError("over-broad: specify a device or pattern to narrow the query")
         if self.limit < 1:
@@ -139,4 +149,4 @@ class ToolAdapter(Protocol):
     # Topology walk (I3, ADR-0007): deterministic BFS on real edges from `focus` within `n`
     # hops, each node enriched with live status from /metrics in `window`. The adapter owns
     # the topology+metrics join (a batched /metrics query per frontier for the HTTP adapter).
-    def walk_topology(self, focus: str, n: int, window: tuple[int, int]) -> tuple[NodeState, ...]: ...
+    def walk_topology(self, focus: str, n: int, window: WindowContext) -> tuple[NodeState, ...]: ...

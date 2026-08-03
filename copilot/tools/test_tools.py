@@ -13,8 +13,9 @@ import tempfile
 from copilot.adapter import StubAdapter
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
 from copilot.tools import Cite, RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
+from copilot.window import WindowContext
 
-WINDOW = (100, 200)
+WINDOW = WindowContext(100, 200)
 METRICS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
 LOGS = [{"device": "r1", "ts": 100 + i, "msg": f"link flap {i}"} for i in range(2)]
 FLOWS = [{"device": "r1", "ts": 100 + i, "bytes": 1000 + i} for i in range(4)]

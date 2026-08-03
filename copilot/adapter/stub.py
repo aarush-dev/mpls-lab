@@ -10,6 +10,7 @@ from copilot.adapter.contract import (
     Evidence, Filters, MAX_LIMIT, NodeState, Result, bfs_hops, frame, hops_within_links,
     sanitize,
 )
+from copilot.window import WindowContext
 
 
 class StubAdapter:
@@ -44,7 +45,7 @@ class StubAdapter:
     def hops_within(self, focus: str, n: int) -> set[str]:
         return hops_within_links(self._topology.get("links", ()), focus, n)
 
-    def walk_topology(self, focus: str, n: int, window: tuple[int, int]) -> tuple[NodeState, ...]:
+    def walk_topology(self, focus: str, n: int, window: WindowContext) -> tuple[NodeState, ...]:
         # BFS the real edges, then enrich each node with its latest metric row. Ordered by
         # (hop, node) so the walk is deterministic (ADR-0007). Unknown focus -> () (never
         # fabricate a node that isn't in the topology). ponytail: the stub ignores `window`
@@ -71,7 +72,11 @@ class StubAdapter:
 
     def _serve(self, source: str, filters: Filters) -> Result:
         filters.validate(self._max_limit)
-        rows = self._rows[source]
+        # ts-window filter (ADR-0002): /metrics /events /flows are windowed sources, so a row
+        # outside [start,end] -- or with no ts to prove it in-window (as gate.pre_gate does over
+        # WINDOWED_SOURCES) -- is not served. Paging offsets index the IN-WINDOW rows, not raw.
+        rows = [r for r in self._rows[source]
+                if r.get("ts") is not None and filters.start <= r["ts"] <= filters.end]
         window = rows[filters.offset:filters.offset + filters.limit]
         evidence = tuple(
             Evidence(

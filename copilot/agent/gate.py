@@ -56,7 +56,7 @@ def tool_calls_ok(errors) -> GateResult:
 
 def pre_gate(cites, *, window, entities, min_evidence) -> GateResult:
     """Deterministic sufficiency + topicality check over gathered `Cite`s (ADR-0008 stage 1)."""
-    start, end = window
+    start, end = window.start, window.end            # R3: window is a WindowContext, not a tuple
     missing = []
     if len(cites) < min_evidence:
         missing.append(f"thin evidence: {len(cites)} item(s) < required {min_evidence}")

@@ -20,10 +20,9 @@ Diagnostic skills (ADR-0012, I5): when the caller wires `skills`, every skill's
 on demand -- the model auto-selects one via the `load_skill` tool, or a human preloads one
 by name (`invoke`). A skill is METHOD (how to investigate), not cited evidence -> no Cite.
 
-Windowing (ADR-0002): the loop -- not the model -- passes the window's (start, end)
-into every tool call, so the agent cannot read outside its window. F3 threads a bare
-`(start, end)` epoch pair (basic form); R3 swaps in the full WindowContext {start, end,
-frozen} and the forensic `end`-freeze guard.
+Windowing (ADR-0002): the loop -- not the model -- passes the `WindowContext {start, end,
+frozen}` into every tool call, so the agent cannot read outside its window. When frozen
+(forensic), the adapter freeze guard rejects any read past T_snapshot (Filters.validate).
 """
 import json
 from dataclasses import dataclass
@@ -35,6 +34,7 @@ from copilot.llm import LLMClient, ToolCall
 from copilot.retrieval import Retriever
 from copilot.skills import Skill, catalog
 from copilot.tools import Cite, TOOL_SPECS, dispatch
+from copilot.window import WindowContext
 
 # canonical event enum (ADR-0009) -- ONE vocabulary for the live stream AND the
 # persisted events.jsonl. F3 emits a subset; the gate/artifact types land later.
@@ -119,7 +119,7 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
     return (ToolCall(name=str(name), arguments=args, id="parsed_0"),)
 
 
-def investigate(question: str, window: tuple[int, int], *,
+def investigate(question: str, window: WindowContext, *,
                 llm: LLMClient, adapter: ToolAdapter, cfg: Config,
                 retriever: Retriever | None = None,
                 kg: dict[str, str] | None = None,

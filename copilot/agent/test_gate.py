@@ -9,8 +9,9 @@ from copilot.agent.gate import (
     GateResult, citation_check, extract_entities, pre_gate, run_gate, tool_calls_ok,
 )
 from copilot.tools import Cite
+from copilot.window import WindowContext
 
-WINDOW = (100, 200)
+WINDOW = WindowContext(100, 200)
 
 
 def _c(id, source="metrics", device="r1", ts=150):
