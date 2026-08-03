@@ -454,7 +454,7 @@ START=$(date -d '1 hour ago' +%s)
 END=$(date +%s)
 curl -o dataset_fresh.parquet "http://127.0.0.1:8000/datasets?start=${START}&end=${END}&step=30&build=true"
 
-# Expected: joins metrics + flows + events + labels into one table, 49 columns
+# Expected: joins metrics + flows + events + labels into one table, 59 columns
 # Size: ~500K–2M rows per hour (depends on step size and fault count)
 ```
 
@@ -467,7 +467,9 @@ curl -o dataset_fresh.parquet "http://127.0.0.1:8000/datasets?start=${START}&end
 import pandas as pd
 
 df = pd.read_parquet("dataset.parquet")
-print(df.shape)  # (N rows, 49 columns)
+print(df.shape)  # (N rows, 59 columns) for a fresh build; the committed real
+                 # capture (dataset_1785032386_1785033870_30s.parquet) is still
+                 # 49 cols -- not yet re-joined onto the current schema
 print(df.columns.tolist())
 # ['ts', 'device', 'site_type', 'vrf', 'entity', 'entity_type',
 #  'if_in_octets', 'if_out_octets', 'if_oper_status',
@@ -618,6 +620,17 @@ python3 generate.py --days 1 --step 30 --scale 3.0 --seed 7
 # change time-of-day coverage.
 # Same --days/--step/--scale/--seed reruns byte-identical; the _seed<N> filename
 # suffix and the Parquet `seed` metadata key appear for any seed but 42.
+```
+
+### Multi-topology run (`--topologies N`, Stream F/N)
+```bash
+cd /root/LAB/synthetic
+python3 generate.py --topologies 12 --hard-neg 200
+# --topologies 0 (default) = legacy single-topology file.
+# --topologies N>=1 = combined run over N topologies, writing stream=F
+# (fault-dense) and stream=N (fault-free + --hard-neg hard negatives per
+# topology) rows plus companion *_events/*_topology_edges/*_paths.parquet
+# (generate.py:1039-1041).
 ```
 
 ### Load synthetic + real Parquet together
@@ -1031,7 +1044,7 @@ cd /root/LAB/airgap && ./verify-airgap.sh
 | `/root/LAB/airgap/pull-and-save.sh` | Air-gap bundler | Update image list for new services |
 | `/root/LAB/airgap/verify-airgap.sh` | Air-gap validator | Change egress filter rules (rare) |
 
-### Dataset Schema (49 columns)
+### Dataset Schema (59 columns)
 
 ```
 ts, device, site_type, vrf, entity, entity_type,
@@ -1048,12 +1061,29 @@ cpu_pct, mem_pct, bgp_msg_rx, bgp_msg_tx, rib_routes, ospf_lsa_count,
 device_temp_c, device_power_watts, device_fan_rpm, device_psu_voltage_v,
 # concurrent-fault supervision (index-aligned lists, element 0 = primary)
 fault_types, severities, scenario_ids, impact_methods, n_concurrent,
-severity_label, fault_type_primary, severity_primary, scenario_id_primary
+severity_label, fault_type_primary, severity_primary, scenario_id_primary,
+sla_binding_vrf,
+# G1/G6/G4: multi-topology + stream sampling
+topology_id, stream, is_hard_negative,
+# G7: root/affected dual-head cascade supervision
+is_root, cascade_parent_id, cascade_depth, cascade_motif_id, affected_entity_count,
+# G8: per-fault reproducibility
+injection_seed
 ```
 
 `ts` is `timestamp[us, tz=UTC]`. `severity` is an ordinal float (0.33/0.66/1.0);
 `severity_label` keeps the string. `time_to_impact_s` is a LIST — one entry per
 concurrent episode — so use `export.precursor_mask(df)` instead of `> 0`.
+
+`topology_id`/`stream` select the leave-one-topology-out split (12 topologies, 10
+train + 2 held out) and Stream F (fault-dense) vs Stream N (fault-free +
+hard-negatives). `is_hard_negative` marks near-miss rows (`is_fault` stays False).
+`is_root`/`cascade_parent_id`/`cascade_depth`/`cascade_motif_id`/
+`affected_entity_count` are root/affected cascade supervision (depth 2-3).
+`injection_seed` reproduces one fault draw in the air gap. Row key is now
+`(stream, topology_id, device, entity, ts)`. Companion files per run:
+`*_events.parquet`, `*_topology_edges.parquet`, `*_paths.parquet`
+(`wg_tunnel`/`ospf_spf_path` only — no MPLS dataplane on this WSL2 host).
 
 **Join key for all telemetry:** `device` (e.g., "ce_branch1", "pe1", "p3")
 

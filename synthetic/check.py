@@ -171,8 +171,12 @@ def main():
     for col, kinds in driven_by.items():
         driven = ifc[ifc.fault_type_primary.isin(kinds)]
         if len(driven):
-            pd_ = driven.groupby("entity")[col].mean()
-            ph = healthy.groupby("entity")[col].mean()
+            # G10: q_backlog_bytes is NULL when the queue is empty (real tc only
+            # reports a non-empty queue). For the louder-under-fault comparison an
+            # absent reading is 0 occupancy -- without fillna every healthy entity
+            # mean is NaN and the delta collapses to NaN.
+            pd_ = driven[col].fillna(0.0).groupby(driven["entity"]).mean()
+            ph = healthy[col].fillna(0.0).groupby(healthy["entity"]).mean()
             common = pd_.index.intersection(ph.index)
             delta = pd_[common] - ph[common]
             assert delta.mean() > 0, \

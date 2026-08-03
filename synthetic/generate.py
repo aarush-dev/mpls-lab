@@ -35,6 +35,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)  # sibling modules: topologies / events / topology_paths
 sys.path.insert(0, os.path.join(HERE, "..", "dataapi"))
 sys.path.insert(0, os.path.join(HERE, "..", "telemetry"))
 sys.path.insert(0, os.path.join(HERE, "..", "faults"))
@@ -199,8 +200,16 @@ def _gen_interfaces(rng, inv, prof, times):
                 # if_out_discards and q_drops stay generated: those two ARE
                 # measured in the lab (tc -s qdisc), so their dynamics are real.
                 d_out += float(rng.poisson(disc_rate * scale * (0.3 + d)))
-                # Queue: shallow standing occupancy that grows nonlinearly with load.
-                backlog = q_base * scale * (0.2 + d ** 2 * 2.2) * rng.uniform(0.7, 1.3)
+                # G10: real `tc -s qdisc` reports q_backlog on only ~0.2% of
+                # interface rows (a momentarily non-empty queue), NULL otherwise,
+                # mean ~190 / max ~924 when it fires. A standing per-row occupancy
+                # (old `q_base*(0.2+d**2*2.2)`) made q_backlog_bytes a PERFECT
+                # synthetic-row tell -- the realism-gap discriminator hit AUC
+                # 0.9999 on it alone. Emit sparse bursts under high load; leave it
+                # null (empty queue) the rest of the time. The congestion fault
+                # path fills it additively (_apply_env) so the precursor survives.
+                backlog = (round(rng.uniform(50.0, 950.0), 1)
+                           if d > 0.6 and rng.random() < 0.01 * scale else None)
                 q_drops += float(rng.poisson(q_drop_rate * scale * max(0.0, d - 0.55) * 6))
                 row = {
                     "ts": _iso(ep), "device": dev, "site_type": st,
@@ -213,7 +222,7 @@ def _gen_interfaces(rng, inv, prof, times):
                     "if_oper_status": 1.0,
                     "if_in_errors": 0.0, "if_out_errors": 0.0,
                     "if_in_discards": 0.0, "if_out_discards": d_out,
-                    "q_backlog_bytes": round(backlog, 1), "q_drops": q_drops,
+                    "q_backlog_bytes": backlog, "q_drops": q_drops,
                 }
                 if optic:
                     # Chassis temp is regenerated on the device rows; here we only
@@ -331,7 +340,38 @@ def _gen_tunnels(rng, inv, prof, times):
     return rows
 
 
-def _inject_faults(rng, df, inv, prof, times, step, scale):
+def _adjacency(inv):
+    """G7: device -> graph-adjacent devices, from the WG tunnel endpoints.
+
+    Cascade propagation is restricted to this set so a cascade only teaches
+    correlations the topology actually supports (an unrestricted cascade
+    transfers nothing). Tunnel names are `deviceA-deviceB`; device names carry no
+    '-', so a single partition splits them. P/PE nodes have no tunnels -> no
+    neighbours -> they simply do not seed multi-hop cascades (fine, most targets
+    are CEs). ponytail: tunnel adjacency only; add PE/P core adjacency from
+    topology-meta if a scenario ever needs to cascade through the core.
+    """
+    adj = {d: set() for d in inv}
+    for d, m in inv.items():
+        for t in m.get("tunnels", []):
+            a, _, b = t.partition("-")
+            other = b if a == d else a
+            if other in adj:
+                adj[d].add(other)
+                adj[other].add(d)
+    return {d: sorted(s) for d, s in adj.items()}
+
+
+# G4: hard-negative mechanisms -- near-miss scenarios that look fault-like but are
+# NOT faults (is_fault stays False; the sampler weights them so the model does not
+# learn "busy => fault"). Ledger fields per the spec: t_impact=None,
+# impact_method='no_impact', severity=None, is_hard_negative=True.
+HARD_NEG_KINDS = ("congestion_recedes", "self_healing_flap", "maintenance_drain",
+                  "legit_surge", "collector_dropout", "no_impact_topo_change")
+
+
+def _inject_faults(rng, df, inv, prof, times, step, scale,
+                   stream="F", topology_id="lab", hard_neg_target=0):
     """Overlay labeled fault episodes; set precursor ramp + label columns.
 
     Semantics (matches export.py / faults README):
@@ -382,6 +422,12 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     # DEFECT 5b: one list of episode dicts per row instead of six scalar arrays.
     # export.attach_labels turns these into the primary scalars + list columns.
     acc = [[] for _ in range(len(df))]
+    # G2/G3: a flat per-episode ledger (incl. hard negatives) for the events and
+    # topology/paths writers. G4: a row mask for near-miss rows (is_fault stays
+    # False on these -- they are negatives).
+    ledger = []
+    hn_mask = np.zeros(len(df), dtype=bool)
+    adj = _adjacency(inv)
     # DEFECT 5a: the clash guard was device-wide, so a device could carry at most
     # one episode ever and `n_concurrent` was 1 everywhere. It is now per-KIND:
     # two netem-style ramps on the same entity still conflict (one impairment
@@ -516,7 +562,10 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         if imask.any():
             p = _prog(imask, t_start, t_impact, t_end, dur, sevmul, p_cross)
             if ft in _CONGEST:
-                qb_arr[imask] = np.round(qb_arr[imask] * (1 + p * 9.0), 1)
+                # G10: additive (not multiplicative) so congestion FILLS the queue
+                # from an empty/NULL baseline -- a congested interface genuinely
+                # reports backlog, up to ~the real max.
+                qb_arr[imask] = np.round(np.nan_to_num(qb_arr[imask]) + p * 900.0, 1)
                 qd_arr[imask] = np.round(qd_arr[imask] + p * 40.0, 1)
                 # DEFECT 2: if_out_discards is the measured one (tc -s qdisc);
                 # if_in_errors/if_in_discards stay at the lab's structural zero.
@@ -535,16 +584,24 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
                 xb_arr[imask] = bi
                 qd_arr[imask] = np.round(qd_arr[imask] + p * 12.0, 1)
 
-    def _place(ft, target, t_start, dur_impact, sev, suffix=""):
+    def _place(ft, target, t_start, dur_impact, sev, suffix="",
+               cascade_depth=0, is_root=True, parent=None, motif=None):
         """Draw one episode's timing, label it and perturb its metrics.
 
-        Returns the episode's `kind` if it landed, else None. Factored out
-        because the cascade branch was a
-        50-line copy of this with `cascade_` prefixes -- two copies of the lead
-        draw is exactly how DEFECT 1 survived in one path and not the other.
+        Returns a result dict {kind, sid, entity, t_start, t_impact, t_end, dicts}
+        if it landed, else None (`dicts` = the acc entries, so the cascade caller
+        can backfill affected_entity_count). Factored out because the cascade
+        branch was a 50-line copy of this with `cascade_` prefixes -- two copies
+        of the lead draw is exactly how DEFECT 1 survived in one path and not the
+        other.
+
+        G7: cascade_depth/is_root/parent/motif tag the episode's place in a
+        cascade motif. G8: injection_seed is drawn per episode from the run's one
+        seeded stream, so a single scenario is reproducible in the air gap.
         """
         sig = sigs[ft]
         kind = sig["kind"]
+        inj_seed = int(rng.integers(0, 1 << 63))  # G8
         sevmul = {"low": 0.5, "medium": 0.8, "high": 1.0}[str(sev)]
         # DEFECT 1a: lead drawn from the per-type prior in faults/leadpriors.py,
         # not from calibrate.py's median-of-a-24-minute-capture (~2 s, which the
@@ -608,14 +665,39 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         sev_ord = None if inert else SEVERITY_ORDINAL[str(sev)]
         sev_lab = None if inert else str(sev)
         tti = np.round(t_impact - epoch[lab], 1)
+        made = []
         for i, tt in zip(np.flatnonzero(lab), tti):
-            acc[i].append({"scenario_id": sid, "fault_type": ft,
-                           "severity": sev_ord,
-                           "severity_label": sev_lab, "rank": rank,
-                           "lead_time_s": round(lead, 1),
-                           "time_to_impact_s": float(tt),
-                           "impact_method": method,
-                           "sla_binding_vrf": binding_vrf})  # DEFECT 2b
+            d = {"scenario_id": sid, "fault_type": ft,
+                 "severity": sev_ord,
+                 "severity_label": sev_lab, "rank": rank,
+                 "lead_time_s": round(lead, 1),
+                 "time_to_impact_s": float(tt),
+                 "impact_method": method,
+                 "sla_binding_vrf": binding_vrf,  # DEFECT 2b
+                 # G7/G8: per-episode provenance the primary carries into the row.
+                 "injection_seed": inj_seed,
+                 "is_root": is_root, "cascade_parent_id": parent,
+                 "cascade_depth": cascade_depth, "cascade_motif_id": motif,
+                 "affected_entity_count": 1}  # backfilled by the cascade caller
+            acc[i].append(d)
+            made.append(d)
+
+        # G2/G3 ledger row (one per episode). entity = the scoped tunnel for a
+        # ramp, else device-wide (None). t_impact recorded as an absolute epoch.
+        scoped_ent = None
+        if kind == "tunnel_ramp" and tmask.any():
+            tents = ent_arr[tmask]
+            scoped_ent = str(tents[0]) if len(tents) else None
+        ledger.append({
+            "scenario_id": sid, "fault_type": ft, "kind": kind,
+            "device": target, "entity": scoped_ent,
+            "t_start": float(t_start), "t_impact": float(t_impact), "t_end": float(t_end),
+            "severity_label": sev_lab, "vrf": tunnel_vrf_set(site_vrfs(inv[target])) or None,
+            "injection_seed": inj_seed, "topology_id": topology_id, "stream": stream,
+            "is_hard_negative": False,
+            "cascade_parent_id": parent, "cascade_depth": cascade_depth,
+            "cascade_motif_id": motif, "is_root": is_root,
+        })
 
         if kind == "tunnel_ramp" and tmask.any():
             _tunnel_ramp(tmask, sig, _prog(tmask, t_start, t_impact, t_end,
@@ -633,29 +715,165 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
             active[kind] = win.copy()
         else:
             act |= win
-        return kind
+        return {"kind": kind, "sid": sid, "entity": scoped_ent,
+                "t_start": t_start, "t_impact": t_impact, "t_end": t_end,
+                "dicts": made}
+
+    def _inject_hard_negatives(target_count):
+        """G4: perturb metrics in a fault-LIKE but non-fault way and flag the rows.
+
+        Six mechanisms (HARD_NEG_KINDS), all parameter variations on primitives
+        that already exist. is_fault stays False (these rows never enter `acc`);
+        the ledger carries t_impact=None / impact_method='no_impact' / severity
+        null, matching the null-where-ignored convention. Perturbations are
+        chosen to stay monotonic-safe (positive forward counter bumps; the rest
+        touch non-counter series) so the counter-monotonicity gate cannot trip.
+        """
+        made, guard = 0, 0
+        while made < target_count and guard < target_count * 6:
+            guard += 1
+            mech = HARD_NEG_KINDS[int(rng.integers(0, len(HARD_NEG_KINDS)))]
+            dev = str(rng.choice(ce_devs))
+            t0 = float(rng.choice(times_arr[: max(1, len(times_arr) - 8)]))
+            dur = float(rng.uniform(2, 8)) * step
+            t1 = t0 + dur
+            win = (dev_arr == dev) & (epoch >= t0) & (epoch <= t1)
+            if not win.any():
+                continue
+            entity = None
+            if mech == "congestion_recedes":
+                tmask = win & (etype == "tunnel")
+                if not tmask.any():
+                    continue
+                theta_lat, _ = leadpriors.strictest_sla(site_vrfs(inv[dev]))
+                h = float(np.nanmean(lat_arr[tmask]))
+                epa = epoch[tmask].astype(float)
+                tri = np.clip(1.0 - np.abs((epa - (t0 + dur / 2)) / (dur / 2)), 0, 1)
+                # peak stays at 70% of the headroom below the SLA -- never crosses
+                lat_arr[tmask] = np.round(lat_arr[tmask] + 0.7 * max(0.0, theta_lat - h) * tri, 4)
+                hn_mask[tmask] = True
+                ents = ent_arr[tmask]
+                entity = str(ents[0]) if len(ents) else None
+            elif mech in ("self_healing_flap", "no_impact_topo_change"):
+                imask = win & (etype == "interface") & (ent_arr != "lo")
+                ents = sorted(set(ent_arr[imask].tolist()))
+                if not ents:
+                    continue
+                pick = str(rng.choice(ents))
+                fm = imask & (ent_arr == pick)
+                if mech == "self_healing_flap":  # hold < OSPF dead-interval: <=2 buckets
+                    order = np.flatnonzero(fm)
+                    fm = np.zeros_like(fm)
+                    fm[order[:2]] = True
+                ops_arr[fm] = 0.0
+                hn_mask[fm] = True
+                entity = pick
+            elif mech == "legit_surge":  # diurnal-like surge, NO injector
+                # _counter_adjust needs the FULL entity timeline (like
+                # _iface_churn): a window-only mask leaves the extra bytes
+                # uncarried and the cumulative counter steps backward at window
+                # end -- which trips the monotonicity gate.
+                full = (dev_arr == dev) & (etype == "interface")
+                if not full.any():
+                    continue
+                epf = epoch[full].astype(float)
+                tri = np.clip(1.0 - np.abs((epf - (t0 + dur / 2)) / (dur / 2)), 0, 1)
+                adj = np.where((epf >= t0) & (epf <= t1), tri * 0.5, 0.0)
+                _counter_adjust(iin_arr, full, adj)
+                hn_mask[full & (epoch >= t0) & (epoch <= t1)] = True
+            elif mech == "maintenance_drain":  # OspfCostShift: max-metric, no impact
+                dmask = win & (etype == "device")
+                if not dmask.any():
+                    continue
+                cpu_arr[dmask] = np.round(cpu_arr[dmask] * 1.15, 3)
+                hn_mask[dmask] = True
+            elif mech == "collector_dropout":  # snmpd/telegraf paused -> gaps
+                dmask = win & (etype == "device")
+                if not dmask.any():
+                    continue
+                for a in (cpu_arr, temp_arr, pow_arr, fan_arr):
+                    a[dmask] = np.nan
+                hn_mask[dmask] = True
+            ledger.append({
+                "scenario_id": f"hn-{mech}-{dev}-{_sid_hex(rng)}",
+                "fault_type": mech, "kind": "hard_negative",
+                "device": dev, "entity": entity,
+                "t_start": t0, "t_impact": None, "t_end": t1,
+                "severity_label": None,
+                "vrf": tunnel_vrf_set(site_vrfs(inv[dev])) or None,
+                "injection_seed": int(rng.integers(0, 1 << 63)),
+                "topology_id": topology_id, "stream": stream,
+                "is_hard_negative": True, "impact_method": "no_impact",
+                "cascade_parent_id": None, "cascade_depth": None,
+                "cascade_motif_id": None, "is_root": False,
+            })
+            made += 1
+        return made
 
     ftypes = list(sigs)
-    targets = list(inv.keys())
     times_arr = np.array(times, dtype=np.int64)
     sevs = ["low", "medium", "high"]
-    for _ in range(n_ep):
+    motif_n = [0]
+
+    # G6: Stream N carries NO campaign faults -- only traffic + hard negatives.
+    for _ in range(n_ep if stream == "F" else 0):
         ft = rng.choice(ftypes)
         target = rng.choice(pe_devs if ft in ("bgp_flap", "node_failure") and pe_devs else ce_devs)
         t_start = float(rng.choice(times_arr[: max(1, len(times_arr) - 1)]))
-        kind = _place(ft, target, t_start, float(rng.uniform(60, 240)),
+        root = _place(ft, target, t_start, float(rng.uniform(60, 240)),
                       rng.choice(sevs, p=[0.3, 0.4, 0.3]))
-        # Cascade: 22% of episodes drag a second fault in. DEFECT 5a -- it lands
-        # on the SAME device with a DIFFERENT kind, which is both the realistic
-        # case (a congesting uplink degrades that site's tunnels) and the only
-        # way the dataset gets within-device concurrency for the consumer's
-        # multi-label head. A different kind cannot collide on the per-kind lock.
-        if kind and rng.random() < 0.22:
-            others = [f for f in ftypes if sigs[f]["kind"] != kind]
-            if others:
-                _place(rng.choice(others), target, t_start + 2.0 * step,
-                       float(rng.uniform(60, 240)),
-                       rng.choice(sevs, p=[0.3, 0.4, 0.3]), suffix="-casc")
+        if not root:
+            continue
+        # G7: 20% of episodes seed a cascade. Now DEPTH 2-3, propagating only to
+        # graph-ADJACENT devices (an unrestricted cascade teaches a correlation
+        # the topology does not support and will not transfer). Each child is a
+        # different device, so same-kind never collides on the per-kind lock.
+        if rng.random() < 0.20:
+            motif = f"casc-{topology_id}-{motif_n[0]}"
+            motif_n[0] += 1
+            motif_dicts = list(root["dicts"])
+            for d in root["dicts"]:  # retag the root into the motif
+                d["cascade_motif_id"] = motif
+                d["cascade_depth"] = 0
+            devices_hit = {target}
+            cur_dev, cur_sid = target, root["sid"]
+            root_kind = root["kind"]
+            for depth in range(1, int(rng.integers(2, 4)) + 1):  # 2 or 3 hops
+                # depth 1 stays on the SAME device with a DIFFERENT kind -- that is
+                # the within-device concurrency the multi-label head needs (DEFECT
+                # 5a) and must not regress. depth >=2 hops to a graph-ADJACENT
+                # device (G7): the cross-device propagation root/affected wants.
+                if depth == 1:
+                    child_dev = cur_dev
+                    others = [f for f in ftypes if sigs[f]["kind"] != root_kind]
+                    if not others:
+                        break
+                    child_ft = str(rng.choice(others))
+                else:
+                    neigh = [n for n in adj.get(cur_dev, []) if n in inv]
+                    if not neigh:
+                        break
+                    child_dev = str(rng.choice(neigh))
+                    child_ft = str(rng.choice(ftypes))
+                child = _place(child_ft, child_dev,
+                               t_start + 2.0 * step * depth,
+                               float(rng.uniform(60, 240)),
+                               rng.choice(sevs, p=[0.3, 0.4, 0.3]),
+                               suffix=f"-casc{depth}", cascade_depth=depth,
+                               is_root=False, parent=cur_sid, motif=motif)
+                if not child:
+                    continue
+                motif_dicts += child["dicts"]
+                devices_hit.add(child_dev)
+                cur_dev, cur_sid = child_dev, child["sid"]
+            aec = len(devices_hit)  # affected devices in the motif
+            for d in motif_dicts:
+                d["affected_entity_count"] = aec
+
+    if hard_neg_target:
+        _inject_hard_negatives(hard_neg_target)
+
+    df["is_hard_negative"] = hn_mask  # G4
 
     # write arrays back to df once
     df["tunnel_latency_ms"] = lat_arr
@@ -680,15 +898,18 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
         print(f"WARN: lead floor ({leadpriors.FLOOR_BUCKETS} buckets) fired on "
               f"{100.0 * floored_n[0] / n_ep:.1f}% of episodes -- check "
               f"faults/leadpriors.py against --step {step}", file=sys.stderr)
-    return attach_labels(df, acc)
+    return attach_labels(df, acc), ledger
 
 
-def generate(days, step, scale, profile_path, seed=42):
-    with open(profile_path) as fh:
-        prof = json.load(fh)
-    inv = prof["inventory"]
+def _build_run(prof, inv, days, step, scale, seed, stream, topology_id,
+               hard_neg_target):
+    """One (topology, stream, seed) slice: build rows, inject, finalize.
+
+    Returns (df, ledger, (t0, t1)). No write -- generate() writes one file,
+    generate_multi() concatenates many. Splitting the write out is what lets the
+    events/paths writers see the full multi-topology ledger at once.
+    """
     rng = np.random.default_rng(seed)
-
     start = datetime(2026, 6, 15, tzinfo=timezone.utc).timestamp()  # a Monday
     n = int(days * 86400 / step)
     times = [int(start + k * step) for k in range(n)]
@@ -697,29 +918,112 @@ def generate(days, step, scale, profile_path, seed=42):
             + _gen_tunnels(rng, inv, prof, times)
             + _gen_devices(rng, inv, prof, times, step))
     df = pd.DataFrame(rows)
-
-    df = _inject_faults(rng, df, inv, prof, times, step, scale)
-
-    # exact canonical order + dtypes, from the same finalizer the real export
-    # uses (DEFECT 6a/6b live in there: ordinal severity, timestamp ts)
+    df, ledger = _inject_faults(rng, df, inv, prof, times, step, scale,
+                                stream=stream, topology_id=topology_id,
+                                hard_neg_target=hard_neg_target)
+    df["topology_id"] = topology_id  # G1
+    df["stream"] = stream            # G6
+    # DEFECT 6a/6b live in finalize_schema (ordinal severity, timestamp ts).
     df = finalize_schema(df)
+    return df, ledger, (times[0], times[-1] + step)
 
-    # ponytail: seed omitted from the name at 42 so existing filenames stay valid
-    sfx = "" if seed == 42 else f"_seed{seed}"
-    fname = f"synthetic_{int(start)}_d{days}_s{step}_x{scale}{sfx}.parquet"
-    path = os.path.join(OUTDIR, fname)
-    # Mark it synthetic IN THE FILE, not just in the filename: a renamed or
-    # re-exported copy must still be distinguishable from a real capture.
+
+def _write_synth(df, path, prof, seed, extra_meta=None):
+    """Write df to Parquet with the synthetic-provenance file KV metadata."""
     tbl = pa.Table.from_pandas(df, preserve_index=False)
-    tbl = tbl.replace_schema_metadata({
+    meta = {
         **(tbl.schema.metadata or {}),
         b"synthetic": b"true",
         b"generator": b"synthetic/generate.py",
         b"seed": str(seed).encode(),
         b"calibrated_from": str(prof.get("source_parquet", "")).encode(),
-    })
+    }
+    for k, v in (extra_meta or {}).items():
+        meta[k.encode() if isinstance(k, str) else k] = str(v).encode()
+    tbl = tbl.replace_schema_metadata(meta)
     pq.write_table(tbl, path)
+    return path
+
+
+def generate(days, step, scale, profile_path, seed=42):
+    """Single-topology (base lab) Stream-F run -- the original entry point."""
+    with open(profile_path) as fh:
+        prof = json.load(fh)
+    df, _ledger, _span = _build_run(prof, prof["inventory"], days, step, scale,
+                                    seed, "F", "lab", hard_neg_target=0)
+    sfx = "" if seed == 42 else f"_seed{seed}"  # 42 keeps existing filenames valid
+    path = os.path.join(
+        OUTDIR, f"synthetic_{int(_span[0])}_d{days}_s{step}_x{scale}{sfx}.parquet")
+    _write_synth(df, path, prof, seed)
     return path, df
+
+
+def _paths_meta(t):
+    """Adapt topologies.py's meta to the shape topology_paths.build_edges wants:
+    pops as {pop_name: [p_router,...]}, srlgs/inter_pop_links carrying the real
+    (dev, iface) endpoints so edge flaps land on the right interfaces. The SRLG
+    groups already hold the inter-POP link interfaces, so they double as the
+    inter-POP adjacency source (consecutive-pair links per group)."""
+    m, inv = t["meta"], t["inventory"]
+    ppp, npop = m["p_per_pop"], m["pops"]
+    p_routers = sorted((d for d in inv if d.startswith("p") and not d.startswith("pe")),
+                       key=lambda d: int(d[1:]))
+    pops = {f"pop{i + 1}": p_routers[i * ppp:(i + 1) * ppp] for i in range(npop)}
+    grps = m.get("srlgs", [])
+    srlgs = {f"srlg{i}": [s.split(":", 1) for s in g] for i, g in enumerate(grps)}
+    inter = [{"links": [s.split(":", 1) for s in g], "srlg": f"srlg{i}"}
+             for i, g in enumerate(grps)]
+    rr = t["knobs"].get("rr_nodes") if t["knobs"].get("route_reflector") else None
+    return {**m, "pops": pops, "srlgs": srlgs, "inter_pop_links": inter,
+            "route_reflectors": rr}
+
+
+def generate_multi(days, step, scale, profile_path, seed, n_topologies,
+                   hard_neg_per_topo, out_tag="multi"):
+    """G1/G6/G2/G3 driver: fan the generator across N topologies x {F, N} and
+    write one combined main Parquet + events + topology_edges + paths.
+
+    Stream F carries campaign faults + cascades; Stream N carries hard negatives
+    only (fault-free). Each topology gets an independent seed offset so episodes
+    stay disjoint across topologies. Held-out topologies ARE generated here (the
+    dataset marks them via topology_id) -- the training split drops them by id.
+    """
+    import topologies
+    import events
+    import topology_paths
+    with open(profile_path) as fh:
+        prof = json.load(fh)
+
+    topos = topologies.load_topologies()[:n_topologies]
+    dfs, full_ledger, topo_ledgers, span = [], [], [], None
+    for i, t in enumerate(topos):
+        tid, inv, meta = t["topology_id"], t["inventory"], _paths_meta(t)
+        # Stream F: faults. Stream N: no campaign, hard negatives only.
+        dfF, ledF, span = _build_run(prof, inv, days, step, scale, seed + i,
+                                     "F", tid, hard_neg_target=hard_neg_per_topo // 2)
+        dfN, ledN, span = _build_run(prof, inv, days, step, scale,
+                                     seed + 1000 + i, "N", tid,
+                                     hard_neg_target=hard_neg_per_topo)
+        dfs += [dfF, dfN]
+        led = ledF + ledN
+        full_ledger += led
+        topo_ledgers.append((tid, inv, meta, led))
+
+    df = pd.concat(dfs, ignore_index=True)
+    base = f"synthetic_{out_tag}_d{days}_s{step}_x{scale}_n{n_topologies}"
+    main_path = os.path.join(OUTDIR, base + ".parquet")
+    _write_synth(df, main_path, prof, seed,
+                 extra_meta={"topologies": n_topologies,
+                             "held_out": ",".join(t["topology_id"] for t in topos
+                                                  if t.get("held_out"))})
+    ev_path = events.write_events(full_ledger,
+                                  os.path.join(OUTDIR, base + "_events.parquet"),
+                                  rng=np.random.default_rng(seed))
+    edges_path, paths_path = topology_paths.write_topology_and_paths(
+        topo_ledgers, os.path.join(OUTDIR, base + "_topology_edges.parquet"),
+        os.path.join(OUTDIR, base + "_paths.parquet"), span[0], span[1])
+    return {"main": main_path, "events": ev_path, "edges": edges_path,
+            "paths": paths_path, "df": df}
 
 
 def main():
@@ -731,8 +1035,26 @@ def main():
     ap.add_argument("--profile", default=os.path.join(HERE, "profile.json"))
     ap.add_argument("--seed", type=int, default=42,
                     help="RNG seed; change it for an independent holdout sample")
+    # G1/G6/G2/G3: multi-topology + F/N-stream + events/edges/paths in one run.
+    ap.add_argument("--topologies", type=int, default=0,
+                    help="0 = legacy single-topology file; >=1 = combined multi-topology run")
+    ap.add_argument("--hard-neg", type=int, default=200,
+                    help="hard negatives per topology's Stream N (G4)")
     args = ap.parse_args()
     assert os.path.exists(args.profile), "profile.json missing -- run calibrate.py first"
+
+    if args.topologies:
+        out = generate_multi(args.days, args.step, args.scale, args.profile,
+                             args.seed, args.topologies, args.hard_neg)
+        df = out["df"]
+        print(f"wrote {out['main']}\n  + {out['events']}\n  + {out['edges']}"
+              f"\n  + {out['paths']}")
+        print(f"rows={len(df)} cols={len(df.columns)} topologies={df.topology_id.nunique()} "
+              f"streams={sorted(df.stream.dropna().unique())} "
+              f"fault_rows={int(df.is_fault.sum())} "
+              f"hard_neg_rows={int(df.is_hard_negative.sum())} "
+              f"max_concurrent={int(df.n_concurrent.max())}")
+        return
 
     path, df = generate(args.days, args.step, args.scale, args.profile, args.seed)
     print(f"wrote {path}")

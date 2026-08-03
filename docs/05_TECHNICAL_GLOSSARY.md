@@ -301,7 +301,19 @@ Giving an LLM access to a local knowledge base (documents, runbooks, topology di
 Completely isolated from the internet. An air-gapped system cannot make outbound requests (no DNS, no cloud APIs, no data exfiltration). In this lab, air-gap is a hard requirement (ISRO BAH 2026 grading: 20% of score). All docker images are pre-downloaded and saved offline. At runtime, the topology runs with `imagePullPolicy: Never` so it can't even try to fetch images. The verify-airgap script (running during deployment) proves zero outbound egress by capturing network traffic and checking for external IPs. This is why the RAG corpus and all training data are local.
 
 **Parquet**  
-An efficient, columnar file format for storing tabular data. Unlike CSV (row-oriented, verbose), Parquet compresses well and supports fast column-specific queries (e.g., "fetch all rows where is_fault=True and vrf=CORP" without scanning all columns). In this lab, the data API exports labeled time-series as Parquet files (one row per (time, device, entity, entity_type, ts-bucket) tuple, 49 columns). Every file the **synthetic** generator writes also carries mandatory file-level key/value metadata — `synthetic=true`, `generator`, `calibrated_from` (`synthetic/generate.py:657-659`) — and `synthetic/check.py` gate 0 refuses any file lacking it, so a synthetic file can never be silently mistaken for a live-lab export. Parquet is the standard format for ML training datasets; scikit-learn, pandas, and PyTorch can all read it directly.
+An efficient, columnar file format for storing tabular data. Unlike CSV (row-oriented, verbose), Parquet compresses well and supports fast column-specific queries (e.g., "fetch all rows where is_fault=True and vrf=CORP" without scanning all columns). In this lab, the data API exports labeled time-series as Parquet files (one row per (stream, topology_id, device, entity, ts) tuple, 59 columns). Every file the **synthetic** generator writes also carries mandatory file-level key/value metadata — `synthetic=true`, `generator`, `calibrated_from` (`synthetic/generate.py:657-659`) — and `synthetic/check.py` gate 0 refuses any file lacking it, so a synthetic file can never be silently mistaken for a live-lab export. Parquet is the standard format for ML training datasets; scikit-learn, pandas, and PyTorch can all read it directly.
+
+**Leave-one-topology-out**  
+An evaluation split that trains on 10 generated topologies and holds out 2 entirely, so a model is scored on network shapes it never saw during training rather than just unseen time windows. Selected via the `topology_id` column and `--topologies N` on `synthetic/generate.py`.
+
+**Stream F / Stream N**  
+The two row populations `synthetic/generate.py` writes per topology, tagged by the `stream` column: F is fault-dense, N is fault-free plus hard negatives. A sampler composes the two to control fault prevalence in a training batch.
+
+**Hard negative**  
+A synthetic row engineered to look like a fault (elevated metrics, busy-looking traffic) without one — `is_hard_negative=True`, `is_fault` stays `False`. Prevents a model from learning "busy implies fault."
+
+**Cascade supervision**  
+Root/affected dual-head labels (`is_root`, `cascade_parent_id`, `cascade_depth`, `cascade_motif_id`, `affected_entity_count`) marking which entity caused a fault versus which entities were downstream-affected by it, propagated 2-3 hops across graph-adjacent entities.
 
 ---
 
@@ -330,7 +342,7 @@ All signals are tagged with the `device` label (e.g., `sdwan_tunnel_latency_ms{d
 3. Fetch flows from nfacctd (aggregated bytes/packets per source/destination/port/VRF).
 4. Fetch labels from `labels.jsonl` (injected faults with t_start/t_impact/lead_time).
 5. Normalize all to a common schema (one row per (time, device, signal)) and join on device + time.
-6. Export as labeled Parquet: 49 columns (time, device, site_type, vrf, interface, traffic counters, tunnel metrics, interface error/discard counters, queue depth, transceiver DOM readings, device CPU/memory, routing-table and LSDB size, chassis temperature/power/fan/PSU, flow stats, is_fault, fault_type, lead_time_s, severity, scenario_id).
+6. Export as labeled Parquet: 59 columns (time, device, site_type, vrf, interface, traffic counters, tunnel metrics, interface error/discard counters, queue depth, transceiver DOM readings, device CPU/memory, routing-table and LSDB size, chassis temperature/power/fan/PSU, flow stats, is_fault, fault_type, lead_time_s, severity, scenario_id, topology_id, stream, is_hard_negative, cascade fields, injection_seed).
 
 **ML training** uses this Parquet: each row is a 30-second time bucket; features are metrics (latency, loss, jitter, traffic), events (adjacency changes), flows (top talkers); label is `is_fault` or `fault_type` or `lead_time_s`. Models can be:
 - **Supervised anomaly detection:** train on labeled faults to recognize fault signatures (random forest, XGBoost, neural nets).

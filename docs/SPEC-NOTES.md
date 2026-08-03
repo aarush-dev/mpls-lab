@@ -1195,3 +1195,121 @@ four findings (three filed, one fixed). Harness + record: `copilot/e2e/harness.p
   (`[metrics:3-5]`, unicode hyphen) the gate rejects as fabricated; **#45** a harmony
   `<|channel|>commentary` token leaks into a tool-call name (registry safely rejects it — no crash
    — but a step is wasted).
+
+## Dataset closing-pass confirmations (2026-08-03)
+
+### G11 — MPLS dataplane: unavailable on this host, decision confirmed
+
+MPLS dataplane unavailable on this WSL2 host (no `mpls_router`/`mpls_iptunnel` module, but
+`platform_labels` is non-zero — see below) → dataset paths use the WireGuard/OSPF abstraction;
+`paths.parquet` `path_type` ∈ {`wg_tunnel`, `ospf_spf_path`}, no `ldp_lsp`.
+
+Evidence:
+- `lsmod | grep -i mpls` → empty output (no kernel module loaded).
+- `uname -r` → `6.18.33.1-microsoft-standard-WSL2`.
+- `modprobe mpls_router 2>&1` and `modprobe mpls_iptunnel 2>&1` → both silent/no-op (module not
+  found on this kernel, no error surfaced either — WSL2 kernel is prebuilt, no loadable module).
+- `docker exec clab-sdwan_mpls_noc-p2 sysctl net.mpls.platform_labels` → `net.mpls.platform_labels
+  = 1048575` (LDP/vtysh sets this label range in-container regardless of kernel module presence).
+- `docker exec clab-sdwan_mpls_noc-p2 ip -M route` → returns ~120 real MPLS label routes (swap/pop
+  entries, protocol 193 = FRR/LDP), proving FRR's LDP control plane populates the label table. This
+  is the **control-plane** MPLS label FIB (per-namespace, kernel-independent); it does not prove a
+  working **forwarding** dataplane — `mpls_iptunnel`/`mpls_router` modules stay absent, so actual
+  label-switched packet forwarding through this WSL2 kernel is unverified. Decision above stands:
+  dataset paths do not claim `ldp_lsp`.
+
+### G9 — controller /metrics scrape cadence: 30s, not 10s
+
+Controller's own Prometheus `/metrics` job is scraped at **30s**, same as SNMP — NOT 10s.
+`telemetry/telegraf/telegraf.conf:7-10` sets the only interval in the file, at `[agent]` (global
+default), no per-plugin override:
+```
+[agent]
+  interval = "30s"
+  flush_interval = "30s"
+```
+The controller job, `telemetry/telegraf/telegraf.conf` `[[inputs.prometheus]]` block (`urls =
+["http://172.20.20.56:9362/metrics"]`, `metric_version = 2`), carries no `interval =` key of its
+own, so it inherits the 30s global. One-line fix (not applied): add `interval = "10s"` inside that
+`[[inputs.prometheus]]` block.
+
+### G5 — 7h de-bias capture: has not run
+
+No ≥7h real capture exists; `profile.json` is still calibrated off the same short window
+DATASETS.md already documents. `synthetic/profile.json` (`source_parquet`,
+`source_rows`, `step_s`): `source_parquet = dataset_1785032386_1785033870_30s.parquet`,
+`source_rows = 49844`, `step_s = 30` → span = `1785033870 - 1785032386` = 1484s = **24.7 min**.
+The largest real-capture parquet on disk, `dataapi/datasets/dataset_1782052929_1782060129_30s.parquet`
+(645KB), spans `1782060129 - 1782052929` = 7200s = **2h** — still short of 7h, and it is not the
+file `profile.json` was calibrated from anyway. `ps aux | grep -iE 'orchestrator|export.py|campaign'`
+→ no matches, nothing capturing now. **G5 needs action**: no 7h capture has been run or started.
+
+### G10 realism-gap discriminator
+
+HistGradientBoostingClassifier trained to tell real live-lab rows from synthetic (base topology
+`topo_p6_pe12_r2_base`, stream F), 28 numeric features + one-hot `entity_type`/`site_type`, classes
+balanced at 131,616 each, NaN left native (not imputed). `synthetic/discriminator.py`; permutation
+importance on a 25% held-out split (HistGBT has no native importances).
+
+**AUC = 0.9999 ± 0.0000** (5-fold). Tier: **>0.95 — will NOT transfer.** Synthetic is trivially
+distinguishable; a model trained on it will not generalize to the real lab.
+
+Top-5 (AUC drop when shuffled): `q_backlog_bytes` +0.247, `entity_type_interface` +0.047,
+`if_in_octets` +0.004, `tunnel_jitter_ms` +0.003, `mem_pct` +0.002. `q_backlog_bytes` alone
+explains the split: real emits it on only 3,094 rows (mean 5.4, mostly zero, max 924), synthetic on
+97,344 rows (mean 214, min 9, never zero) — different NaN/coverage pattern **and** magnitude.
+
+**Fix next (top features are the fix list):** correct `q_backlog_bytes` generation — match real's
+sparse per-entity coverage (most rows NaN/zero) and its low idle magnitude, not a dense 200-byte
+backlog; then re-check `entity_type` pillar-coverage alignment. The top-5 are the priority order.
+
+### G9 fix — APPLIED
+
+The one-line fix above is now in `telemetry/telegraf/telegraf.conf`: `interval = "10s"`
+added inside the controller `[[inputs.prometheus]]` block. Takes effect on the next
+telegraf reload (`docker restart` of the telegraf container); SNMP + ping cadences
+unchanged.
+
+### G10 follow-up — one genuine artifact fixed; residual gap is calibration-bound (needs G5)
+
+`q_backlog_bytes` was a real synthetic artifact: the generator emitted a *standing*
+per-row occupancy (mean ~214) while real `tc -s qdisc` reports a queue only when
+non-empty (~0.2% of rows). Fixed in `synthetic/generate.py`: q_backlog is now NULL
+when the queue is empty and fires sparse bursts under high load (~1.3% coverage,
+mean ~183, matching real); the congestion fault fills it *additively* so the
+precursor survives an empty baseline. `synthetic/check.py`'s louder-under-fault gate
+updated to treat NULL as 0 occupancy.
+
+After the fix, `q_backlog_bytes` drops out of the top-5 — but **AUC stays 0.9999**,
+now dominated by `q_drops`, then `if_in_octets`, `bgp_msg_rx`, `rib_routes`. Direct
+distribution comparison shows these are **real-capture deficiencies, not synthetic
+defects**: real `bgp_msg_rx` is populated on 17% of device rows, `rib_routes` 51%,
+`q_drops` 2% — sparse because the reference is a 24-min window with partial telemetry
+(VPNv4 dataplane down) and `_src: "default"` calibration; `if_in_octets` differs ~60×
+because real carries large lifetime counter offsets. Hand-tuning synthetic to match a
+broken reference would *degrade* realism. **The correct fix is G5**: run the ≥7h clean
+capture, recalibrate `profile.json`, then re-run G10. The discriminator is doing its
+job — it is flagging that the calibration source, not the generator, is the bottleneck.
+
+### Episode-rate re-measurement (supersedes research/14's 31.8/type/day)
+
+Measured on a fresh single-topology Stream-F slice (0.25 sim-day, base inventory):
+- **scale 1.0 → 12.2 episodes/type/sim-day** (confirms the post-fix ~11.4, ~2.8× below
+  the old 31.8; the lead/ramp/concurrency-lock fixes genuinely lowered density).
+- **scale 3.0 → 36.6 episodes/type/sim-day.**
+
+Simulated-day target for 800/type (lever (a) density + lever (c) topology count):
+- one topology @ scale 1.0: **~66 sim-days** (the old 25-day figure is wrong).
+- **@ scale 3.0 across the 10-topology training pool: ~2.2 sim-days/topology** for
+  ≥800/type aggregate — round to **3 sim-days/topology/stream** for margin.
+- Full-scale estimate: 10 train + 2 held-out topologies × {F, N} × 3 sim-days at
+  scale 3.0 ≈ 150–200M rows total. Do NOT reuse the 25-day figure.
+
+### Schema FROZEN at 59 columns
+
+With G1–G9 landed, the canonical schema (`dataapi/export.py:COLUMNS`, len 59) is
+frozen. New row key: `(stream, topology_id, device, entity, ts)` — Streams F and N
+share timestamps (independent realities of one topology). Companion tables
+(`*_events`, `*_topology_edges`, `*_paths`) versioned alongside the main Parquet.
+Nothing changes without an explicit regeneration decision (air-gap transfer makes
+schema churn expensive).

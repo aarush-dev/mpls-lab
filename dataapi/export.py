@@ -67,6 +67,20 @@ COLUMNS = [
     # DEFECT 2b: which VRF's SLA governed t_impact on a multi-VRF tunnel ramp,
     # index-aligned with fault_types (strictest VRF present; null off ramp_derived).
     "sla_binding_vrf",
+    # --- G1: which topology this row came from (leave-one-topology-out needs it) ---
+    "topology_id",
+    # --- G6: Stream F (fault-dense) vs Stream N (fault-free + hard-negatives) ---
+    "stream",
+    # --- G4: near-miss rows -- look like a fault, are not one. is_fault stays
+    # False; t_impact/severity null; the sampler weights these so the model does
+    # not learn "busy => fault". ---
+    "is_hard_negative",
+    # --- G7: root/affected dual-head supervision (what to fix, not just what hurts) ---
+    "is_root", "cascade_parent_id", "cascade_depth", "cascade_motif_id",
+    "affected_entity_count",
+    # --- G8: per-fault RNG draw -- the only way to reproduce one scenario in an
+    # air-gap (nothing can be re-pulled). ---
+    "injection_seed",
 ]
 
 # DEFECT 6a: ordinal severity. A magnitude the loss function can use, with the
@@ -322,15 +336,23 @@ def attach_labels(df, acc):
     cols = {c: [] for c in ("is_fault", "scenario_id", "fault_type", "severity",
                             "severity_label", "lead_time_s", "time_to_impact_s",
                             "fault_types", "severities", "scenario_ids",
-                            "impact_methods", "sla_binding_vrf", "n_concurrent")}
+                            "impact_methods", "sla_binding_vrf", "n_concurrent",
+                            # G7/G8 primary-episode scalars (None on the real path,
+                            # which never sets them -- .get() below keeps it robust)
+                            "is_root", "cascade_parent_id", "cascade_depth",
+                            "cascade_motif_id", "affected_entity_count",
+                            "injection_seed")}
     for eps in acc:
         if not eps:
             cols["is_fault"].append(False)
             for c in ("scenario_id", "fault_type", "severity", "severity_label",
                       "lead_time_s", "time_to_impact_s", "fault_types", "severities",
-                      "scenario_ids", "impact_methods", "sla_binding_vrf"):
+                      "scenario_ids", "impact_methods", "sla_binding_vrf",
+                      "cascade_parent_id", "cascade_depth", "cascade_motif_id",
+                      "affected_entity_count", "injection_seed"):
                 cols[c].append(None)
             cols["n_concurrent"].append(0)
+            cols["is_root"].append(False)
             continue
         eps = sorted(eps, key=lambda e: -e["rank"])
         p = eps[0]
@@ -348,6 +370,15 @@ def attach_labels(df, acc):
         # DEFECT 2b: index-aligned with fault_types; None for non-ramp episodes.
         cols["sla_binding_vrf"].append([e.get("sla_binding_vrf") for e in eps])
         cols["n_concurrent"].append(len(eps))
+        # G7/G8: primary episode carries the cascade/root/seed scalars. A plain
+        # (non-cascade) fault is its own root at depth 0. .get() defaults keep the
+        # real export path (which sets none of these) valid.
+        cols["is_root"].append(bool(p.get("is_root", True)))
+        cols["cascade_parent_id"].append(p.get("cascade_parent_id"))
+        cols["cascade_depth"].append(p.get("cascade_depth"))
+        cols["cascade_motif_id"].append(p.get("cascade_motif_id"))
+        cols["affected_entity_count"].append(p.get("affected_entity_count"))
+        cols["injection_seed"].append(p.get("injection_seed"))
     for c, v in cols.items():
         df[c] = v
     df["fault_type_primary"] = df["fault_type"]
@@ -396,10 +427,22 @@ def finalize_schema(df):
     df["is_fault"] = df["is_fault"].fillna(False).astype(bool)
     df["n_concurrent"] = pd.to_numeric(df["n_concurrent"], errors="coerce") \
         .fillna(0).astype("int8")
+    # G4/G7: booleans default False; G7 counters/depth are nullable ints (null off
+    # a cascade / on non-fault rows); G8 seed is a nullable int64.
+    df["is_hard_negative"] = df["is_hard_negative"].fillna(False).astype(bool)
+    df["is_root"] = df["is_root"].fillna(False).astype(bool)
+    df["cascade_depth"] = pd.to_numeric(df["cascade_depth"], errors="coerce").astype("Int8")
+    df["affected_entity_count"] = pd.to_numeric(
+        df["affected_entity_count"], errors="coerce").astype("Int16")
+    df["injection_seed"] = pd.to_numeric(
+        df["injection_seed"], errors="coerce").astype("Int64")
     for c in _FLOAT_COLS:
         df[c] = pd.to_numeric(df[c], errors="coerce").astype("float64")
     for c in ("scenario_id", "fault_type", "severity_label", "vrf",
-              "fault_type_primary", "scenario_id_primary") + _LIST_COLS:
+              "fault_type_primary", "scenario_id_primary",
+              # G1/G6/G7 string columns
+              "topology_id", "stream", "cascade_parent_id", "cascade_motif_id"
+              ) + _LIST_COLS:
         df[c] = df[c].astype("object")
     # DEFECT 2a: one Arrow type for vrf -- list<string> | None on every row.
     df["vrf"] = df["vrf"].map(_as_vrf_list)

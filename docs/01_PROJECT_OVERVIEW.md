@@ -48,7 +48,7 @@ Six major components were built:
 
 **A FastAPI data API.** A local HTTP server at port 8000 gives the ML team a clean, versioned interface to all of the above. They can query raw metrics, retrieve log events, download flow records, read fault labels, inspect the network topology as a graph, and — most importantly — download a pre-joined, labeled Parquet file that combines all four signal types into a single DataFrame ready for model training.
 
-**A Kafka streaming layer for two independent consumers.** The Parquet path above is a batch interface — it answers "give me the last hour." The streaming layer answers "tell me as it happens." One producer (`streaming/bridge.py`) reads the already-running sources and publishes to four topics: `noc.metrics` (the same 49-column rows, labels stripped), `noc.events` (discrete routing events at exact timestamps, not 30-second buckets), `noc.faults` (ground-truth labels) and `noc.topology` (the graph plus the controller's live path choices). Two consumer *groups* then read it independently — the predictive-analysis pipeline replays from the earliest offset to build fixed-length feature windows, while the copilot pipeline starts at the latest offset and maintains a rolling natural-language incident brief. Because Kafka tracks committed offsets per group, each gets a full copy and neither can slow or block the other. Records are keyed by `device`, which turns Kafka's per-partition ordering into a per-device ordering guarantee. See `streaming/README.md`.
+**A Kafka streaming layer for two independent consumers.** The Parquet path above is a batch interface — it answers "give me the last hour." The streaming layer answers "tell me as it happens." One producer (`streaming/bridge.py`) reads the already-running sources and publishes to four topics: `noc.metrics` (the same 59-column rows, labels stripped), `noc.events` (discrete routing events at exact timestamps, not 30-second buckets), `noc.faults` (ground-truth labels) and `noc.topology` (the graph plus the controller's live path choices). Two consumer *groups* then read it independently — the predictive-analysis pipeline replays from the earliest offset to build fixed-length feature windows, while the copilot pipeline starts at the latest offset and maintains a rolling natural-language incident brief. Because Kafka tracks committed offsets per group, each gets a full copy and neither can slow or block the other. Records are keyed by `device`, which turns Kafka's per-partition ordering into a per-device ordering guarantee. See `streaming/README.md`.
 
 **A synthetic dataset and air-gap packaging.** Because 148 lab containers running for a few hours produce limited data at ML scale, a calibrated synthetic generator extends the real captures. Row count is `entities_per_tick × ticks`, linear in `--days` only (`--scale` only changes fault-episode density); at the current 899 entities/tick (661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`), `--days 7 --scale 3` (defaults `--days 2 --scale 1`; `synthetic/generate.py:667-669`) produces roughly 18.1 million rows. Two files are shipped, both `--days 1 --step 30 --scale 3.0` at 2,589,120 rows each: seed 42 for training and seed 7 as an episode-disjoint holdout (`DATASETS.md`). Everything else in `synthetic/output/` lacked `seed` + `calibrated_from` file metadata and was deleted — `check.py` now refuses an unattributable file. The entire software stack is packaged for offline deployment: Docker images are saved as compressed archives, and an automated verifier confirms that a full deployment produces zero outbound traffic to public IP addresses.
 
@@ -196,7 +196,7 @@ print(df.shape)          # (rows, 40)
 print(df.columns.tolist())
 ```
 
-The Parquet schema has 49 columns per row (`dataapi/schema/dataset.schema.json`). Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
+The Parquet schema has 59 columns per row (`dataapi/export.py:COLUMNS`). Each row represents one 30-second time bucket for one (device, entity) pair, where entity is a network interface, a WireGuard tunnel, or the device itself:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -234,6 +234,13 @@ Nineteen further columns, added by the device-health + environmental feature set
 | `rib_routes` | RIB route count |
 | `ospf_lsa_count` | OSPF link-state database entry count (`vtysh show ip ospf database json`) |
 | `device_temp_c`, `device_power_watts`, `device_fan_rpm`, `device_psu_voltage_v` | Modelled chassis environmental sensors |
+| `topology_id` | Which of the 12 topologies (10 train + 2 held out) the row came from — leave-one-topology-out evaluation |
+| `stream` | `F` (fault-dense) or `N` (fault-free + hard-negatives) — the sampler composes fault prevalence from the two |
+| `is_hard_negative` | True for near-miss rows (looks like a fault, isn't — `is_fault` stays False) |
+| `is_root`, `cascade_parent_id`, `cascade_depth`, `cascade_motif_id`, `affected_entity_count` | Root/affected dual-head cascade supervision — depth 2-3, graph-adjacent propagation |
+| `injection_seed` | Per-fault RNG draw, for reproducing one scenario in the air gap |
+
+New companion Parquet files ship alongside the main table: `*_events.parquet` (templated control-plane events, exact ts), `*_topology_edges.parquet` (interval-encoded graph), `*_paths.parquet` (ordered-hop RouteNet paths — `wg_tunnel`/`ospf_spf_path` only, no MPLS dataplane on this WSL2 host). Row key is now `(stream, topology_id, device, entity, ts)`.
 
 The `time_to_impact_s` column is the key ML target for a regression or hazard model. For classification, `is_fault` provides a binary label. For multi-class classification, `fault_type` identifies the primary fault type and `fault_types` the full concurrent set — up to 3 faults overlap on one row in the shipped data. Because the label columns are lists, select precursor rows with `export.precursor_mask(df)` rather than `time_to_impact_s > 0`.
 
@@ -260,7 +267,7 @@ r = requests.get("http://localhost:8000/topology")
 # Useful for graph neural network features
 ```
 
-**The synthetic dataset**, run as `python3 synthetic/generate.py --days 7 --scale 3`, produces roughly 18.1 million additional labeled rows (899 entities/tick × ticks) calibrated to match the statistical properties of the real lab captures. The two shipped files are one day each (2,589,120 rows, 49 columns) at seeds 42 and 7. It can be concatenated directly with the real data for training:
+**The synthetic dataset**, run as `python3 synthetic/generate.py --days 7 --scale 3`, produces roughly 18.1 million additional labeled rows (899 entities/tick × ticks) calibrated to match the statistical properties of the real lab captures. The two shipped files are one day each (2,589,120 rows, 59 columns) at seeds 42 and 7. It can be concatenated directly with the real data for training:
 
 ```python
 real = pd.read_parquet("dataapi/datasets/noc_dataset_*.parquet")

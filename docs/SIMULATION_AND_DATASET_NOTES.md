@@ -130,7 +130,7 @@ neither blocks the other.
 
 | topic | parts | retention | payload |
 |---|---|---|---|
-| `noc.metrics` | 6 | 1 day | the same canonical 49-column rows, label columns stripped |
+| `noc.metrics` | 6 | 1 day | the same canonical 59-column rows, label columns stripped |
 | `noc.events` | 6 | 7 days | discrete routing events at **exact** timestamps, templated |
 | `noc.faults` | 3 | 30 days | orchestrator label rows |
 | `noc.topology` | 1 | 30 days | static graph + the controller's live path choices |
@@ -182,10 +182,10 @@ Two independent producers, one schema. `dataapi/export.COLUMNS` is the single
 source of truth and `synthetic/generate.py` imports it (`generate.py:41`), so the
 two can never disagree.
 
-### 2.1 Schema — 49 columns
+### 2.1 Schema — 59 columns
 
-`dataapi/export.py:38-53`. First 21 are the original schema in their original
-order, so readers written against it still work.
+`dataapi/export.py:COLUMNS`, len 59. First 21 are the original schema in their
+original order, so readers written against it still work.
 
 - keys: `ts, device, site_type, vrf, entity, entity_type` — `vrf` is
   `list<string>` on every row (DEFECT 2a): a tunnel carries several VRFs
@@ -210,6 +210,22 @@ order, so readers written against it still work.
   severity_primary / scenario_id_primary` aliases. `sla_binding_vrf` (DEFECT 2b)
   names the VRF whose SLA governed `t_impact` on a multi-VRF tunnel ramp, null
   off `ramp_derived` episodes.
+- **added (G1/G6, multi-topology)**: `topology_id` — leave-one-topology-out,
+  12 topologies (10 train + 2 held out); `stream` — `F` (fault-dense) or `N`
+  (fault-free + hard negatives), the sampler composes prevalence from the two.
+- **added (G4, hard negatives)**: `is_hard_negative` — near-miss row, `is_fault`
+  stays `False`.
+- **added (G7, cascade supervision)**: `is_root, cascade_parent_id,
+  cascade_depth, cascade_motif_id, affected_entity_count` — root/affected
+  dual-head labels, depth 2-3, graph-adjacent propagation.
+- **added (G8, reproducibility)**: `injection_seed` — per-fault RNG draw, the
+  only way to reproduce one scenario air-gapped.
+
+Row key is now `(stream, topology_id, device, entity, ts)`. New companion
+Parquet files ship per run: `*_events.parquet` (templated control-plane events,
+exact ts), `*_topology_edges.parquet` (interval-encoded graph), `*_paths.parquet`
+(ordered-hop RouteNet paths, `wg_tunnel`/`ospf_spf_path` only — no MPLS
+dataplane on this WSL2 host).
 
 Three `entity_type` values (`export.py:55-60`): `interface` (per physical port),
 `tunnel` (per WireGuard tunnel), `device` (whole box, `entity` == device name).

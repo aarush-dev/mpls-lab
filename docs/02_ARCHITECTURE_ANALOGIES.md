@@ -58,7 +58,7 @@ Before diving into individual pieces, here is the whole system in one diagram. R
                                 ▼
                     ┌─────────────────────────┐
                     │   ML TEAM               │
-                    │   49-column Parquet      │
+                    │   59-column Parquet      │
                     │   +synthetic (~18.1M    │
                     │   rows @ --days 7 -s 3) │
                     │   is_fault, lead_time_s  │
@@ -526,7 +526,7 @@ The **FastAPI Data API** at `localhost:8000` does the same thing for this lab. I
 | `GET /topology` | Network graph as JSON (nodes + links) |
 | `GET /datasets?build=true` | Joined, labeled Parquet — the main ML input |
 
-**The 49-column Parquet schema:**
+**The 59-column Parquet schema:**
 
 ```python
 # from dataapi/export.py — SNMP + tunnel + flow columns unchanged since Phase 2
@@ -574,8 +574,21 @@ COLUMNS = [
 
     # Chassis environmental sensors (modelled)
     "device_temp_c", "device_power_watts", "device_fan_rpm", "device_psu_voltage_v",
+
+    # Multi-topology + stream sampling (G1, G6, G4)
+    "topology_id",     # leave-one-topology-out: 12 topologies, 10 train + 2 held out
+    "stream",          # "F" (fault-dense) | "N" (fault-free + hard-negatives)
+    "is_hard_negative", # near-miss row; is_fault stays False
+
+    # Cascade supervision (G7) — root/affected dual-head, depth 2-3, graph-adjacent
+    "is_root", "cascade_parent_id", "cascade_depth", "cascade_motif_id", "affected_entity_count",
+
+    # Reproducibility (G8)
+    "injection_seed",  # per-fault RNG draw, for replay in the air gap
 ]
 ```
+
+New companion files per run: `*_events.parquet` (templated control-plane events, exact ts), `*_topology_edges.parquet` (interval-encoded graph), `*_paths.parquet` (ordered-hop RouteNet paths, `wg_tunnel`/`ospf_spf_path` only — no MPLS dataplane on this WSL2 host). Row key: `(stream, topology_id, device, entity, ts)`.
 
 **Reading the dataset in Python — a minimal example:**
 
@@ -624,7 +637,7 @@ resp = requests.get("http://localhost:8000/metrics", params={
 result = resp.json()["result"]   # list of {metric: {...}, values: [[ts, val], ...]}
 ```
 
-The synthetic dataset — `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) — extends real captures to roughly **18.1 million rows** (899 entities/tick × ticks; `--scale` only controls fault-episode density, not row count) with calibrated statistical models, giving the ML team enough data to train on without requiring days of lab uptime. The two shipped files are one day each (2,589,120 rows, 49 columns) at seeds 42 and 7 — see `DATASETS.md`.
+The synthetic dataset — `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) — extends real captures to roughly **18.1 million rows** (899 entities/tick × ticks; `--scale` only controls fault-episode density, not row count) with calibrated statistical models, giving the ML team enough data to train on without requiring days of lab uptime. The two shipped files are one day each (2,589,120 rows, 59 columns) at seeds 42 and 7 — see `DATASETS.md`.
 
 ---
 
@@ -643,7 +656,7 @@ Meanwhile, the WireGuard SD-WAN overlay is running in parallel. If the MPLS path
 
 All along this path, **Telegraf is polling SNMP counters every 30 seconds**, **routers are emitting syslog messages that Promtail ships to Loki**, **PE and CE routers are exporting IPFIX flows that nfacctd collects**, and **the SD-WAN controller is emitting per-tunnel metrics every 5 seconds**. Every signal is tagged with `device="ce_branch1"` (or whichever node it came from) so the Data API can join them all into a single row in the final Parquet.
 
-That Parquet row, with its 49 columns and a ground-truth `is_fault` label, is what the ML model sees. The goal: learn to recognize the early-warning signatures (latency creep, rekey clustering, prefix churn) and predict `t_impact` before it arrives.
+That Parquet row, with its 59 columns and a ground-truth `is_fault` label, is what the ML model sees. The goal: learn to recognize the early-warning signatures (latency creep, rekey clustering, prefix churn) and predict `t_impact` before it arrives.
 
 ---
 

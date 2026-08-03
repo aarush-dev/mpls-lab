@@ -23,7 +23,7 @@ Everything flows in one direction: physical network containers emit signals, a t
         |
         | GET /datasets?build=true
         v
-  Labeled Parquet (49 columns, join key = "device")
+  Labeled Parquet (59 columns, join key = "device")
         |
         v
   Your ML Model
@@ -292,7 +292,7 @@ print(f"Test:  {len(test)} rows, {test['is_fault'].mean()*100:.1f}% fault")
 
 ## 3. The Dataset Schema — What Every Column Means
 
-The canonical 49-column schema is defined in `export.py` (`COLUMNS` list). Every Parquet file — both real and synthetic — has exactly these columns in this order.
+The canonical 59-column schema is defined in `export.py` (`COLUMNS` list). Every Parquet file — both real and synthetic — has exactly these columns in this order.
 
 ```python
 # From /root/LAB/dataapi/export.py
@@ -315,13 +315,27 @@ COLUMNS = [
     "fault_types", "severities", "scenario_ids", "impact_methods", "n_concurrent",
     "severity_label",
     "fault_type_primary", "severity_primary", "scenario_id_primary",
+    "sla_binding_vrf",
+    # --- G1/G6/G4: multi-topology + stream sampling ---
+    "topology_id", "stream", "is_hard_negative",
+    # --- G7: root/affected dual-head cascade supervision ---
+    "is_root", "cascade_parent_id", "cascade_depth", "cascade_motif_id",
+    "affected_entity_count",
+    # --- G8: per-fault reproducibility ---
+    "injection_seed",
 ]
 ```
 
 The first 21 columns are the original schema in their original order, so readers
 written against it keep working. Columns 22–40 are the device-health feature set;
-41–49 are the multi-label set. `time_to_impact_s` (column 21) became a LIST when
-the multi-label columns landed — the only in-place type change.
+41–52 are the multi-label + SLA-binding set; 53–59 are topology/stream/cascade/seed
+columns added for leave-one-topology-out and cascade supervision. `time_to_impact_s`
+(column 21) became a LIST when the multi-label columns landed — the only in-place
+type change. Row key is now `(stream, topology_id, device, entity, ts)`. New
+companion Parquet files ship per run: `*_events.parquet` (templated control-plane
+events, exact ts), `*_topology_edges.parquet` (interval-encoded graph),
+`*_paths.parquet` (ordered-hop RouteNet paths, `wg_tunnel`/`ospf_spf_path` only —
+no MPLS dataplane on this WSL2 host).
 
 **Identity columns:**
 
@@ -685,7 +699,7 @@ That is the entire extension. The label schema, the `/datasets` join, and the sy
 
 ## 6. Synthetic Data
 
-The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 49-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
+The synthetic generator (`/root/LAB/synthetic/generate.py`) produces Parquet files in the exact same 59-column schema as the real data API output. Real and synthetic are `pd.concat`-compatible with no transformation.
 
 **What was built:** `python3 synthetic/generate.py --days 7 --scale 3` (defaults are `--days 2 --scale 1`, `synthetic/generate.py:667-669`) produces roughly 18.1M rows (`entities_per_tick × ticks`, 899 entities/tick = 661 interface + 168 tunnel + 70 device, `synthetic/generate.py:613-615`; `--scale` only controls fault-episode density, not row count) covering 7 days of simulated telemetry across all 70 FRR routers (24 P + 12 PE + 34 CE), with fault episodes injected at calibrated rates. Fault signature PEAKS (how much latency, jitter and loss rise) are derived from real lab captures via `calibrate.py`. The precursor LENGTH is not: `lead_time_s` is drawn per episode from the per-fault-type priors in `faults/leadpriors.py`, because a 24.5-minute capture at 30 s resolution cannot estimate a lead — see `docs/SPEC-NOTES.md`. Two files are shipped, one day each at seeds 42 and 7 (`DATASETS.md`); every output file without `seed` + `calibrated_from` metadata was deleted, and `check.py` now refuses them.
 

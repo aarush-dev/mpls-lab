@@ -20,7 +20,7 @@ A reproducible, air-gapped **Containerlab SD-WAN-over-MPLS** lab that produces r
 - **`controller/`** — simulated SD-WAN controller. Tunnel RTT/loss/jitter is **modelled**, read back from the site's netem qdisc config, not independently measured (see escalation 1 below); Prometheus on :9362.
 - **`trafficgen/`** — diurnal per-VRF traffic (nc backend) so counters/flows move.
 - **`faults/`** — `injectors.py` (netem/flap/BGP/kill/rekey/drift, each reversible) + `orchestrator.py` (single scenarios + `--campaign` mode) writing the ground-truth **labels timeline** (joinable on device+time). 21 scenarios.
-- **`dataapi/`** — FastAPI (localhost): `/metrics /events /flows /labels /topology /datasets`; `export.py` joins everything → canonical 49-column Parquet (multi-label) (schema in `dataapi/schema/`). `ragcorpus/` seeds the RAG team.
+- **`dataapi/`** — FastAPI (localhost): `/metrics /events /flows /labels /topology /datasets`; `export.py` joins everything → canonical 59-column Parquet (multi-label) (schema in `dataapi/schema/`). `ragcorpus/` seeds the RAG team.
 - **`synthetic/`** — `calibrate.py` (profile from real captures) + `generate.py` (ML-scale labeled time-series in the same canonical schema; `--scale`/`--days`/`--seed`).
 - **`airgap/`** — `pull-and-save.sh` / `load-offline.sh` / `verify-airgap.sh` (zero runtime egress).
 - **`streaming/`** — `bridge.py` (Kafka producer → `noc.metrics` / `noc.events` / `noc.faults` / `noc.topology`, keyed by `device`) + `consume.py` (two consumer groups: `noc-predictive` from earliest, `noc-copilot` from latest).
@@ -36,7 +36,8 @@ A 105-finding repair pass just landed (commits through `ed06dd8a`) fixing bugs a
 - **VRFs:** CORP / VOICE / GUEST. **ASNs:** branch 65101–65124, hub 65201–65206, dc 65301–65304.
 - **Faults:** 21 scenarios. 4 lost their probes and are now `impact_method: modelled` (not `vm_threshold`): `hub_spoke_congest`, `bgp_cascade`, `brownout`. New `impact_method: probe_unavailable` for empty-probe windows.
 - **Telemetry:** 11 compose services, 70 SNMP agents (all FRR nodes), 11 Grafana panels — all verified against actual metric emitters this pass.
-- **Data schema:** 49 Parquet columns (40 before the multi-label/dtype repair; 21 pre-device-health).
+- **Data schema:** 59 Parquet columns, FROZEN (was 49 pre-closing-pass; 40 before multi-label/dtype; 21 pre-device-health). +10 closing-pass columns: `topology_id`,`stream`,`is_hard_negative`,`is_root`,`cascade_parent_id`,`cascade_depth`,`cascade_motif_id`,`affected_entity_count`,`injection_seed`. Row key now `(stream, topology_id, device, entity, ts)`. Companion tables: `*_events`/`*_topology_edges`/`*_paths` (`synthetic/{events,topology_paths}.py`).
+- **Dataset closing pass (G1–G11):** landed — topology diversity (12 topos, 10 train + 2 held-out, `synthetic/topologies.py`), Stream F/N split, hard negatives, depth-2-3 graph-adjacent cascades, events/edges/paths tables, `injection_seed`, G9 controller 10s scrape. `verify_readiness.py` all-pass on the short multi-topology run. **Gated: G10 realism-gap AUC=0.9999 (won't transfer) — the 24-min calibration is the bottleneck; G5 ≥7h capture + recalibration is the real prerequisite before the full-scale run. See `docs/SPEC-NOTES.md`.**
 - **Host:** 19 cores / 108 GB RAM / 1007 GB disk.
 
 ## What is verified vs. not

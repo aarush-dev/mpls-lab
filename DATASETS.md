@@ -3,8 +3,10 @@
 Three Parquet files are tracked in git as reference samples. Everything else under
 `dataapi/datasets/` and `synthetic/output/` stays gitignored — regenerate it.
 
-All three use the canonical **49-column** schema (`dataapi/export.py:COLUMNS`). They
-are concat-compatible: `pd.concat([real, synth])` needs no reindex.
+All three use the canonical **59-column** schema (`dataapi/export.py:COLUMNS`). They
+are concat-compatible: `pd.concat([real, synth])` needs no reindex. (The three
+committed samples predate the closing-pass columns — see *Closing-pass additions*
+below; `finalize_schema` back-fills the 10 new columns as null on any old file.)
 
 | file | rows | source | window |
 |---|---|---|---|
@@ -101,6 +103,31 @@ present — an unattributable file cannot ship. Seed 42 keeps its old filename; 
   `faults/labels/labels.jsonl`, which is why its fault rows went 327 → 391: the old
   single-winner collapse dropped overlapping labels that the multi-label join keeps.
   No metric value changed.
+
+## Closing-pass additions (G1–G11) — schema FROZEN at 59 columns
+
+Ten columns added to the canonical schema (`dataapi/export.py:COLUMNS`, len 59):
+
+| column | gap | meaning |
+|---|---|---|
+| `topology_id` | G1 | which of 12 topologies (10 train + 2 held-out); enables leave-one-topology-out |
+| `stream` | G6 | `F` = fault-dense (campaign) / `N` = fault-free + hard negatives; a sampler composes any prevalence |
+| `is_hard_negative` | G4 | near-miss row (congestion recedes below SLA, self-heal flap, drain, surge, collector dropout, redundant-link down). `is_fault` stays **False** |
+| `is_root`,`cascade_parent_id`,`cascade_depth`,`cascade_motif_id`,`affected_entity_count` | G7 | root/affected dual-head supervision; cascades are depth 2-3, hop-1 same-device (concurrency), hops 2-3 graph-adjacent |
+| `injection_seed` | G8 | per-fault RNG draw — reproduce one scenario in the air gap |
+
+**New row key: `(stream, topology_id, device, entity, ts)`.** Streams F and N share
+timestamps (independent realities of the same topology), so `stream` and
+`topology_id` are part of the key now — group by them for per-series work
+(counter monotonicity, etc.).
+
+**Companion tables** written alongside the main Parquet by `generate_multi`:
+- `*_events.parquet` (G2) — templated `(template_id, params)` control-plane events at EXACT ts (sub-bucket), from the fault ledger. `synthetic/events.py`.
+- `*_topology_edges.parquet` (G3) — interval-encoded graph (`valid_from`/`valid_to`); link flaps close+reopen intervals. `synthetic/topology_paths.py`.
+- `*_paths.parquet` (G3) — ordered `hop_sequence` for RouteNet link↔path passing; `path_type` ∈ `{wg_tunnel, ospf_spf_path}` only (no `ldp_lsp` — no MPLS dataplane on this WSL2 host, see `docs/SPEC-NOTES.md` G11).
+
+Acceptance gate: `python3 verify_readiness.py <main> <events> <edges> <paths>`
+(all checks pass on the short multi-topology run).
 
 ## Regenerate
 
