@@ -167,6 +167,18 @@ import filter (ADR-0013 rejected an interpreter sandbox). **B3a (#31)** wires th
 `run`. Real-sandbox tests (`test_executor.py`) prove no-net + timeout bite; skip where unshare is
 unavailable. Self-check: `python3 -m copilot.workspace.executor`.
 
+**B3a (#31) landed.** The `bash` tool wired into the agent loop (`copilot/agent/loop.py`): a
+per-session `Executor` (B2) is threaded into `investigate(..., executor=)` and advertised as
+`BASH_SPEC` **only when wired** (like `load_skill` — no executor ⇒ no bash, byte-identical to F3).
+A `bash` call routes by-name to `_run_bash` → `executor.run(command)` (no-net, timeout, cwd=B0
+scratchpad); the observation (`exit=N` + stdout + stderr) rides back as the `tool_result` the model
+reads next. Output is **action, not cited evidence** → no `Cite`, never gate-blocks. `api/app.py`
+builds the executor per request from `for_session(sessions.root, sid)` when a `session_id` is
+present (the scratchpad lives under the session dir); a one-off chat (no sid) gets no bash. Seam
+tests: loop-level (`test_agent.py`, real executor) + HTTP-level (`test_api.py`, `/chat` with a
+session) prove code runs + no-net/timeout still bite through the loop; skip where unshare is absent.
+**B3b (#32)** adds artifacts + demo render on top.
+
 **R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
 seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth
 `/labels` fault into a full-fidelity §3.3 record — every block (risk/forecast/localization/anomaly/

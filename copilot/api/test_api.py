@@ -12,6 +12,7 @@ import shutil
 import tempfile
 from datetime import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from copilot.adapter import StubAdapter
@@ -23,6 +24,10 @@ from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
 from copilot.skills import Skill
+from copilot.workspace.executor import _nonet_ok
+
+# the bash-over-http test needs a real no-net sandbox (unshare -n); skip honestly without it.
+needs_nonet = pytest.mark.skipif(not _nonet_ok(), reason="unshare -n unavailable on this host")
 
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
 
@@ -317,6 +322,45 @@ def test_session_persists_and_resumes_over_http():
     assert len(reopened.read("s1")) > len(wire), "turn 2 appended, turn 1 not clobbered"
 
 
+@needs_nonet
+def test_bash_tool_runs_code_over_http_with_a_session():
+    # B3a acceptance: the coding agent runs code in its scratchpad and reads the result, via the
+    # real endpoint. Needs a session (the scratchpad lives under the session dir) + a real
+    # executor (no doubles). Skips visibly where unshare is absent (like the executor self-check).
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+    if not _nonet_ok():
+        print("  (skipped bash-over-http test: unshare -n unavailable)")
+        return
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter()
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+    llm = ScriptedLLM([
+        tool_call("bash", {"command": "echo B3A-OK"}, id="c1"),
+        final("the run finished, anything else?"),        # ask-back: bash gives no cited evidence
+    ])
+    app.dependency_overrides[get_llm] = lambda: llm
+    resp = TestClient(app).post("/chat", json={"question": "run echo",
+                                               "start": 100, "end": 200, "session_id": "b3a"})
+    assert resp.status_code == 200
+    tr = [e for e in _events(resp) if e["type"] == "tool_result"][0]
+    assert tr["name"] == "bash" and "exit=0" in tr["content"] and "B3A-OK" in tr["content"]
+    assert any(t["name"] == "bash" for t in llm.calls[0][1]), "bash advertised over HTTP"
+
+
+def test_bash_tool_absent_without_a_session():
+    # no session_id -> no persistent scratchpad -> bash is not advertised (a one-off can't code).
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=ROWS)
+    llm = ScriptedLLM([final("which device?")])
+    app.dependency_overrides[get_llm] = lambda: llm
+    resp = TestClient(app).post("/chat", json={"question": "hi", "start": 100, "end": 200})
+    assert resp.status_code == 200
+    assert not any(t["name"] == "bash" for t in llm.calls[0][1]), "no bash without a session"
+
+
 def test_no_session_id_persists_nothing():
     # a stateless one-off chat: no session_id -> the store is never touched.
     from copilot.api.app import get_sessions
@@ -443,6 +487,8 @@ def _run():
     test_case_id_routes_to_a_frozen_follow_up_over_http()
     test_session_persists_and_resumes_over_http()
     test_no_session_id_persists_nothing()
+    test_bash_tool_runs_code_over_http_with_a_session()
+    test_bash_tool_absent_without_a_session()
     test_gate_outcomes_land_in_the_ledger_pass_and_fail()
     test_manual_skill_invoke_over_http()
     test_device_question_streams_cited_log_and_flow_rows()

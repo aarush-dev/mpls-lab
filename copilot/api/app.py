@@ -32,6 +32,7 @@ from copilot.memory import Ledger, SessionStore
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
 from copilot.window import WindowContext
+from copilot.workspace import Executor, for_session
 
 app = FastAPI(title="NOC Copilot", version="1.0")
 
@@ -183,9 +184,15 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
     # back (write-through). No session_id -> a stateless one-off chat, nothing persisted.
     sid = req.session_id
     history = sessions.history(sid) if sid else None
+    # B3a (ADR-0011/0013): the coding-agent bash tool needs a per-session scratchpad, which lives
+    # under the session dir (same root as SessionStore). No session_id -> no persistent workspace
+    # -> no bash tool (a one-off chat can't run code). Executor confines it: no-net, timeout, cwd.
+    executor = (Executor(for_session(sessions.root, sid), timeout_s=cfg.exec_timeout_s,
+                         max_timeout_s=cfg.exec_max_timeout_s, output_cap=cfg.exec_output_cap)
+                if sid else None)
     outcome = investigate(req.question, _window(req, cfg),
                           llm=llm, adapter=adapter, cfg=cfg, retriever=retriever, kg=kg,
-                          skills=skills, invoke=req.skills, history=history)
+                          skills=skills, executor=executor, invoke=req.skills, history=history)
     if sid:
         sessions.append(sid, outcome.events)
         # R2b (ADR-0009): route this turn's gate outcomes (pass and fail) into the Event Ledger

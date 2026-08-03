@@ -7,6 +7,8 @@ Run:  python3 -m copilot.agent.test_agent
 """
 import dataclasses
 
+import pytest
+
 from copilot.adapter import StubAdapter
 from copilot.agent import Event, Outcome, investigate, parse_tool_calls
 from copilot.agent.loop import compact_history
@@ -14,6 +16,8 @@ from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.skills import Skill
 from copilot.window import WindowContext
+from copilot.workspace import Executor, for_session
+from copilot.workspace.executor import _nonet_ok
 
 WINDOW = WindowContext(100, 200)
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
@@ -221,6 +225,81 @@ def test_self_judge_parses_verdict():
     # junk verdict OR an omitted "pass" key -> fail-open (deterministic gate is the hard guarantee)
     assert self_judge(ScriptedLLM([final("not json at all")]), msgs, "a").ok
     assert self_judge(ScriptedLLM([final('{"missing": ["x"]}')]), msgs, "a").ok
+
+
+def _executor(tmp="/tmp/_b3a", sid="s", **kw):
+    return Executor(for_session(tmp, sid), **kw)
+
+
+# real-sandbox bash tests need unshare -n (like test_executor.py). skipif reports the skip
+# honestly under pytest; _run() (the __main__ self-check) prints one instead of silently passing.
+needs_nonet = pytest.mark.skipif(not _nonet_ok(), reason="unshare -n unavailable on this host")
+
+
+def _skip_no_nonet() -> bool:
+    if _nonet_ok():
+        return False
+    print("  (skipped bash exec test: unshare -n unavailable)")
+    return True
+
+
+def test_bash_tool_inert_without_an_executor():
+    # B3a: no executor wired -> bash is not advertised, and a call to it is unknown-tool
+    # guidance (dispatch), never a crash. Byte-identical to F3 when exec isn't wired.
+    llm = ScriptedLLM([tool_call("bash", {"command": "echo hi"}, id="c1"),
+                       final("ran it, anything else?")])
+    out = investigate("run it", WINDOW, llm=llm, adapter=StubAdapter(), cfg=_cfg())
+    tr = out.of_type("tool_result")[0]
+    assert tr.data["name"] == "bash" and "unknown tool" in tr.data["content"]
+
+
+@needs_nonet
+def test_bash_tool_runs_code_and_result_reaches_the_loop():
+    # B3a acceptance: the agent runs code in its scratchpad and reads the result through the
+    # loop. Real executor (no doubles).
+    if _skip_no_nonet():
+        return
+    marker = "MARKER-7f3a"
+    llm = ScriptedLLM([
+        tool_call("bash", {"command": f"echo '{marker}'"}, id="c1"),
+        final(f"printed {marker}, continue?"),
+    ])
+    out = investigate("run the script", WINDOW, llm=llm, adapter=StubAdapter(),
+                      cfg=_cfg(), executor=_executor(sid="run"))
+    tr = out.of_type("tool_result")[0]
+    assert tr.data["name"] == "bash"
+    assert "exit=0" in tr.data["content"] and marker in tr.data["content"]
+    assert tr.data["n"] == 0, "bash output is action, not cited evidence"
+
+
+@needs_nonet
+def test_bash_no_net_bites_through_the_loop():
+    # B3a acceptance: no-net still enforced via the loop -- a real connect() from executed code
+    # fails, so the observation shows a nonzero exit.
+    if _skip_no_nonet():
+        return
+    net = ScriptedLLM([
+        tool_call("bash", {"command":
+                  "python3 -c \"import socket; socket.create_connection(('1.1.1.1',80),3)\""},
+                  id="c1"),
+        final("net check done, ok?"),
+    ])
+    out = investigate("try the net", WINDOW, llm=net, adapter=StubAdapter(),
+                      cfg=_cfg(), executor=_executor(sid="net"))
+    assert "exit=0" not in out.of_type("tool_result")[0].data["content"]
+
+
+@needs_nonet
+def test_bash_timeout_bites_through_the_loop():
+    # B3a acceptance: timeout still enforced via the loop -- a slow command under a 1s executor
+    # cap is killed and flagged.
+    if _skip_no_nonet():
+        return
+    slow = ScriptedLLM([tool_call("bash", {"command": "sleep 10"}, id="c1"),
+                        final("slept, next?")])
+    out = investigate("sleep", WINDOW, llm=slow, adapter=StubAdapter(), cfg=_cfg(),
+                      executor=_executor(sid="slow", timeout_s=1, max_timeout_s=2))
+    assert "timed out" in out.of_type("tool_result")[0].data["content"]
 
 
 def test_self_judge_fail_retries_then_answers():
@@ -516,6 +595,10 @@ def _run():
     test_compact_history_never_drops_a_cited_evidence_id()
     test_compaction_flag_on_bounds_the_prompt_the_model_sees()
     test_bad_event_type_rejected()
+    test_bash_tool_inert_without_an_executor()
+    test_bash_tool_runs_code_and_result_reaches_the_loop()
+    test_bash_no_net_bites_through_the_loop()
+    test_bash_timeout_bites_through_the_loop()
     print("copilot.agent self-check OK")
 
 

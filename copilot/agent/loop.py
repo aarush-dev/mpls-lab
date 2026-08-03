@@ -38,6 +38,7 @@ from copilot.retrieval import Retriever
 from copilot.skills import Skill, catalog, fault_type_hint
 from copilot.tools import Cite, TOOL_SPECS, dispatch
 from copilot.window import WindowContext
+from copilot.workspace import Executor
 
 # canonical event enum (ADR-0009) -- ONE vocabulary for the live stream AND the
 # persisted events.jsonl. F3 emits a subset; the gate/artifact types land later.
@@ -115,6 +116,18 @@ LOAD_SKILL_SPEC = {
                    "into context before investigating.",
     "parameters": {"type": "object", "required": ["name"],
                    "properties": {"name": {"type": "string"}}},
+}
+
+# B3a (ADR-0011/0013): the coding-agent bash tool, advertised only when a per-session Executor
+# is wired (get to run code end-to-end). Runs in the B0 scratchpad, no network, time-limited
+# (B2). Its output is ACTION, not cited evidence -> no Cite, like load_skill.
+BASH_SPEC = {
+    "name": "bash",
+    "description": "Run a shell command in your scratchpad working directory (no network, "
+                   "time-limited). Write a script with the file tools or a heredoc, run it, "
+                   "and read its stdout back.",
+    "parameters": {"type": "object", "required": ["command"],
+                   "properties": {"command": {"type": "string"}}},
 }
 
 # TOOL_SPECS + dispatch live in copilot.tools (the registry, I1) -- re-exported here so
@@ -203,6 +216,7 @@ def investigate(question: str, window: WindowContext, *,
                 retriever: Retriever | None = None,
                 kg: dict[str, str] | None = None,
                 skills: dict[str, Skill] | None = None,
+                executor: Executor | None = None,
                 invoke: list[str] | None = None,
                 history: list[dict] | None = None,
                 fault_type: str | None = None,
@@ -251,7 +265,8 @@ def investigate(question: str, window: WindowContext, *,
             system += f"\n\n[skill: {s.name}]\n{s.body}"  # name silently no-ops -- the UI picks
         #                                                  from the catalog, so a miss is rare;
         #                                                  add a warning event if humans hand-type it.
-    tool_specs = TOOL_SPECS + ([LOAD_SKILL_SPEC] if skills else [])
+    tool_specs = (TOOL_SPECS + ([LOAD_SKILL_SPEC] if skills else [])
+                  + ([BASH_SPEC] if executor else []))    # B3a: bash only when exec is wired
     messages = [{"role": "system", "content": system}]
     hist = history or []                   # R2a: prior turns reach the model on resume (ADR-0009)
     if cfg.history_compaction and hist:    # I6/ADR-0015 §5: flag off -> hist untouched, byte-identical
@@ -333,6 +348,8 @@ def investigate(question: str, window: WindowContext, *,
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
             if tc.name == "load_skill":                  # I5: a skill body is method, not
                 observation, cites = _load_skill(skills, tc.arguments), ()  # evidence -> no
+            elif tc.name == "bash" and executor:         # B3a: run code in the scratchpad; the
+                observation, cites = _run_bash(executor, tc.arguments), ()  # output is action, not
             else:                                        # Cite, and a load miss never gate-blocks.
                 observation, cites = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
                 evidence.extend(cites)
@@ -378,6 +395,26 @@ def _load_skill(skills: dict[str, Skill], args: dict) -> str:
     if s is None:
         return f"error: unknown skill {name!r}; pick one from the skills list"
     return s.body
+
+
+def _run_bash(executor: Executor, args: dict) -> str:
+    """B3a (ADR-0011/0013): run the model's `command` through the B2 executor (no-net, timeout,
+    cwd=scratchpad) and render the result as one observation. A missing command / a refused run
+    (no-net sandbox unavailable) comes back AS guidance (ADR-0015), never a raise. Output is the
+    thing the model reads next -- exit line + stdout (+ stderr if any)."""
+    command = args.get("command")
+    if not command or not isinstance(command, str):
+        return "error: bash needs a 'command' string to run"
+    r = executor.run(command)
+    if r.refused:
+        return f"error: {r.stderr}"
+    head = f"exit={r.returncode}" + (" (timed out)" if r.timed_out else "")
+    parts = [head]
+    if r.stdout:
+        parts.append(r.stdout.rstrip("\n"))
+    if r.stderr:
+        parts.append("stderr:\n" + r.stderr.rstrip("\n"))
+    return "\n".join(parts)
 
 
 def _capped(events: list[Event], why: str) -> Outcome:
