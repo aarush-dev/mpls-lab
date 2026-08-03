@@ -1,7 +1,7 @@
 # Runbook — SD-WAN tunnel latency / loss high
 
 > RAG seed. Ties to fault scenarios `congestion`, `tunnel_degrade`,
-> `asymmetric_loss`, `brownout`.
+> `asymmetric_loss`, `brownout`, `hub_spoke_congest`.
 
 ## Symptom
 
@@ -29,6 +29,11 @@ predictive signal the copilot must catch before user impact.
   - `tunnel_degrade` — jitter+loss climb + rekey clustering.
   - `asymmetric_loss` — loss% up while latency stays normal (one-directional).
   - `brownout` — queueing latency climbs under a rate cap; loss arrives late.
+  - `hub_spoke_congest` — netem ramp on a **hub** uplink (`ce_hub{1..6}` eth1),
+    so every spoke routed through that hub degrades at once. Modelled, **not**
+    tunnel-observable: the controller folds netem only from the spoke's eth1, so
+    the hub-side cap shows in no tunnel gauge — classify by the shared-hub
+    fan-out (many spokes degrade together) and the label, not a metric crossing.
 
 ## Triage
 
