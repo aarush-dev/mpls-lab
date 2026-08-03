@@ -105,16 +105,25 @@ def citation_check(answer: str, valid_ids) -> GateResult:
 
 
 def run_gate(answer: str, cites, *, window, question, min_evidence, tool_errors=(),
-             abstain=False) -> GateResult:
+             abstain=False, prior_cites=()) -> GateResult:
     """I4a stage-1 gate (ADR-0008): tool-call success + deterministic pre-gate + citation check,
     combined. Stage-2 (self-judge LLM) + the bounded agentic retry on fail are I4b (#14).
 
     `abstain` (R4a): the Prediction Record abstained -> soften the pre-gate's sufficiency checks
-    (ADR-0008 §Nuances). Integrity (tool-call success, in-window, on-topic, citation) is unmoved."""
+    (ADR-0008 §Nuances). Integrity (tool-call success, in-window, on-topic, citation) is unmoved.
+
+    `prior_cites` (R6b, ADR-0014): evidence a master synthesis inherits from its sub-chats. A
+    synthesis merges FINDINGS, not telemetry, so it gathers no `Cite`s of its own -- without this
+    it fails the sufficiency floor (0 items) and every device sentence reads as an uncited claim.
+    Promoted to FIRST-CLASS, not exempted: prior cites carry the sub-chat's real source/ts/device,
+    so they ride the SAME in-window/on-topic integrity checks as gathered cites -- a synthesis can
+    no more cite out-of-window evidence than an ordinary answer can. Empty for a single-fault
+    investigation, so that path is byte-identical (the regression the ticket asks for)."""
+    all_cites = (*cites, *prior_cites)
     calls = tool_calls_ok(tool_errors)
-    pre = pre_gate(cites, window=window, entities=extract_entities(question),
+    pre = pre_gate(all_cites, window=window, entities=extract_entities(question),
                    min_evidence=min_evidence, soft=abstain)
-    cite = citation_check(answer, {c.id for c in cites})
+    cite = citation_check(answer, {c.id for c in all_cites})
     return _result([*calls.missing, *pre.missing, *cite.missing])
 
 

@@ -255,6 +255,12 @@ def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
     chats = case_chats(case_dir)
     if not chats.read(INITIAL_CHAT):
         chats.append(INITIAL_CHAT, outcome.events)
+    # R6b: concurrent faults -> n per-fault chats + a master synthesis (ADR-0014). Single-fault
+    # cases stop at the initial chat above. Function-local import: synthesis imports from here.
+    if int(record.get("n_concurrent", 1)) > 1:
+        from copilot.forensic.synthesis import synthesize_concurrent
+        synthesize_concurrent(case_dir, record, window, replay, primary=outcome, llm=llm, cfg=cfg,
+                              retriever=retriever, skills=skills, kg=kg)
     return case_dir
 
 

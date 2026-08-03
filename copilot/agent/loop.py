@@ -68,6 +68,7 @@ class Outcome:
     answer: str | None                       # final answer OR the ask-back question
     events: tuple[Event, ...] = ()
     stopped: str | None = None               # None | "step_cap" | "tool_call_cap"
+    cites: tuple[Cite, ...] = ()             # R6b: evidence this run gathered, for a master synthesis to inherit
 
     def of_type(self, t: str) -> tuple[Event, ...]:
         return tuple(e for e in self.events if e.type == t)
@@ -260,7 +261,7 @@ def investigate(question: str, window: WindowContext, *,
             if banner:
                 text = banner + "\n\n" + text
             emit("assistant_msg", content=text)
-            return Outcome(answer=text, events=tuple(events))
+            return Outcome(answer=text, events=tuple(events), cites=tuple(evidence))
 
         if native and reply.content:                     # reasoning alongside a call
             emit("think", content=reply.content)

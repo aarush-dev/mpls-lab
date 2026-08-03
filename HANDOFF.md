@@ -189,7 +189,7 @@ teaching the exact `[metrics:0]` citation token. **Regressions filed** (#42 mand
 patch): #43 (range/unicode citations), #44 (embedder query/passage asymmetry), #45 (harmony leak),
 #46 (all-None-node retrieval crash — **fixed** here: `store.py` pins the pyarrow schema).
 
-**Forensic chain R5a→R6a landed.** R5a (#22) trigger poll-loop + episode dedup + restart cursor;
+**Forensic chain R5a→R6b landed.** R5a (#22) trigger poll-loop + episode dedup + restart cursor;
 R5b (#23) case creation — freeze window to `cases/<id>/window/`, `prediction.json`, `ReplayAdapter`
 (2nd F2 ToolAdapter, disk only), `case.md`; R6a (#24, `copilot/forensic/chat.py`) multi-chat per
 case + follow-ups pinned to the FROZEN window — n chats coexist addressably (each resumes only its
@@ -197,8 +197,16 @@ own history), reads ride the ReplayAdapter (freeze guard rejects `end > T_snapsh
 run persists as chat `initial`, `/chat` routes a `case_id` to a follow-up (untrusted id sanitised,
 unknown → 404). SessionStore `append` now takes a per-conversation `flock` (ADR-0009). Self-check:
 `python3 -m copilot.forensic.test_chat`.
+R6b (#25, `copilot/forensic/synthesis.py`) concurrent-fault fan-out — `n_concurrent > 1` spawns one
+chat per fault (`fault-0` = the reused primary run) + a `master` synthesis chat. The master merges
+findings (no telemetry of its own), inheriting the sub-chats' cites attributed per sub-chat
+(`fault-1:metrics:0`) and passing them to the gate as first-class `prior_cites` (`run_gate` gained
+the param; single-fault path byte-identical, integrity — in-window/on-topic — still enforced).
+`Outcome` gained `cites` so a synthesis can inherit them. Count-driven over the frozen single-device
+case (the emulator collapses concurrency to one record + a count); a real emitter of n per-device
+records is **missing ticket #49**. Self-check: `python3 -m copilot.forensic.test_synthesis`.
 
-**Not done:** R6b (#25) concurrent-fault n-chats + master synthesis, C1;
+**Not done:** the emulator emitting n distinct per-fault records (#49); C1;
 Milestone B. Seeder does not set `node` on incidents, so `search_incidents`-by-device narrows to
 empty (S1 follow-up, noted in #46). Default `/chat` KB still needs a seeded `COPILOT_KB_URI`.
 
