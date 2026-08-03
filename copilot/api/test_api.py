@@ -7,6 +7,7 @@ the canonical ADR-0009 event stream, each event timestamped.
 Run:  python3 -m copilot.api.test_api
 """
 import atexit
+import base64
 import json
 import shutil
 import tempfile
@@ -350,6 +351,51 @@ def test_bash_tool_runs_code_over_http_with_a_session():
     assert any(t["name"] == "bash" for t in llm.calls[0][1]), "bash advertised over HTTP"
 
 
+def test_present_streams_an_artifact_event_over_http():
+    # B3b acceptance: a presented chart streams as an `artifact` event carrying the inline payload
+    # a demo renders (kind chart -> base64 + mime). Needs a session (artifacts live under the
+    # session dir). The file is pre-created in the session scratchpad; the agent presents it.
+    import os
+
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+    from copilot.workspace import for_session
+
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    chart = os.path.join(for_session(d, "art").scratchpad, "cpu.png")
+    with open(chart, "wb") as f:
+        f.write(b"PNG-BYTES")
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter()
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+    llm = ScriptedLLM([tool_call("present", {"path": "cpu.png", "title": "r1 cpu"}, id="c1"),
+                       final("shown the chart, anything else?")])   # ask-back -> gate bypassed
+    app.dependency_overrides[get_llm] = lambda: llm
+    resp = TestClient(app).post("/chat", json={"question": "chart r1 cpu",
+                                               "start": 100, "end": 200, "session_id": "art"})
+    assert resp.status_code == 200
+    art = [e for e in _events(resp) if e["type"] == "artifact"][0]
+    assert art["kind"] == "chart" and art["mime"] == "image/png" and art["title"] == "r1 cpu"
+    assert art["content_b64"] == base64.b64encode(b"PNG-BYTES").decode(), "inline render payload"
+    assert art["path"] == "artifacts/0000-cpu.png"
+    assert any(t["name"] == "present" for t in llm.calls[0][1]), "present advertised over HTTP"
+    # the artifact event round-trips into events.jsonl unchanged (one schema, ADR-0009).
+    assert any(w["type"] == "artifact" and w.get("content_b64") for w in SessionStore(d).read("art"))
+
+
+def test_present_tool_absent_without_a_session():
+    # no session_id -> no per-session workspace -> present is not advertised (a one-off can't
+    # snapshot into a case record).
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=ROWS)
+    llm = ScriptedLLM([final("which device?")])
+    app.dependency_overrides[get_llm] = lambda: llm
+    resp = TestClient(app).post("/chat", json={"question": "hi", "start": 100, "end": 200})
+    assert resp.status_code == 200
+    assert not any(t["name"] == "present" for t in llm.calls[0][1]), "no present without a session"
+
+
 def test_bash_tool_absent_without_a_session():
     # no session_id -> no persistent scratchpad -> bash is not advertised (a one-off can't code).
     app.dependency_overrides.clear()
@@ -509,6 +555,8 @@ def _run():
     test_no_session_id_persists_nothing()
     test_bash_tool_runs_code_over_http_with_a_session()
     test_bash_tool_absent_without_a_session()
+    test_present_streams_an_artifact_event_over_http()
+    test_present_tool_absent_without_a_session()
     test_gate_outcomes_land_in_the_ledger_pass_and_fail()
     test_manual_skill_invoke_over_http()
     test_device_question_streams_cited_log_and_flow_rows()

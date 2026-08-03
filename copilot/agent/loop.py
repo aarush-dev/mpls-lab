@@ -38,10 +38,10 @@ from copilot.retrieval import Retriever
 from copilot.skills import Skill, catalog, fault_type_hint
 from copilot.tools import Cite, TOOL_SPECS, dispatch
 from copilot.window import WindowContext
-from copilot.workspace import Executor
+from copilot.workspace import Executor, PathPolicyError, Workspace, snapshot
 
 # canonical event enum (ADR-0009) -- ONE vocabulary for the live stream AND the
-# persisted events.jsonl. F3 emits a subset; the gate/artifact types land later.
+# persisted events.jsonl. F3 emits a subset; gate (I4a) and artifact (B3b) types land in later tickets.
 EVENT_TYPES = frozenset({
     "user_msg", "assistant_msg", "think", "tool_call", "tool_result", "gate", "artifact",
 })
@@ -128,6 +128,20 @@ BASH_SPEC = {
                    "and read its stdout back.",
     "parameters": {"type": "object", "required": ["command"],
                    "properties": {"command": {"type": "string"}}},
+}
+
+# B3b (ADR-0009/0010): present a generated output (a chart image or code) from the scratchpad --
+# snapshot it into the append-only artifacts/ and emit an `artifact` event for the demo to render
+# inline. A later overwrite of the source can't change the shown artifact (snapshot-on-present).
+# Advertised only when a per-session Workspace is wired. It's an output, not a fact -> no Cite.
+PRESENT_SPEC = {
+    "name": "present",
+    "description": "Show a file you generated in your scratchpad (a chart image, or a code/text "
+                   "file) to the user; it is snapshotted into the case record. Pass its path and "
+                   "an optional title.",
+    "parameters": {"type": "object", "required": ["path"],
+                   "properties": {"path": {"type": "string"},
+                                  "title": {"type": "string"}}},
 }
 
 # TOOL_SPECS + dispatch live in copilot.tools (the registry, I1) -- re-exported here so
@@ -217,6 +231,7 @@ def investigate(question: str, window: WindowContext, *,
                 kg: dict[str, str] | None = None,
                 skills: dict[str, Skill] | None = None,
                 executor: Executor | None = None,
+                workspace: Workspace | None = None,
                 invoke: list[str] | None = None,
                 history: list[dict] | None = None,
                 fault_type: str | None = None,
@@ -266,7 +281,8 @@ def investigate(question: str, window: WindowContext, *,
         #                                                  from the catalog, so a miss is rare;
         #                                                  add a warning event if humans hand-type it.
     tool_specs = (TOOL_SPECS + ([LOAD_SKILL_SPEC] if skills else [])
-                  + ([BASH_SPEC] if executor else []))    # B3a: bash only when exec is wired
+                  + ([BASH_SPEC] if executor else [])     # B3a: bash only when exec is wired
+                  + ([PRESENT_SPEC] if workspace else []))  # B3b: present only when workspace wired
     messages = [{"role": "system", "content": system}]
     hist = history or []                   # R2a: prior turns reach the model on resume (ADR-0009)
     if cfg.history_compaction and hist:    # I6/ADR-0015 §5: flag off -> hist untouched, byte-identical
@@ -346,16 +362,22 @@ def investigate(question: str, window: WindowContext, *,
                 return _capped(events, "tool_call_cap")
             tool_calls += 1
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
+            artifact = None                              # B3b: set by present -> an artifact event
             if tc.name == "load_skill":                  # I5: a skill body is method, not
                 observation, cites = _load_skill(skills, tc.arguments), ()  # evidence -> no
             elif tc.name == "bash" and executor:         # B3a: run code in the scratchpad; the
                 observation, cites = _run_bash(executor, tc.arguments), ()  # output is action, not
-            else:                                        # Cite, and a load miss never gate-blocks.
+            elif tc.name == "present" and workspace:     # B3b: snapshot a presented output; it
+                observation, artifact = _present(workspace, tc.arguments)  # rides its own artifact
+                cites = ()                               # event, and is an output, not a Cite.
+            else:                                        # a load/present miss never gate-blocks.
                 observation, cites = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
                 evidence.extend(cites)
                 if observation.startswith("error:"):    # guidance error -> a failed call (gate)
                     tool_errors.append(observation)
             emit("tool_result", id=tc.id, name=tc.name, content=observation, n=len(cites))
+            if artifact is not None:                     # B3b: the snapshotted output rides its own
+                emit("artifact", **artifact)             # canonical event after the tool_result
             messages.append({"role": "tool", "tool_call_id": tc.id,
                              "name": tc.name, "content": observation})
 
@@ -415,6 +437,25 @@ def _run_bash(executor: Executor, args: dict) -> str:
     if r.stderr:
         parts.append("stderr:\n" + r.stderr.rstrip("\n"))
     return "\n".join(parts)
+
+
+def _present(ws: Workspace, args: dict) -> tuple[str, dict | None]:
+    """B3b (ADR-0009/0010): snapshot the model's presented `path` into the append-only artifacts/
+    and return (observation, artifact-event-payload). A missing path / a file outside the scratchpad
+    / an unreadable file comes back AS guidance (ADR-0015), never a raise, with a None payload (no
+    artifact event emitted). The snapshot freezes the bytes now, so a later overwrite of the source
+    can't change the shown artifact."""
+    path = args.get("path")
+    if not path or not isinstance(path, str):
+        return "error: present needs a 'path' to a file in your scratchpad", None
+    try:
+        art = snapshot(ws, path, title=args.get("title"))
+    except PathPolicyError:                              # writable()'s message talks about writes;
+        return (f"error: cannot present {path!r}: present a file inside your scratchpad "  # reframe
+                f"(copy it in first if it lives elsewhere)", None)
+    except OSError as e:                                  # missing / not-a-file / unreadable
+        return f"error: cannot present {path!r}: {getattr(e, 'strerror', None) or e}", None
+    return f"presented {art.source!r} as {art.name} ({art.kind})", art.event()
 
 
 def _capped(events: list[Event], why: str) -> Outcome:

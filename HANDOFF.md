@@ -177,7 +177,22 @@ builds the executor per request from `for_session(sessions.root, sid)` when a `s
 present (the scratchpad lives under the session dir); a one-off chat (no sid) gets no bash. Seam
 tests: loop-level (`test_agent.py`, real executor) + HTTP-level (`test_api.py`, `/chat` with a
 session) prove code runs + no-net/timeout still bite through the loop; skip where unshare is absent.
-**B3b (#32)** adds artifacts + demo render on top.
+
+**B3b (#32) landed (backend).** The `present` tool wired into the loop (`copilot/agent/loop.py`):
+a per-session `Workspace` is threaded into `investigate(..., workspace=)` and `PRESENT_SPEC` is
+advertised **only when wired** (like bash — no session ⇒ no present). A `present(path, title?)`
+call routes by-name to `_present` → `snapshot(ws, path)` (`copilot/workspace/present.py`), which
+**copies the scratchpad file into the append-only `artifacts/` at present-time** (name
+`NNNN-<basename>`, never reused) and returns the payload for an `artifact` event emitted right
+after the `tool_result`. Snapshot **freezes the bytes now** — a later overwrite of the source
+can't change the shown artifact (ADR-0009). Payload: `kind` chart (image ext → base64
+`content_b64`) or code (text `content`), `mime`, `path`, capped inline (>512 KB → reference-only).
+Source confined to scratchpad (reuses `Workspace.writable`); a missing/outside file → guidance
+(ADR-0015), no artifact event. `api/app.py` builds the `Workspace` once and shares it with the
+Executor. Seam tests: loop + HTTP (`/chat`) prove the artifact event streams with an inline render
+payload and round-trips into `events.jsonl`; snapshot-on-present unit self-check
+(`python3 -m copilot.workspace.present`). **Render is a separate lane** — the demo/UI (C1/#27,
+still an F0 stub) consumes the `artifact` event; this ticket only produces it.
 
 **R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
 seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth
