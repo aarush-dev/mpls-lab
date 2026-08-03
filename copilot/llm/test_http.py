@@ -168,6 +168,35 @@ def test_recorded_risk_self_judge_fails_open_on_prose():
                       msgs, "r1 cpu pegged").ok is True
 
 
+def test_recorded_risk_ask_back_without_question_mark_is_gated():
+    # RISK 2 (loop.py ask-back heuristic): the ask-back only fires when a no-evidence turn ends
+    # in '?'. Exercise the failing shape -- a real model's clarifying prose that does NOT end in
+    # '?' -- and record the outcome: it does NOT surface as an ask-back; it falls into the gate
+    # and is safely BLOCKED (never emitted as an uncited answer). The heuristic's limitation is a
+    # UX degradation, not a correctness hole, so it is recorded here, not "fixed" (ticket: fix
+    # only if it bites).
+    llm = ScriptedLLM([final("I need to know which device you mean before I can look.")])
+    out = investigate("is the network ok?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(gate_max_retries=0))
+    assert not out.answer.startswith("I need to know"), \
+        "clarifying prose without '?' must not surface as an ask-back (heuristic limitation)"
+    assert out.answer.startswith("cannot answer yet"), "it is safely gated instead, not emitted"
+
+
+def test_recorded_risk_investigate_and_chat_are_sync():
+    # RISK 3 (sync blocking): investigate() and the client's chat() are synchronous, and the
+    # /chat endpoint is a sync `def`. Recorded outcome: this is intentional (ADR-0010, local-only
+    # single-user) -- Starlette runs a sync endpoint in its threadpool, so a slow multi-round
+    # investigation blocks a worker thread, not the event loop. Exercised by asserting the shape
+    # so a later async refactor is a conscious change, not an accident.
+    import inspect
+    from copilot.api.app import chat as chat_endpoint
+    assert not inspect.iscoroutinefunction(OpenAIClient.chat)
+    assert not inspect.iscoroutinefunction(investigate)
+    assert not inspect.iscoroutinefunction(chat_endpoint), \
+        "sync endpoint -> Starlette threadpool (ADR-0010 local-only); blocks a worker, not the loop"
+
+
 def _smoke():
     """One live smoke call (R1 acceptance) -- opt-in, needs a running endpoint. Proves the
     client speaks the wire protocol; NOT a full investigation."""
@@ -185,6 +214,8 @@ def _run():
     test_to_reply_parses_calls_and_degrades_bad_args()
     test_parse_tool_calls_only_when_the_whole_turn_is_the_call()
     test_recorded_risk_self_judge_fails_open_on_prose()
+    test_recorded_risk_ask_back_without_question_mark_is_gated()
+    test_recorded_risk_investigate_and_chat_are_sync()
     print("copilot.llm.http self-check OK")
 
 
