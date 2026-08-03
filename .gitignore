@@ -22,11 +22,13 @@ airgap/images/
 .env
 copilot/.env
 
-# Copilot runtime state (R2a session store / cases) — per-run, not source
+# Copilot runtime state (R2a session store / R2b event ledger / cases) — per-run, not source
 sessions/
 cases/
+ledger.db
 copilot/sessions/
 copilot/cases/
+copilot/ledger.db
 
 # Python / tooling cruft
 __pycache__/

@@ -30,7 +30,7 @@ copilot/
 
   # Lane-Runtime (Dev 2) — disjoint ownership
   llm/        OpenAI-compatible client, profile-selected               (F1,R1)
-  memory/     Session Store (sessions/<id>/events.jsonl+meta.json, resumable) (R2a); Event Ledger next (R2b)
+  memory/     Session Store (sessions/<id>/events.jsonl+meta.json, resumable) (R2a); Event Ledger (ledger.py — append-only SQLite timeline, gate outcomes) (R2b)
   window/     WindowContext live/query/forensic                        (R3)
   emulator/   PA-emulator: /labels ground truth → Prediction Record    (R4)
   forensic/   forensic trigger: predict loop, dedup, case creation     (R5,R6)
@@ -83,7 +83,9 @@ Self-check: `python3 -m copilot.llm.test_http`; live smoke (needs an endpoint):
 own **emit-time** ISO-UTC `ts` (R2a: stamped in the loop at occurrence, not at send) —
 one schema (`event_wire`) for the live stream and the persisted `events.jsonl`. Pass a
 `session_id` to resume: prior turns are replayed into the loop and this turn is appended
-back (R2a `SessionStore`); omit it for a stateless one-off chat.
+back (R2a `SessionStore`); omit it for a stateless one-off chat. On a session request the
+turn's **gate outcomes** (pass and fail) are also written to the R2b Event Ledger
+(`COPILOT_LEDGER_PATH`, default `ledger.db`) — the append-only SQLite timeline.
 
 ```bash
 uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only

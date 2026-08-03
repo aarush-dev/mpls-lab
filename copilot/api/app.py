@@ -27,7 +27,7 @@ from copilot.adapter import HttpAdapter, ToolAdapter
 from copilot.agent import Outcome, event_wire, investigate
 from copilot.config import Config, load
 from copilot.llm import LLMClient, make_client
-from copilot.memory import SessionStore
+from copilot.memory import Ledger, SessionStore
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
 from copilot.window import WindowContext
@@ -121,6 +121,13 @@ def get_sessions() -> SessionStore:
     return SessionStore(os.environ.get("COPILOT_SESSIONS_DIR", "sessions"))
 
 
+def get_ledger() -> Ledger:
+    # R2b (ADR-0009): the append-only Event Ledger (SQLite), the system's timeline. Path from
+    # env (COPILOT_LEDGER_PATH), else ./ledger.db -- same env-override pattern. Tests override
+    # with a tmp file. Gate outcomes route here through the F4 event pipeline (see chat()).
+    return Ledger(os.environ.get("COPILOT_LEDGER_PATH", "ledger.db"))
+
+
 def _window(req: ChatRequest, cfg: Config) -> WindowContext:
     # R3 (ADR-0002): Query when the request names a period, else rolling Live (now-X..now).
     # Forensic (frozen) windows are built by the case layer (R5b), not from a chat request.
@@ -142,7 +149,8 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
          retriever: Retriever | None = Depends(get_retriever),
          kg: dict[str, str] | None = Depends(get_kg),
          skills: dict[str, Skill] | None = Depends(get_skills),
-         sessions: SessionStore = Depends(get_sessions)) -> StreamingResponse:
+         sessions: SessionStore = Depends(get_sessions),
+         ledger: Ledger = Depends(get_ledger)) -> StreamingResponse:
     # R2a: a session_id resumes the conversation -- prior turns are reconstructed from the
     # session's events.jsonl and threaded into the loop, and this turn's events are appended
     # back (write-through). No session_id -> a stateless one-off chat, nothing persisted.
@@ -153,4 +161,12 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
                           skills=skills, invoke=req.skills, history=history)
     if sid:
         sessions.append(sid, outcome.events)
+        # R2b (ADR-0009): route this turn's gate outcomes (pass and fail) into the Event Ledger
+        # -- the system's timeline. A turn emits >=1 gate (one per blocked retry + the terminal
+        # one), so the record id folds in `retry` alongside sid+ts: unique per emitted gate,
+        # stable across a re-persist (idempotent). Keyed to a session -> a one-off chat records
+        # nothing (mirrors R2a). Prediction Records land here from their producer (#20/#23).
+        for e in outcome.of_type("gate"):
+            w = event_wire(e)
+            ledger.append(f"{sid}:{w['ts']}:{e.data['retry']}", w)
     return StreamingResponse(_sse(outcome), media_type="text/event-stream")

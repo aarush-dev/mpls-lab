@@ -333,10 +333,70 @@ def test_no_session_id_persists_nothing():
     assert os.listdir(d) == [], "no session_id -> nothing written"
 
 
+def _ledger_client(script, ledger, *, retries=1):
+    from copilot.api.app import get_ledger, get_sessions
+    from copilot.memory import SessionStore
+
+    sroot = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, sroot, ignore_errors=True)
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=ROWS)
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(sroot)
+    app.dependency_overrides[get_ledger] = lambda: ledger
+    app.dependency_overrides[get_config] = lambda: Config(gate_max_retries=retries)
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM(script)
+    return TestClient(app)
+
+
+def test_gate_outcomes_land_in_the_ledger_pass_and_fail():
+    # R2b acceptance: a real investigation's gate outcome (pass AND fail) lands in the Event
+    # Ledger, keyed to the session, and survives a restart (a fresh Ledger on the same file).
+    import os
+
+    from copilot.memory import Ledger
+
+    dbdir = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, dbdir, ignore_errors=True)
+    path = os.path.join(dbdir, "ledger.db")
+    led = Ledger(path)
+
+    # pass: a cited answer clears the gate (ok=True lands).
+    _ledger_client([
+        tool_call("query_metrics", {"device": "r1"}, id="c1"),
+        final("r1 cpu pegged [metrics:0]"),
+        final('{"pass": true}'),
+    ], led).post("/chat", json={"question": "why is r1 slow?", "start": 100, "end": 200,
+                                "session_id": "pass1"})
+    # fail: an uncited answer is blocked; retries=0 keeps it a one-shot fail (ok=False lands).
+    _ledger_client([final("r1 is slow")], led, retries=0).post(
+        "/chat", json={"question": "why is r1 slow?", "start": 100, "end": 200,
+                       "session_id": "fail1"})
+
+    # one turn, TWO gate events: an uncited answer fails (ok=False, retry=0), the loop re-enters
+    # and the cited retry passes (ok=True, retry=1). Both must land as DISTINCT ledger rows --
+    # the id folds in `retry`, so a same-ts pair can't collide under INSERT OR IGNORE.
+    _ledger_client([
+        tool_call("query_metrics", {"device": "r1"}, id="c1"),
+        final("r1 is slow"),                              # uncited -> gate fail (retry=0)
+        final("r1 cpu pegged [metrics:0]"),               # cited retry -> gate pass (retry=1)
+        final('{"pass": true}'),                          # self-judge over the retry
+    ], led, retries=1).post("/chat", json={"question": "why is r1 slow?", "start": 100,
+                                           "end": 200, "session_id": "retry1"})
+
+    # a fresh Ledger on the same file (the restart) recovers every outcome from the timeline.
+    reopened = Ledger(path)
+    gates = reopened.by_time("2000-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+    assert all(g["type"] == "gate" for g in gates), "only gate outcomes routed to the ledger so far"
+    assert {g["ok"] for g in gates} == {True, False}, "both a passing and a failing gate outcome persisted"
+    # the retry1 turn's two gates survived as two rows (no INSERT OR IGNORE collision).
+    assert len(gates) == 4, "pass1(1) + fail1(1) + retry1(2) = 4 distinct gate rows"
+
+
 def _run():
     test_chat_streams_tool_call_and_cited_answer()
     test_session_persists_and_resumes_over_http()
     test_no_session_id_persists_nothing()
+    test_gate_outcomes_land_in_the_ledger_pass_and_fail()
     test_manual_skill_invoke_over_http()
     test_device_question_streams_cited_log_and_flow_rows()
     test_fault_returns_cited_runbook_and_nearby_incident_over_http()

@@ -68,6 +68,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | A1 | 40 | **real HTTP tool adapter over dataapi** (replaces `StubAdapter`) |
 | R1 | 16 | real LLM backend profiles **+ the loop message-assembly fix** (narrow: fake-server + 1 smoke, not live-lab) |
 | R2a | 17 | session store (`sessions/<id>/{events.jsonl,meta.json}`) + multi-turn loop entry (`history`) + emit-time event ts + gate-on-pass |
+| R2b | 18 | Event Ledger (`copilot/memory/ledger.py` — append-only SQLite, idempotent by record id, query by device / time range) + gate outcomes routed in via F4 (`api/app.py`) |
 | E1 | 42 | **end-to-end: real chat on real model + real dataapi + seeded KB** |
 
 **#42 (E1) closing is the first moment `/chat` answers a real question end to end** — not #16. R1 is
@@ -77,7 +78,6 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 ### Remaining Milestone A
 | Code | # | Delivers |
 |---|---|---|
-| R2b | 18 | Event Ledger (append-only records store, incl. gate outcomes) — now unblocked (#17 landed the emit-time `event_wire` schema + gate-on-pass it reuses) |
 | R4a | 20 | PA-emulator core: ground-truth → §3.3 record (oracle) + `abstain`→gate + `fault_type`→skills |
 | R4b | 21 | emulator `error_profile` + drift/health knobs |
 | R5a | 22 | forensic trigger: 10 s loop, alert, episode dedup, restart-safe |
@@ -154,7 +154,7 @@ with anything it shares a row with.
 | **A1** #40 | `api/app.py` (`get_adapter`), `tools/registry.py` (transport errors), `config.py` | replaces the stub; needs a base URL that exists nowhere today. |
 | **R1** #16 | `agent/loop.py:203` (assistant `tool_calls` dropped), `tools/registry.py:61` + `agent/loop.py:91` (two copies of the flat tool-spec shape), `agent/loop.py:104` (ReAct parser), `config.py:49,68` | ADR-0004. A real backend rejects the current message assembly. |
 | **R2a** #17 | `agent/loop.py:122,155` (single-shot → multi-turn), `api/app.py` (`ChatRequest`, session id), `agent/loop.py:46` (emit-time ts), `:185` (gate event on pass) | ADR-0009. Resume is a loop change, not a writer. |
-| **R2b** #18 | I4b gate-outcome emit site (or F4's event pipeline) | #18's scope includes gate outcomes; nothing persists them. |
+| **R2b** #18 | `memory/ledger.py` (new), `api/app.py` (gate outcomes → ledger via F4) | ADR-0009. Routed through F4's event pipeline (not the I4b emit site) — reuses the single `event_wire` schema. |
 | **R4a** #20 | `agent/gate.py` (`abstain` softens), `agent/loop.py:145-154` + `skills/loader.py` (`fault_type` steers) | ADR-0008 §Nuances, ADR-0012 §Decision. I4a/I4b/I5 are incomplete against their own ADRs. |
 | **R4b** #21 | `agent/gate.py` (via #20) | its own acceptance — "heavy stresses the gate" — is otherwise unsatisfiable. |
 | **R5a** #22 | *nothing outside `forensic/`* | **the one honest ticket in the original plan.** Keep it that way. |

@@ -121,6 +121,18 @@ too (`ok=True`), not only on fail. `POST /chat` gained `session_id` — set it t
 for a stateless one-off. Self-check: `python3 -m copilot.memory.test_session` (+ new resume/session
 cases in `agent`/`api` suites). Unblocks **R2b (#18)**, which reuses the emit-time schema + gate-on-pass.
 
+**R2b (#18) landed.** Event Ledger (`copilot/memory/ledger.py` `Ledger`): append-only SQLite —
+the system's timeline (Prediction Records + journal + gate outcomes), idempotent by record id
+(`INSERT OR IGNORE` on the PK — a re-append is a no-op, a written row never updates), queryable
+`by_device` / `by_time` (inclusive ISO-UTC range). One row = one `event_wire` dict (same schema as
+R2a), with `ts`/`type`/`device` lifted into columns. Connection-per-call (dodges sqlite3's
+same-thread guard under FastAPI's threadpool); per-conversation write lock deferred to R6a/#24.
+Gate outcomes (pass and fail) route in through **F4's event pipeline** (`api/app.py`, not the I4b
+emit site) — recorded only on a session request, keyed `f"{sid}:{ts}"`. Prediction Records land
+here from their producer (PA-emulator, #20/#23). `COPILOT_LEDGER_PATH` (default `ledger.db`).
+Self-check: `python3 -m copilot.memory.test_ledger` (+ a pass/fail gate-outcome case in the `api`
+suite). Unblocks **R4a (#20)** / **B4**.
+
 **Plan repaired 2026-08-03, audited same day.** Repair created **#38** (codependency rule + graph
 repair), **#39** (redeploy lab + verify dataapi live), **#40** (real HTTP tool adapter); #16–#27
 rewritten with `Modifies` + `Consumes stub` sections + corrected `blocked_by`; #9–#15 closed. The
@@ -152,7 +164,7 @@ teaching the exact `[metrics:0]` citation token. **Regressions filed** (#42 mand
 patch): #43 (range/unicode citations), #44 (embedder query/passage asymmetry), #45 (harmony leak),
 #46 (all-None-node retrieval crash — **fixed** here: `store.py` pins the pyarrow schema).
 
-**Not done:** memory (R2a/b), emulator (R4a/b), trust gate (T1), forensic chain (R5–R6), C1;
+**Not done:** emulator (R4a/b), trust gate (T1), forensic chain (R5–R6), C1;
 Milestone B. Seeder does not set `node` on incidents, so `search_incidents`-by-device narrows to
 empty (S1 follow-up, noted in #46). Default `/chat` KB still needs a seeded `COPILOT_KB_URI`.
 
