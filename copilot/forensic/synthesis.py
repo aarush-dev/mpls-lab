@@ -35,11 +35,15 @@ def _fault_chat_id(i: int) -> str:
     return INITIAL_CHAT if i == 0 else f"fault-{i}"
 
 
+def _dev(record: dict) -> str:
+    return record.get("device") or "the affected device"
+
+
 def _cofault_question(record: dict, i: int) -> str:
     """The prompt for co-active fault #i (i>=1): investigate a DISTINCT anomaly in the same frozen
     window, independent of the primary fault, and cite its evidence -- names the device so the gate
     anchors on it (gate.ENTITY_RE)."""
-    dev = record.get("device") or "the affected device"
+    dev = _dev(record)
     return (f"A second fault is concurrently active on {dev} (co-active #{i}). Independent of the "
             f"primary fault, identify a distinct anomaly in the frozen telemetry window for {dev} "
             f"and cite the supporting evidence.")
@@ -52,9 +56,13 @@ def _attributed_cites(chat_id: str, outcome: Outcome):
     return [dataclasses.replace(c, id=f"{chat_id}:{c.id}") for c in outcome.cites]
 
 
-def _master_question(record: dict, n: int) -> str:
-    dev = record.get("device") or "the affected device"
-    return (f"{n} concurrent faults on {dev} were investigated in separate chats. Synthesise a "
+def _master_question(record: dict, n: int, devices) -> str:
+    """Names EVERY device the sub-chats gathered evidence on, so the gate's on-topic check
+    (pre_gate: a cite whose device is not a question entity is off-topic) admits all inherited
+    cites. Single-device today (the frozen case is device-scoped); under the #49 emitter a genuine
+    co-active fault on another device is named here, or its cite would be wrongly rejected."""
+    on = ", ".join(devices) or _dev(record)
+    return (f"{n} concurrent faults ({on}) were investigated in separate chats. Synthesise a "
             f"single combined root-cause picture, attributing every claim to the sub-chat evidence "
             f"it rests on.")
 
@@ -76,8 +84,8 @@ def master_synthesis(record: dict, window, subs, *, llm, cfg) -> Outcome:
     citation_check (gate.py); self_judge (stage 2, loop) is not re-run here.
     ponytail: single-shot -- no agentic retry; on gate fail the missing[] IS the answer (mirrors the
     loop). Ceiling: a retry round if a real model routinely under-cites the synthesis."""
-    question = _master_question(record, len(subs))
     prior = [ac for cid, out in subs for ac in _attributed_cites(cid, out)]
+    question = _master_question(record, len(subs), sorted({c.device for c in prior if c.device}))
     prompt = (f"{question}\n\nSub-chat findings:\n\n{_brief(subs)}\n\n"
               "Cite each claim by the bracketed attributed id EXACTLY as shown above.")
     events = [Event("user_msg", {"content": question})]
@@ -93,12 +101,18 @@ def master_synthesis(record: dict, window, subs, *, llm, cfg) -> Outcome:
 
 
 def synthesize_concurrent(case_dir: str, record: dict, window, replay, *, primary: Outcome,
-                          llm, cfg, retriever=None, skills=None, kg=None, invoke=None) -> Outcome:
+                          llm, cfg, retriever=None, skills=None, kg=None, invoke=None):
     """The R6b fan-out (ADR-0014): with `n_concurrent > 1`, run one investigation chat per fault
     (fault-0 = the reused primary run) + a master synthesis chat, all persisted under the case.
-    Returns the master Outcome. `n_concurrent == 1` never reaches here (create_case guards)."""
-    n = max(1, int(record.get("n_concurrent", 1)))
+    Returns the master Outcome (None on an idempotent re-entry). `n_concurrent == 1` never reaches
+    here (create_case guards)."""
+    n = int(record.get("n_concurrent", 1))       # create_case guards n>1 before calling
     chats = case_chats(case_dir)
+    if chats.read(MASTER_CHAT):                   # idempotent re-fire backstop: the master chat is
+        return None                              # written last, so its presence means the fan-out
+        #   already ran -- re-running would append-duplicate fault-*/master (append is append-only,
+        #   no dedup: session.py). Mirrors create_case's INITIAL_CHAT guard. Ceiling: a per-chat
+        #   guard if a crash between the last fault chat and the master ever needs clean resume.
     subs = [(INITIAL_CHAT, primary)]
     for i in range(1, n):
         out = investigate_record(record, _cofault_question(record, i), window, replay, llm=llm,

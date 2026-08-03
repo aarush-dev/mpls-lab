@@ -66,6 +66,18 @@ def test_concurrent_spawns_n_chats_plus_master():
         assert chats.read(MASTER_CHAT), "the master synthesis chat exists"
 
 
+def test_reentry_does_not_duplicate_chats():
+    # regression (spec review): create_case re-fires on a supported path; the fan-out must not
+    # append-duplicate fault-*/master (append is append-only, no dedup). Guarded on the master chat.
+    with tempfile.TemporaryDirectory() as d:
+        create_case(_rec(2), WIN, live_adapter=_stub_live(),
+                    llm=ScriptedLLM(_concurrent_script()), cfg=Config(), cases_root=d)
+        cd = create_case(_rec(2), WIN, live_adapter=_stub_live(),   # re-fire, fresh scripted llm
+                         llm=ScriptedLLM(_concurrent_script()), cfg=Config(), cases_root=d)
+        master = case_chats(cd).read(MASTER_CHAT)
+        assert sum(1 for e in master if e["type"] == "assistant_msg") == 1, "master not duplicated on re-entry"
+
+
 def test_single_fault_has_no_master():
     # regression: n_concurrent==1 stops at the initial chat -- the fan-out never fires.
     with tempfile.TemporaryDirectory() as d:
