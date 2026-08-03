@@ -85,7 +85,6 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 | R6a | 24 | multi-chat per case + follow-up over frozen window |
 | R6b | 25 | concurrent faults: n chats + master synthesis (+ gate change) |
 | T1 | 41 | **trust gate: distrust a degraded model** (consumes #21's drift/health scalar) |
-| I6 | 26 | history compaction (config-gated) |
 | C1 | 27 | demo web app + **live-flush streaming** |
 
 ### Milestone B — coding agent (after A)

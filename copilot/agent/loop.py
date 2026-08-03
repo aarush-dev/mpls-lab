@@ -146,6 +146,58 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
     return (ToolCall(name=str(name), arguments=args, id="parsed_0"),)
 
 
+CITE_RE = re.compile(r"\[[a-z_]+:\d+\]")   # evidence id shape the tools emit ([metrics:0], [events:2])
+
+
+def compact_history(history: list[dict], *, max_chars: int) -> list[dict]:
+    """I6/ADR-0015 §5 history compaction (config-gated): keep the most recent turns verbatim,
+    collapse older ones into ONE leading "investigation so far" note, so a long session's prompt
+    stays under `max_chars`. The note retains every cite id from the dropped turns, so an answer
+    that still leans on prior evidence never loses the id (acceptance). Deterministic -- no LLM
+    call: ADR-0015 rejects dump-then-summarize; a compact digest is the laziest thing that bounds
+    the prompt. Same sliding-window idea as WindowContext.
+
+    ponytail: two known ceilings the bound can be exceeded by -- (1) a single recent turn larger
+    than the budget is kept whole (a turn can't be split); (2) if the dropped turns' cite ids alone
+    exceed the note budget they are still all kept (never drop a cited id > hold the char bound).
+    Upgrade to intra-turn truncation if either ceiling ever bites.
+    """
+    if not history or _chars(history) <= max_chars:
+        return history                       # under budget -> unchanged (no note)
+    note_cap = max(200, max_chars // 5)      # reserve a slice for the digest; the rest is the tail
+    tail_budget = max_chars - note_cap
+    kept: list[dict] = []
+    total = 0
+    for msg in reversed(history):            # newest -> oldest, verbatim while under budget
+        c = len(msg.get("content") or "")
+        if kept and total + c > tail_budget:  # always keep at least the latest turn
+            break
+        kept.append(msg)
+        total += c
+    kept.reverse()
+    dropped = history[:len(history) - len(kept)]
+    if not dropped:                          # only one (oversized) turn -> nothing to collapse
+        return history
+    return [_digest_note(dropped, note_cap)] + kept
+
+
+def _chars(msgs: list[dict]) -> int:
+    return sum(len(m.get("content") or "") for m in msgs)
+
+
+def _digest_note(dropped: list[dict], cap: int) -> dict:
+    """One compacted note standing in for the dropped turns. EVERY cite id in the dropped turns is
+    kept in full -- cites are load-bearing (the gate keys on them), so the prose is truncated to
+    leave room for them, not the other way round. The note stays <= `cap` unless head + cites alone
+    already exceed it (ceiling 2 in compact_history), in which case cites still win."""
+    prose = " | ".join(f"{m.get('role', '?')}: {m.get('content') or ''}" for m in dropped)
+    head = f"Investigation so far ({len(dropped)} earlier turns compacted): "
+    cites = list(dict.fromkeys(CITE_RE.findall(prose)))   # unique, order-preserving
+    tail = (" cites: " + " ".join(cites)) if cites else ""
+    body = prose[: max(0, cap - len(head) - len(tail))]   # reserve room for cites -> note <= cap
+    return {"role": "system", "content": head + body + tail}
+
+
 def investigate(question: str, window: WindowContext, *,
                 llm: LLMClient, adapter: ToolAdapter, cfg: Config,
                 retriever: Retriever | None = None,
@@ -201,7 +253,10 @@ def investigate(question: str, window: WindowContext, *,
         #                                                  add a warning event if humans hand-type it.
     tool_specs = TOOL_SPECS + ([LOAD_SKILL_SPEC] if skills else [])
     messages = [{"role": "system", "content": system}]
-    messages += history or []              # R2a: prior turns reach the model on resume (ADR-0009)
+    hist = history or []                   # R2a: prior turns reach the model on resume (ADR-0009)
+    if cfg.history_compaction and hist:    # I6/ADR-0015 §5: flag off -> hist untouched, byte-identical
+        hist = compact_history(hist, max_chars=cfg.history_max_chars)
+    messages += hist
     messages.append({"role": "user", "content": question})
     tool_calls = 0
     retries = 0                                           # agentic gate retries used (ADR-0008)

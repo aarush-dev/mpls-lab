@@ -58,6 +58,8 @@ class Config:
     kg_enabled: bool = True           # ADR-0007: curated KG, additive, never critical-path
     ledger_to_kb: bool = True         # ADR-0009: finalized case verdict feeds the KB
     history_compaction: bool = False  # ADR-0015: summarize old turns (default off)
+    history_max_chars: int = 6000     # ADR-0015 §5 / I6: when history_compaction is on, the char
+                                      # budget the resumed history is kept under (loop.compact_history)
 
     # -- knobs ----------------------------------------------------------------
     window_x_min: int = 10            # ADR-0002: X, rolling/forensic window minutes

@@ -9,6 +9,7 @@ import dataclasses
 
 from copilot.adapter import StubAdapter
 from copilot.agent import Event, Outcome, investigate, parse_tool_calls
+from copilot.agent.loop import compact_history
 from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.skills import Skill
@@ -415,6 +416,53 @@ def test_history_prior_turns_reach_the_model():
     assert sent[3] == {"role": "user", "content": "and now?"}, "new question comes last"
 
 
+def test_compact_history_small_history_unchanged():
+    # I6/ADR-0015 §5: under budget -> returned as-is (no note, byte-identical).
+    h = [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1 [metrics:0]"}]
+    assert compact_history(h, max_chars=1000) == h
+
+
+def test_compact_history_bounds_a_long_session():
+    # a long session collapses old turns into one leading note; total stays under the bound.
+    h = [{"role": "user" if i % 2 == 0 else "assistant",
+          "content": f"turn {i} " + "x" * 200} for i in range(40)]
+    out = compact_history(h, max_chars=1200)
+    assert sum(len(m["content"]) for m in out) <= 1200
+    assert len(out) < len(h)                              # something was collapsed
+    assert out[0]["content"].startswith("Investigation so far")   # the digest note leads
+
+
+def test_compact_history_bound_holds_with_many_cites():
+    # regression (review): cites reserved room inside the cap, not appended past it -> note <= budget.
+    h = [{"role": "assistant", "content": f"finding {i} [metrics:{i}] [events:{i}]"} for i in range(15)]
+    h += [{"role": "user" if i % 2 else "assistant", "content": "w" * 250} for i in range(20)]
+    out = compact_history(h, max_chars=1500)
+    assert sum(len(m["content"]) for m in out) <= 1500
+    # every cite from the dropped turns still present despite the tight budget
+    for i in range(15):
+        assert f"[metrics:{i}]" in out[0]["content"]
+
+
+def test_compact_history_never_drops_a_cited_evidence_id():
+    # acceptance: a cite id in a dropped turn survives in the digest note.
+    h = [{"role": "assistant", "content": "old finding [events:7]"}]
+    h += [{"role": "user" if i % 2 else "assistant", "content": "z" * 300} for i in range(20)]
+    out = compact_history(h, max_chars=900)
+    assert "[events:7]" in out[0]["content"], "dropped cite id must be preserved in the note"
+
+
+def test_compaction_flag_on_bounds_the_prompt_the_model_sees():
+    # integration: with the flag on, a huge resumed history is compacted before the model call.
+    history = [{"role": "user" if i % 2 == 0 else "assistant",
+                "content": f"turn {i} " + "y" * 200} for i in range(40)]
+    llm = ScriptedLLM([final("which device?")])          # ask-back, one turn, no tools
+    investigate("and now?", WINDOW, llm=llm, adapter=StubAdapter(),
+                cfg=_cfg(history_compaction=True, history_max_chars=1500), history=history)
+    sent = llm.calls[0][0]
+    hist_chars = sum(len(m["content"]) for m in sent[1:-1])   # between system and new question
+    assert hist_chars <= 1500 < sum(len(m["content"]) for m in history)
+
+
 def test_no_history_is_a_fresh_single_turn():
     # backward-compat: history default None -> system + the one question, unchanged from F3.
     llm = ScriptedLLM([final("which device?")])
@@ -462,6 +510,11 @@ def _run():
     test_drift_state_flags_the_answer_but_does_not_block()
     test_history_prior_turns_reach_the_model()
     test_no_history_is_a_fresh_single_turn()
+    test_compact_history_small_history_unchanged()
+    test_compact_history_bounds_a_long_session()
+    test_compact_history_bound_holds_with_many_cites()
+    test_compact_history_never_drops_a_cited_evidence_id()
+    test_compaction_flag_on_bounds_the_prompt_the_model_sees()
     test_bad_event_type_rejected()
     print("copilot.agent self-check OK")
 
