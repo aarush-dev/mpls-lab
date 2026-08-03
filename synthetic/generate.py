@@ -1031,6 +1031,103 @@ def generate_multi(days, step, scale, profile_path, seed, n_topologies,
             "paths": paths_path, "df": df}
 
 
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def _write_manifest(tdir, seed, days, scale, total_rows, files):
+    """Per-tranche manifest: schema version, generator commit, per-file SHA-256 +
+    row counts. This is the last point the schema is open -- air-gap transfer
+    makes churn expensive, so the training repo pins to these hashes."""
+    import subprocess
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=HERE,
+                            capture_output=True, text=True).stdout.strip() or "unknown"
+    man = {
+        "seed": seed, "days": days, "scale": scale,
+        "schema_version": "59col-frozen-v1", "generator_commit": commit,
+        "main_rows": total_rows,
+        "files": {k: {"path": os.path.basename(v), "sha256": _sha256(v),
+                      "rows": pq.ParquetFile(v).metadata.num_rows}
+                  for k, v in files.items()},
+    }
+    with open(os.path.join(tdir, "manifest.json"), "w") as fh:
+        json.dump(man, fh, indent=2)
+    return man
+
+
+def generate_full(profile_path, seeds, days, scale, step, hard_neg_per_topo,
+                  n_topologies=12, out_root=None, tag="full"):
+    """Full-scale run. One tranche per seed (a train seed + a disjoint holdout
+    seed), each = all N topologies x {F, N}. The main table is streamed to a
+    ParquetWriter one (topology, stream) block at a time so peak RAM stays at one
+    block, not the whole ~85M-row corpus (a single pd.concat would OOM). Companion
+    tables come from the accumulated ledger (small). Writes a per-tranche manifest.
+    """
+    import topologies
+    import events
+    import topology_paths
+    with open(profile_path) as fh:
+        prof = json.load(fh)
+    topos = topologies.load_topologies()[:n_topologies]
+    held = ",".join(t["topology_id"] for t in topos if t.get("held_out"))
+    out_root = out_root or os.path.join(OUTDIR, tag)
+    os.makedirs(out_root, exist_ok=True)
+
+    tranches = []
+    for seed in seeds:
+        tdir = os.path.join(out_root, f"{tag}_seed{seed}")
+        os.makedirs(tdir, exist_ok=True)
+        main_path = os.path.join(tdir, "main.parquet")
+        writer, schema, total_rows, span = None, None, 0, None
+        full_ledger, topo_ledgers = [], []
+        for i, t in enumerate(topos):
+            tid, inv, meta = t["topology_id"], t["inventory"], _paths_meta(t)
+            led_topo = []
+            # F first so the writer schema is captured from a table that actually
+            # has faults (real list<string> label cols); N's all-null label cols
+            # then cast cleanly onto it.
+            for stream, sd, hn in (("F", seed + i, hard_neg_per_topo // 2),
+                                   ("N", seed + 5000 + i, hard_neg_per_topo)):
+                df, led, span = _build_run(prof, inv, days, step, scale, sd,
+                                           stream, tid, hn)
+                tbl = pa.Table.from_pandas(df, preserve_index=False)
+                if writer is None:
+                    schema = tbl.schema.with_metadata({
+                        b"synthetic": b"true",
+                        b"generator": b"synthetic/generate.py",
+                        b"seed": str(seed).encode(),
+                        b"calibrated_from": str(prof.get("source_parquet", "")).encode(),
+                        b"topologies": str(n_topologies).encode(),
+                        b"held_out": held.encode(),
+                        b"schema_version": b"59col-frozen-v1",
+                    })
+                    writer = pq.ParquetWriter(main_path, schema)
+                writer.write_table(tbl.cast(schema))
+                total_rows += len(df)
+                full_ledger += led
+                led_topo += led
+                del df, tbl
+            topo_ledgers.append((tid, inv, meta, led_topo))
+        writer.close()
+        ev = events.write_events(full_ledger, os.path.join(tdir, "events.parquet"),
+                                 rng=np.random.default_rng(seed))
+        ed, pth = topology_paths.write_topology_and_paths(
+            topo_ledgers, os.path.join(tdir, "topology_edges.parquet"),
+            os.path.join(tdir, "paths.parquet"), span[0], span[1])
+        man = _write_manifest(tdir, seed, days, scale, total_rows,
+                              {"main": main_path, "events": ev, "edges": ed, "paths": pth})
+        print(f"tranche seed={seed}: {total_rows:,} rows -> {tdir}  "
+              f"(events={man['files']['events']['rows']} edges={man['files']['edges']['rows']} "
+              f"paths={man['files']['paths']['rows']})")
+        tranches.append(tdir)
+    return tranches
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--days", type=float, default=2.0, help="days of telemetry (demo default 2)")
@@ -1045,8 +1142,20 @@ def main():
                     help="0 = legacy single-topology file; >=1 = combined multi-topology run")
     ap.add_argument("--hard-neg", type=int, default=200,
                     help="hard negatives per topology's Stream N (G4)")
+    # full-scale run: memory-safe incremental write, per-seed tranches + manifest.
+    ap.add_argument("--full", action="store_true",
+                    help="full-scale run: all 12 topologies x {F,N} x --seeds tranches")
+    ap.add_argument("--seeds", type=str, default="42,43",
+                    help="comma-separated tranche seeds for --full (train,holdout)")
     args = ap.parse_args()
     assert os.path.exists(args.profile), "profile.json missing -- run calibrate.py first"
+
+    if args.full:
+        seeds = [int(s) for s in args.seeds.split(",")]
+        tranches = generate_full(args.profile, seeds, args.days, args.scale,
+                                 args.step, args.hard_neg, n_topologies=12)
+        print("full-scale tranches:", tranches)
+        return
 
     if args.topologies:
         out = generate_multi(args.days, args.step, args.scale, args.profile,
