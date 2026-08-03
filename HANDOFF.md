@@ -141,9 +141,18 @@ one path check the workspace tools gate writes/exec on — `Workspace.writable(p
 `realpath` iff inside `scratchpad/`, else `PathPolicyError`. `realpath` defeats `..`, absolute-outside,
 symlink-escape, prefix-sibling (all in the self-check). Reads unrestricted (ADR-0011/0013:
 read-only-outside == only writes gated); `artifacts/` is created but NOT writable via the policy
-(B3b writes it a separate way). No tool yet — **B1 (#29)** wires `for_session` into session creation
-and calls `writable` from `write`/`edit`; **B2 (#30)** uses `scratchpad` as exec `cwd`. Self-check:
+(B3b writes it a separate way). **B2 (#30)** uses `scratchpad` as exec `cwd`. Self-check:
 `python3 copilot/workspace/policy.py`.
+
+**B1 (#29) landed.** `copilot/workspace/tools.py` — `WorkspaceTools(ws)` = read/write/edit over the B0
+cage with little-coder's invariants (ADR-0011): read-before-edit (per-session `_read` set; `edit`
+refuses a path not read this session), write=new-only (`write` refuses an existing file and returns
+the `edit(...)` call to make instead), edit=exact-match (verbatim `old_string`; a non-unique match
+needs `replace_all` or more context). Reads unrestricted; `write`/`edit` gated by `Workspace.writable`
+so copy-in-to-modify works (read external → write copy in scratchpad → edit copy). Errors return as a
+guidance string, never raised (ADR-0015, like `tools/registry.py`). One instance per session; **B3a
+(#31)** hands one to the loop as the workspace tool family (its consumer). Self-check:
+`python3 -m copilot.workspace.tools`.
 
 **R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
 seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth
