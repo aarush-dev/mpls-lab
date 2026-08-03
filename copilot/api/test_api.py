@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from copilot.adapter import StubAdapter
 from copilot.agent import EVENT_TYPES, Event
-from copilot.api.app import app, get_adapter, get_kg, get_llm, get_retriever
+from copilot.api.app import app, get_adapter, get_config, get_kg, get_llm, get_retriever
 from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
@@ -67,6 +67,7 @@ def test_chat_streams_tool_call_and_cited_answer():
     client = _client([
         tool_call("query_metrics", {"device": "r1", "limit": 5}, id="c1"),
         final("r1 cpu is pegged [metrics:0]"),
+        final('{"pass": true}'),                  # I4b stage-2 self-judge verdict
     ])
     resp = client.post("/chat", json={"question": "why is r1 slow?",
                                       "start": 100, "end": 200})
@@ -86,6 +87,7 @@ def test_every_event_carries_ts_and_canonical_type():
     client = _client([
         tool_call("query_metrics", {"device": "r1"}, id="c1"),
         final("done [metrics:0]"),
+        final('{"pass": true}'),                  # I4b stage-2 self-judge verdict
     ])
     resp = client.post("/chat", json={"question": "why slow?",
                                       "start": 100, "end": 200})
@@ -106,6 +108,7 @@ def test_device_question_streams_cited_log_and_flow_rows():
         tool_call("search_logs", {"device": "r1"}, id="c1"),
         tool_call("flows", {"device": "r1"}, id="c2"),
         final("r1 flapping [events:0] with a traffic spike [flows:0]"),
+        final('{"pass": true}'),                  # I4b stage-2 self-judge verdict
     ])
     app.dependency_overrides[get_adapter] = lambda: StubAdapter(events_rows=logs, flows_rows=flows)
     resp = TestClient(app).post("/chat", json={"question": "what happened on r1?",
@@ -132,6 +135,7 @@ def test_fault_returns_cited_runbook_and_nearby_incident_over_http():
         tool_call("search_incidents", {"query": "bgp session dropped", "device": "pe1",
                                        "hops": 2}, id="c2"),
         final("bgp hold-timer expiry [rb-bgp]; matches past incident [inc-near]"),
+        final('{"pass": true}'),                  # I4b stage-2 self-judge verdict
     ])
     app.dependency_overrides[get_adapter] = lambda: StubAdapter(topology=TOPOLOGY)
     app.dependency_overrides[get_retriever] = _kb_retriever
@@ -159,6 +163,9 @@ def test_walk_topology_graph_streams_enriched_blast_radius_over_http():
     pe1_metrics = [{"device": "pe1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
     app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=pe1_metrics,
                                                                 topology=TOPOLOGY)
+    # the scripted answer is uncited -> a stage-1 block; retries=0 keeps it a one-shot block
+    # (the tool_result under test still streams) instead of re-entering the loop (I4b).
+    app.dependency_overrides[get_config] = lambda: Config(gate_max_retries=0)
     resp = TestClient(app).post("/chat", json={"question": "downstream of pe1?",
                                                "start": 100, "end": 200})
     evs = _events(resp)
@@ -196,6 +203,8 @@ def test_unfiltered_call_rejected_through_http_seam():
         tool_call("search_logs", {}, id="c1"),
         final("need to narrow to a device"),
     ])
+    # failed tool call -> a stage-1 block; retries=0 keeps it one-shot (tool_result still streams).
+    app.dependency_overrides[get_config] = lambda: Config(gate_max_retries=0)
     resp = client.post("/chat", json={"question": "show me everything",
                                       "start": 100, "end": 200})
     tr = [e for e in _events(resp) if e["type"] == "tool_result"][0]
@@ -216,6 +225,7 @@ def test_think_event_streams_before_tool_call():
         Reply(content="checking r1 metrics first",
               tool_calls=(ToolCall("query_metrics", {"device": "r1"}, id="c1"),)),
         final("r1 cpu high [metrics:0]"),
+        final('{"pass": true}'),                  # I4b stage-2 self-judge verdict
     ])
     resp = client.post("/chat", json={"question": "why slow?",
                                       "start": 100, "end": 200})
@@ -232,6 +242,7 @@ def test_streamed_event_round_trips_into_an_event():
     client = _client([
         tool_call("query_metrics", {"device": "r1"}, id="c1"),
         final("done [metrics:0]"),
+        final('{"pass": true}'),                  # I4b stage-2 self-judge verdict
     ])
     resp = client.post("/chat", json={"question": "why slow?",
                                       "start": 100, "end": 200})

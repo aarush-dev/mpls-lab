@@ -20,9 +20,14 @@ from copilot.retrieval import Hit, Retriever
 @dataclass(frozen=True)
 class Cite:
     """One cited evidence item surfaced to the quality gate (I4a, ADR-0008): its citation id
-    + the provenance the deterministic pre-gate checks. The tools layer is the ONE place that
-    knows each source's shape (ADR-0006), so it builds these -- the gate never re-parses
-    rendered observation text."""
+    + the provenance the deterministic pre-gate checks.
+
+    A deliberate content-BLIND projection, not an `Evidence`/`Doc`/`NodeState`: it unifies all
+    three source shapes (adapter `Evidence.device`, retrieval `Doc.node`, topology node) into
+    one {id, source, device, ts} the gate reasons over, and drops `content` on purpose so the
+    gate can't be swayed by untrusted evidence text (ADR-0016) -- it decides on provenance
+    only. The tools layer is the ONE place that knows each source's shape (ADR-0006), so it
+    builds these; the gate never re-parses rendered observation text."""
     id: str
     source: str            # metrics | events | flows | runbook | incident | topo
     device: str | None

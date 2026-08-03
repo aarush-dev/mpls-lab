@@ -25,6 +25,7 @@ def test_scripted_investigation_completes_with_query_metrics():
     llm = ScriptedLLM([
         tool_call("query_metrics", {"device": "r1", "limit": 5}, id="c1"),
         final("r1 cpu is pegged [metrics:0]"),
+        final('{"pass": true}'),                          # stage-2 self-judge verdict (I4b)
     ])
     out = investigate("why is r1 slow?", WINDOW,
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
@@ -49,6 +50,7 @@ def test_loop_dispatches_search_logs_and_flows():
         tool_call("search_logs", {"device": "r1"}, id="c1"),
         tool_call("flows", {"device": "r1"}, id="c2"),
         final("r1 flapping [events:0] with a traffic spike [flows:0]"),
+        final('{"pass": true}'),                          # stage-2 self-judge verdict (I4b)
     ])
     out = investigate("what happened on r1?", WINDOW, llm=llm,
                       adapter=StubAdapter(events_rows=logs, flows_rows=flows), cfg=_cfg())
@@ -94,8 +96,9 @@ def test_filter_error_is_fed_back_as_observation():
         tool_call("query_metrics", {}, id="bad"),        # no device/pattern
         final("need to narrow down"),
     ])
-    out = investigate("look", WINDOW,
-                      llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
+    # gate_max_retries=0: keep this focused on the ADR-0015 observation feedback, not the retry.
+    out = investigate("look", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(gate_max_retries=0))
     tr = out.of_type("tool_result")[0]
     assert tr.data["content"].startswith("error:") and "device" in tr.data["content"]
     assert out.stopped is None
@@ -107,6 +110,7 @@ def test_think_event_emitted_with_reasoning():
         Reply(content="checking r1 metrics first",
               tool_calls=(ToolCall("query_metrics", {"device": "r1"}, id="c1"),)),
         final("r1 cpu high [metrics:0]"),
+        final('{"pass": true}'),                          # stage-2 self-judge verdict (I4b)
     ])
     out = investigate("why slow?", WINDOW,
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
@@ -121,6 +125,7 @@ def test_owned_parser_handles_non_native_toolcall():
     llm = ScriptedLLM([
         final('{"name": "query_metrics", "arguments": {"device": "r1"}}'),
         final("done [metrics:0]"),
+        final('{"pass": true}'),                          # stage-2 self-judge verdict (I4b)
     ])
     out = investigate("why slow?", WINDOW,
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
@@ -138,6 +143,7 @@ def test_gate_passes_cited_sufficient_answer():
     llm = ScriptedLLM([
         tool_call("query_metrics", {"device": "r1"}, id="c1"),
         final("r1 cpu pegged [metrics:0][metrics:1]"),
+        final('{"pass": true}'),                          # stage-2 self-judge verdict (I4b)
     ])
     out = investigate("why is r1 slow?", WINDOW,
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
@@ -151,8 +157,9 @@ def test_gate_blocks_uncited_answer():
         tool_call("query_metrics", {"device": "r1"}, id="c1"),
         final("r1 is on fire"),                           # claim, no [id]
     ])
-    out = investigate("why is r1 slow?", WINDOW,
-                      llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
+    # gate_max_retries=0 -> a stage-1 block returns immediately (no retry); I4b retry tested below.
+    out = investigate("why is r1 slow?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(gate_max_retries=0))
     g = out.of_type("gate")
     assert len(g) == 1 and g[0].data["ok"] is False
     assert out.answer.startswith("cannot answer yet")
@@ -167,10 +174,25 @@ def test_gate_blocks_off_topic_thin_evidence():
     ])
     out = investigate("what is wrong with r1?", WINDOW, llm=llm,
                       adapter=StubAdapter(metrics_rows=[{"device": "r9", "ts": 150, "cpu": 10}]),
-                      cfg=_cfg())
+                      cfg=_cfg(gate_max_retries=0))
     g = out.of_type("gate")
     assert g and g[0].data["ok"] is False
     assert any("off-topic" in m for m in g[0].data["missing"])
+
+
+def test_gate_blocks_on_a_failed_tool_call():
+    # ADR-0008 check 1: a tool call that errored -> the answer is blocked even with otherwise
+    # sufficient, cited evidence (I4b's retry re-fetches the failed call).
+    llm = ScriptedLLM([
+        tool_call("query_metrics", {}, id="bad"),        # over-broad -> FilterError guidance
+        tool_call("query_metrics", {"device": "r1"}, id="c2"),
+        final("r1 cpu pegged [metrics:0][metrics:1]"),
+    ])
+    out = investigate("why is r1 slow?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(gate_max_retries=0))
+    g = out.of_type("gate")
+    assert g and g[0].data["ok"] is False
+    assert any("failed tool call" in m for m in g[0].data["missing"])
 
 
 def test_ask_back_bypasses_the_gate():
@@ -180,6 +202,76 @@ def test_ask_back_bypasses_the_gate():
                       llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
     assert out.of_type("gate") == ()
     assert out.answer.startswith("Which device")
+
+
+def test_self_judge_parses_verdict():
+    # I4b stage-2 seam: pass/fail JSON verdicts parse; contradictions fold into missing[].
+    from copilot.agent.loop import self_judge
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "why is r1 slow?"}]
+    assert self_judge(ScriptedLLM([final('{"pass": true}')]), msgs, "a").ok
+    r = self_judge(ScriptedLLM([final('{"pass": false, "missing": ["r1 logs"], '
+                                       '"contradictions": ["cpu vs flows"]}')]), msgs, "a")
+    assert not r.ok
+    assert any("r1 logs" in m for m in r.missing) and any("contradiction" in m for m in r.missing)
+    # junk verdict OR an omitted "pass" key -> fail-open (deterministic gate is the hard guarantee)
+    assert self_judge(ScriptedLLM([final("not json at all")]), msgs, "a").ok
+    assert self_judge(ScriptedLLM([final('{"missing": ["x"]}')]), msgs, "a").ok
+
+
+def test_self_judge_fail_retries_then_answers():
+    # I4b acceptance: stage-1 passes but the self-judge says thin -> a retry fetches more
+    # evidence -> the judge then passes -> the answer flows out.
+    logs = [{"device": "r1", "ts": 100 + i, "msg": f"bgp {i}"} for i in range(2)]
+    llm = ScriptedLLM([
+        tool_call("query_metrics", {"device": "r1"}, id="c1"),
+        final("r1 cpu pegged [metrics:0][metrics:1]"),
+        final('{"pass": false, "missing": ["r1 bgp logs"]}'),   # judge: fetch more
+        tool_call("search_logs", {"device": "r1"}, id="c2"),    # retry fetches it
+        final("r1 cpu pegged [metrics:0] and bgp flapping [events:0]"),
+        final('{"pass": true}'),                                # judge: now sufficient
+    ])
+    out = investigate("why is r1 slow?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS, events_rows=logs), cfg=_cfg())
+    assert out.stopped is None
+    assert out.answer == "r1 cpu pegged [metrics:0] and bgp flapping [events:0]"
+    g = out.of_type("gate")                                     # exactly one retry fired
+    assert len(g) == 1 and g[0].data["ok"] is False and g[0].data["retry"] == 0
+    assert any("r1 bgp logs" in m for m in g[0].data["missing"])
+
+
+def test_gate_retry_recovers_from_a_failed_tool_call():
+    # I4b: a failed tool call blocks round 1; the retry re-issues it successfully -> answers.
+    # Guards the tool_errors-cleared-across-retries fix: without it the stale error blocks every
+    # retry to the cap and the answer is always "cannot answer yet".
+    llm = ScriptedLLM([
+        tool_call("query_metrics", {}, id="bad"),          # over-broad -> FilterError guidance
+        final("r1 cpu pegged [metrics:0][metrics:1]"),     # premature answer, the call had failed
+        tool_call("query_metrics", {"device": "r1"}, id="c2"),   # retry re-issues it, now valid
+        final("r1 cpu pegged [metrics:0][metrics:1]"),
+        final('{"pass": true}'),                           # judge passes round 2
+    ])
+    out = investigate("why is r1 slow?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
+    assert out.stopped is None
+    assert out.answer == "r1 cpu pegged [metrics:0][metrics:1]"
+    g = out.of_type("gate")
+    assert len(g) == 1 and any("failed tool call" in m for m in g[0].data["missing"])
+
+
+def test_gate_retry_respects_the_cap():
+    # I4b acceptance: the judge never passes -> retries stop at gate_max_retries, then the
+    # missing[] list is reported instead of a forced answer.
+    script = []
+    for _ in range(3):                                          # 1 initial + 2 retries = 3 rounds
+        script += [tool_call("query_metrics", {"device": "r1"}, id="c"),
+                   final("r1 cpu pegged [metrics:0][metrics:1]"),
+                   final('{"pass": false, "missing": ["more"]}')]
+    out = investigate("why is r1 slow?", WINDOW, llm=ScriptedLLM(script),
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(gate_max_retries=2))
+    assert out.stopped is None
+    assert out.answer.startswith("cannot answer yet")
+    g = out.of_type("gate")                                     # retry0, retry1, final block
+    assert len(g) == 3 and [e.data["retry"] for e in g] == [0, 1, 2]
 
 
 def test_bad_event_type_rejected():
@@ -203,7 +295,12 @@ def _run():
     test_gate_passes_cited_sufficient_answer()
     test_gate_blocks_uncited_answer()
     test_gate_blocks_off_topic_thin_evidence()
+    test_gate_blocks_on_a_failed_tool_call()
     test_ask_back_bypasses_the_gate()
+    test_self_judge_parses_verdict()
+    test_self_judge_fail_retries_then_answers()
+    test_gate_retry_recovers_from_a_failed_tool_call()
+    test_gate_retry_respects_the_cap()
     test_bad_event_type_rejected()
     print("copilot.agent self-check OK")
 

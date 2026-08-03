@@ -986,9 +986,52 @@ agentic retry on fail are **I4b (#14)** — not built here.
   implemented the dropped reverse-topicality clause (windowed-scoped, KB/topo exempt); tightened
   the entity regex to kill false-positive required-entities; failed windowed null-ts now blocks;
   moved gate composition into `gate.run_gate` (was loop-level, Feature Envy).
-- **Deferred (I4b, #14):** the self-judge LLM call for relevance/sufficiency/consistency, and the
-  bounded (`gate_max_retries`, 2) agentic retry that re-fetches `missing[]` — the gate is terminal
-  until then, so a failed exploratory call blocks rather than retries.
+- **Deferred → shipped in I4b (#14), below:** the self-judge LLM call + the bounded agentic retry.
+
+## Copilot I4b: quality gate — self-judge + ≤2 agentic retry
+
+Stage 2 of the ADR-0008 gate + the retry loop. Reuses the F3 agent-loop machinery (ADR-0005) —
+no new module: `self_judge` + the retry live in `copilot/agent/loop.py` beside `investigate`.
+
+- **Self-judge = one LLM call over the pre-gate's survivors** (`self_judge(llm, messages, answer)`).
+  Re-sends the *running transcript* (the tool-result observations, already adapter-**sanitized** per
+  ADR-0016) under an auditor system prompt + the draft answer, no tools → parses one JSON verdict
+  `{pass, missing[], contradictions[]}`. It judges over the actual evidence **content**, not just
+  `Cite` ids — that content is what makes the CONSISTENT / `contradictions[]` check real (ids alone
+  can't reveal a conflict). The content-blind `Cite` channel stays the *deterministic* gate's input;
+  the LLM judge legitimately needs content and only sees the sanitized render. Only runs when stage-1
+  (`run_gate`) already passed — the judge audits *survivors*, per ADR-0008.
+- **Verdict rides the same `GateResult` as stage 1** (`ok`, `missing[]`), so the loop treats both
+  stages uniformly. `contradictions[]` fold into `missing[]` prefixed `contradiction:` — for the
+  message + retry they are both just "reasons the answer can't go out yet"; no second channel.
+- **Fail-open unless the verdict is an explicit `{"pass": false}`.** Junk / non-JSON / a missing
+  `pass` key → treated as pass. The deterministic stage 1 is the hard guarantee; a flaky judge must
+  not wedge an otherwise-good, in-window, cited answer. `ponytail:` upgrade path = stricter parse /
+  re-ask if it rubber-stamps.
+- **Bounded agentic retry** (ADR-0008). On any gate/judge fail the loop appends the answer + a user
+  turn naming the `missing[]` ("gather any missing evidence, or resolve the noted conflicts, then
+  answer again") and re-enters the step loop, up to `cfg.gate_max_retries` (2). **`tool_errors` is
+  cleared at each retry** — a retry re-issues the failed call, so each round is judged on its OWN
+  errors; without this a single round-1 guidance error would block every retry to the cap (a bug
+  the two-axis review caught, guarded by `test_gate_retry_recovers_from_a_failed_tool_call`).
+  Evidence accumulates across retries (the `cites` list is not reset), so a retry that fetches more
+  genuinely grows the survivor set. Still failing after the cap → `cannot answer yet: <missing>`
+  (the `missing[]` list IS the message). Each fail emits a `gate` event `{ok:false, missing,
+  retry:<n>}`; `retry` counts retries used.
+- **Runaway is doubly bounded** — `gate_max_retries` caps gate re-entries, `tool_call_cap` +
+  `step_cap` (ADR-0005) still cap tool calls + loop turns *across* retries (ADR-0008 nuance).
+- **Ordering vs ADR.** ADR sequences pre-gate → self-judge → (on pass) citation check.
+  `run_gate` already bundles the citation check into stage 1 (shipped I4a); combining it with the
+  judge and retrying on any failure is behaviourally identical (block until everything passes or
+  the cap trips) with a shorter diff — the citation check still gates every answer.
+- **Testing (scripted judge stub).** The judge is just another `llm.chat`, so a scripted `Reply`
+  with JSON content IS the judge stub. `test_agent.py` adds: `self_judge` verdict parsing
+  (pass/fail/contradictions/fail-open); a judge-fail → retry → fetch-more → judge-pass → answer
+  path; and a cap test (judge always fails → 2 retries → `cannot answer yet`, `retry`=[0,1,2]).
+  Existing pass-through tests gain a `{"pass":true}` judge reply; the pure stage-1 block tests pin
+  `gate_max_retries=0` so they stay one-shot. Same fixture edits in `api/test_api.py` (the F4 HTTP
+  seam drives the loop, so its scripts must carry the judge verdict too — the minimum forced by
+  the loop's new contract).
 
 ## Real fault injection from the UI + Loki fix + plugin live-wiring
 

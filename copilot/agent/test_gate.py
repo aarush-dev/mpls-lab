@@ -5,7 +5,9 @@ Seam under test: the pure gate fns -- pre_gate / citation_check / extract_entiti
 over structured `Cite`s (spec #3 §Testing; the deterministic half, no LLM).
 Run:  python3 -m copilot.agent.test_gate
 """
-from copilot.agent.gate import GateResult, citation_check, extract_entities, pre_gate
+from copilot.agent.gate import (
+    GateResult, citation_check, extract_entities, pre_gate, run_gate, tool_calls_ok,
+)
 from copilot.tools import Cite
 
 WINDOW = (100, 200)
@@ -19,6 +21,14 @@ def test_extract_entities_pulls_device_names():
     assert extract_entities("why is r1 slow?") == frozenset({"r1"})
     assert extract_entities("bgp neighbor down on pe1 and ce2?") == frozenset({"pe1", "ce2"})
     assert extract_entities("is the network ok?") == frozenset()
+    # protocol / interface tokens are NOT devices -> not required entities (else unanswerable)
+    assert extract_entities("bgp as65001 flapping on ge0 for v4?") == frozenset()
+
+
+def test_tool_calls_ok_flags_failed_calls():
+    assert tool_calls_ok(()).ok
+    r = tool_calls_ok(("error: over-broad: specify a device",))
+    assert not r.ok and any("failed tool call" in m for m in r.missing)
 
 
 def test_pre_gate_passes_sufficient_in_window_on_topic():
@@ -44,6 +54,20 @@ def test_pre_gate_blocks_off_topic_unsupported_entity():
     r = pre_gate((_c("metrics:0", device="r9"), _c("metrics:1", device="r9")),
                  window=WINDOW, entities=frozenset({"r1"}), min_evidence=2)
     assert not r.ok and any("off-topic" in m and "r1" in m for m in r.missing)
+
+
+def test_pre_gate_blocks_windowed_evidence_off_question_entity():
+    # reverse topicality (ADR-0008): a live read on a device the question never named -> off-topic
+    r = pre_gate((_c("metrics:0", device="r9"), _c("metrics:1", device="r1")),
+                 window=WINDOW, entities=frozenset({"r1"}), min_evidence=2)
+    assert not r.ok and any("metrics:0 on r9" in m for m in r.missing)
+
+
+def test_pre_gate_blocks_windowed_null_ts():
+    # a windowed item with no ts can't be proven in-window -> fail, don't skip (ADR-0008)
+    r = pre_gate((_c("metrics:0", ts=None), _c("metrics:1")),
+                 window=WINDOW, entities=frozenset({"r1"}), min_evidence=2)
+    assert not r.ok and any("out-of-window" in m and "metrics:0" in m for m in r.missing)
 
 
 def test_pre_gate_exempts_kb_and_topology_from_window():
@@ -83,18 +107,33 @@ def test_citation_check_rejects_answer_with_no_citations():
     assert not r.ok
 
 
+def test_run_gate_combines_tool_calls_pre_gate_and_citation():
+    cites = (_c("metrics:0"), _c("metrics:1"))
+    ok = run_gate("r1 cpu pegged [metrics:0]", cites, window=WINDOW,
+                  question="why is r1 slow?", min_evidence=2)
+    assert ok.ok, ok.missing
+    # a failed tool call blocks even a well-cited, sufficient answer (ADR-0008 check 1)
+    bad = run_gate("r1 cpu pegged [metrics:0]", cites, window=WINDOW,
+                   question="why is r1 slow?", min_evidence=2, tool_errors=("error: x",))
+    assert not bad.ok and any("failed tool call" in m for m in bad.missing)
+
+
 def _run():
     test_extract_entities_pulls_device_names()
+    test_tool_calls_ok_flags_failed_calls()
     test_pre_gate_passes_sufficient_in_window_on_topic()
     test_pre_gate_blocks_thin_evidence()
     test_pre_gate_blocks_out_of_window()
     test_pre_gate_blocks_off_topic_unsupported_entity()
+    test_pre_gate_blocks_windowed_evidence_off_question_entity()
+    test_pre_gate_blocks_windowed_null_ts()
     test_pre_gate_exempts_kb_and_topology_from_window()
     test_pre_gate_allows_blast_radius_neighbours()
     test_citation_check_passes_fully_cited_answer()
     test_citation_check_rejects_uncited_claim()
     test_citation_check_rejects_fabricated_id()
     test_citation_check_rejects_answer_with_no_citations()
+    test_run_gate_combines_tool_calls_pre_gate_and_citation()
     print("copilot.agent.gate self-check OK")
 
 
