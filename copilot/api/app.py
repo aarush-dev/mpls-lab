@@ -20,6 +20,7 @@ import os
 import time
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -35,6 +36,17 @@ from copilot.window import WindowContext
 from copilot.workspace import Executor, for_session
 
 app = FastAPI(title="NOC Copilot", version="1.0")
+
+# ADR-0010 (Amended): the UI is owned by a separate team; this CORS allowance is copilot's
+# documented boundary contract for their browser origin (Grafana :3000). GET+POST, localhost-only
+# -- same origin boundary as the rest of the stack (local-only). The UI wiring itself is out of
+# scope; this endpoint-level allowance is the one copilot piece that survives the #50-#53 revert.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 class ChatRequest(BaseModel):

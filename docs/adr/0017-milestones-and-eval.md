@@ -7,8 +7,8 @@
 ### Two milestones, one loop
 
 - **Milestone A — Investigator**: the 5 read-only investigation tools, retrieval, quality gate, two
-  systems, windowing, memory/cases, skills, context management, injection guard, FastAPI + demo app.
-  A complete, demoable system on its own.
+  systems, windowing, memory/cases, skills, context management, injection guard, FastAPI service
+  (UI owned by a separate team, ADR-0010 Amended). A complete, demoable system on its own.
 - **Milestone B — Coding agent**: workspace tools, scratchpad, sandboxed execution, artifacts,
   `ledger_to_kb`. Layers onto A's loop.
 

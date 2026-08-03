@@ -94,7 +94,7 @@ PA / PA-emulator ──Prediction Records──▶ Event Ledger
    Quality gate (deterministic + self-judge, ≤2 retry) ──▶ cited answer / "what's missing"
           │
           ▼
-   FastAPI service (streamed timestamped trace) ──▶ demo app / dashboard
+   FastAPI service (streamed timestamped trace) ──▶ external UI (separate team, via CORS)
 ```
 
 ---
@@ -104,3 +104,4 @@ PA / PA-emulator ──Prediction Records──▶ Event Ledger
 - The prediction stack itself (4 experts, meta-learner, drift detectors, conformal) — separate team.
 - Dataset/simulation generator (`research/13`,`14`) — prerequisite input, separate workstream.
 - Eval scoring harness — deferred to post-build (ADR-0017).
+- The UI / NOC dashboard — owned by a **separate team**; copilot exposes only the FastAPI service (ADR-0010, Amended).

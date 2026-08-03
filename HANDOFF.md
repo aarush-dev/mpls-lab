@@ -191,8 +191,8 @@ Source confined to scratchpad (reuses `Workspace.writable`); a missing/outside f
 (ADR-0015), no artifact event. `api/app.py` builds the `Workspace` once and shares it with the
 Executor. Seam tests: loop + HTTP (`/chat`) prove the artifact event streams with an inline render
 payload and round-trips into `events.jsonl`; snapshot-on-present unit self-check
-(`python3 -m copilot.workspace.present`). **Render is a separate lane** — the demo/UI (C1/#27,
-still an F0 stub) consumes the `artifact` event; this ticket only produces it.
+(`python3 -m copilot.workspace.present`). **Render is a separate team** — the UI (ADR-0010
+Amended, out of scope here) consumes the `artifact` event; this ticket only produces it.
 
 **R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
 seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth

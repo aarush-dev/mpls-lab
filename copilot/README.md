@@ -37,7 +37,6 @@ copilot/
 
   # Convergence
   api/        FastAPI, streamed step-trace                             (F4)
-  demo/       demo web app consuming the trace                         (C1)
 ```
 
 Rule: **touch only your lane's subpackage.** Cross-lane coupling points are the
@@ -222,7 +221,7 @@ front end. Nothing here duplicates them; it **consumes** them.
   subsystem). The copilot reads live truth via the dataapi adapter; the emulator
   reads `/labels`. No new topic needed for F0.
 - **Grafana / front end** — observability dashboards already live at
-  `../telemetry/grafana/` (Loki/VictoriaMetrics). Those stay put. The **copilot**
-  front end is `copilot/demo/` (scaffold) and, later, the real NOC dashboard —
-  both integrate through **`copilot/api/`** (the streamed trace, ADR-0010), never
-  by reaching into copilot internals.
+  `../telemetry/grafana/` (Loki/VictoriaMetrics). Those stay put. The copilot
+  UI is owned by a **separate team** (ADR-0010 Amended); copilot builds none. It
+  integrates through **`copilot/api/`** (the streamed trace + a CORS allowance for
+  the UI origin, ADR-0010), never by reaching into copilot internals.

@@ -12,25 +12,39 @@
   assistant_msg | think | tool_call | tool_result | gate | artifact`). The stage words above are
   readable aliases, not new types: `observation`=`tool_result`, `answer`=`assistant_msg`. Stream and
   store share ONE schema so every streamed event round-trips into the log unchanged.
-- A **demo app** consumes that trace to *show what the agent is doing* (live tool calls, evidence,
-  citations, gate pass/fail), inspired by agentic apps. Throwaway-ish until the dashboard exists.
+- **No UI in this repo.** Another team owns the NOC dashboard/UI. Copilot ships only the FastAPI
+  service; its endpoints **plus a documented CORS allowance** for the UI's browser origin are the
+  whole contract. See **Amended (UI descoped)** below.
 
 ## Context
 
-The Query system is interactive/multi-turn; Forensic auto-reports then accepts follow-ups. A UI is
-made later inside an existing dashboard; until then a small demo app shows all abilities.
+The Query system is interactive/multi-turn; Forensic auto-reports then accepts follow-ups. The UI
+lives in another team's dashboard, consuming this service.
 
 ## Alternatives rejected
 
-- **CLI/REPL only** — rejected; a UI is coming, the API is what it will call.
+- **CLI/REPL only** — rejected; a UI consumes the API, so the API is what it must serve.
 - **API returns only final answers** — rejected; transparency (tool calls + gate visible) is a
   requirement (ADR-0009).
 
 ## Nuances
 
-- All trace events are **user-visible** (ADR-0009); the UI may *collapse* tool detail but hides
-  nothing.
-- `# ponytail:` demo app is scaffolding; the real UI is the dashboard integration.
+- All trace events are **user-visible** (ADR-0009); the consuming UI may *collapse* tool detail but
+  the service hides nothing.
+
+## Amended (UI descoped)
+
+Original plan (grilling) called for a **basic UI + throwaway demo app** built here. Superseded: the
+UI is owned by a **separate team**. Consequences:
+
+- **No demo app.** The `copilot/demo/` stub is deleted; ADR-0010's demo-app mandate is struck. The
+  `/chat` trace is exercised via API tests + `curl`, not an in-repo UI.
+- **Boundary = the FastAPI service.** Contract for the other team = the endpoints + streamed event
+  schema (ADR-0009) + a **CORS allowance** for their browser origin, which copilot owns and
+  documents. Everything upstream of the service is copilot-internal.
+- **Reverted Grafana wiring (`53cc26ba`, #50-#53) stays reverted** — that was copilot reaching into
+  the UI, which is now out of scope. Exception: the **CORS piece of #50** is legitimately copilot's
+  and is re-landed on its own (endpoint boundary, not UI code).
 
 ## Resolved (R5b / #23)
 

@@ -28,7 +28,7 @@ An offline **Copilot subsystem** — two systems on one conversational agent cor
 
 The agent works like an engineer works a ticket: it picks a tool, reads the result, decides the next
 step, and the user **watches every step** (tool calls and quality checks are visible). It runs a
-small local model, air-gapped, sandboxed. A small demo web app shows all of this live.
+small local model, air-gapped, sandboxed. A separate team's UI shows all of this live over the API (ADR-0010 Amended).
 
 ## User Stories
 
@@ -63,7 +63,7 @@ small local model, air-gapped, sandboxed. A small demo web app shows all of this
 29. As a developer, I want the copilot steered by editable skill files (how to investigate each fault), so that a weak model follows a reliable procedure.
 30. As a developer, I want to manually invoke a specific diagnostic skill, so that I can direct the investigation.
 31. As a developer, I want tool results to come back small and filtered, so that a small model's context never overflows.
-32. As a developer, I want a demo web app that shows the agent working live, so that I can validate and present the copilot end-to-end.
+32. ~~As a developer, I want a demo web app that shows the agent working live.~~ **Descoped** — the UI is owned by a separate team (ADR-0010 Amended); copilot exposes only the API.
 33. As a developer, I want the model backend and data endpoints behind single adapters, so that changes to either don't ripple through the codebase.
 
 ## Implementation Decisions
@@ -134,9 +134,9 @@ by scenario/device+fault); restart-safe via last-processed record id.
 **Interface + demo (ADR-0010).** A local **FastAPI** service; the chat endpoint **streams a
 timestamped step-trace** using ADR-0009's canonical event enum (`user_msg | assistant_msg | think |
 tool_call | tool_result | gate | artifact`; `observation`=`tool_result`, `answer`=`assistant_msg`) so
-stream and persisted log share one schema. A small **demo web app** consumes the trace
-to show the agent working live (tool calls, evidence, citations, gate pass/fail), agentic-app style —
-scaffolding until a real dashboard integrates through the same API.
+stream and persisted log share one schema. A **separate team's UI** consumes the trace
+to show the agent working live (tool calls, evidence, citations, gate pass/fail), agentic-app style.
+The UI is built and owned by that team; copilot exposes the API + a CORS allowance for their origin.
 
 **Coding agent (Milestone B — ADR-0011, 0013).** The agent gains a **workspace tool family**
 (`read/write/edit/bash`) with little-coder invariants (read-before-edit, write-new-only, edit-exact) and
@@ -152,7 +152,7 @@ subprocess — **no container**.
 **Milestones (ADR-0017).** **A = Investigator** (read-only; complete + demoable on its own).
 **B = Coding agent** (layers onto A's loop). Two disjoint file-ownership lanes so two people build in
 parallel: **Lane-Investigation** (adapter/tools/retrieval/agent/skills) and **Lane-Runtime**
-(llm/memory/window/emulator/forensic), converging at the API + demo.
+(llm/memory/window/emulator/forensic), converging at the API.
 
 ## Testing Decisions
 
@@ -176,8 +176,8 @@ adapter query strings** (PromQL/LogQL against a seeded backend), and **1–2 rea
 no-net + timeout + path confinement actually bite (it's a security boundary).
 
 **Manual end-to-end testing is first-class.** A small model's real answer *quality* can't be
-unit-asserted; a human driving the **demo app** and reading the trace is a primary validation path for
-full E2E, until the deferred eval harness (ADR-0017) automates scoring against `/labels`.
+unit-asserted; a human reading the streamed trace (via API tests / `curl`) is a primary validation path
+for full E2E, until the deferred eval harness (ADR-0017) automates scoring against `/labels`.
 
 **Modules tested:** the HTTP surface (behavior), and targeted unit tests for gnarly deterministic bits
 — topology BFS + `/metrics` enrichment, episode dedup, the gate's deterministic pre-gate, the
@@ -193,7 +193,7 @@ self-checks); no heavy framework unless a module needs it (ponytail).
 - The dataset/simulation generator (`research/13`, `14`) — prerequisite input, separate workstream.
 - The **eval scoring harness** — deferred to post-build (ADR-0017); tool-usage data accrues free via
   `events.jsonl` meanwhile.
-- The real NOC dashboard UI — later; the demo app stands in and the dashboard integrates via the API.
+- The NOC dashboard UI — owned by a **separate team** (ADR-0010 Amended); copilot exposes only the API + CORS.
 - Hardened sandboxing (containers/seccomp) — the file-policy + subprocess suffices until deployed
   adversarially.
 - A separate critic model, reranking/query-decomposition, threshold-watcher detector, fail-closed
