@@ -148,6 +148,57 @@ def test_nim_embedder_body_gates_input_type_on_env(monkeypatch=None):
         os.environ.clear(); os.environ.update(os_env)
 
 
+def test_nim_embedder_auto_input_type_follows_kind():
+    # I2a asymmetry: nv-embedqa needs query vs passage. COPILOT_EMBED_INPUT_TYPE=auto -> the
+    # body's input_type is derived from encode()'s kind (add=passage, search=query), not fixed.
+    import copilot.retrieval.embedder as emb
+
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"data": [{"embedding": [0.0]}]}
+
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(json)
+        return _Resp()
+
+    import httpx
+    orig, os_env = httpx.post, dict(os.environ)
+    httpx.post = _fake_post
+    try:
+        os.environ["COPILOT_EMBED_INPUT_TYPE"] = "auto"
+        e = emb.NimEmbedder(Config(embed_profile="nim"))
+        e.encode(["doc"], kind="passage")
+        assert captured.get("input_type") == "passage", captured
+        e.encode(["q"], kind="query")
+        assert captured.get("input_type") == "query", captured
+        # a fixed value (legacy/symmetric) is sent as-is regardless of kind.
+        os.environ["COPILOT_EMBED_INPUT_TYPE"] = "passage"
+        emb.NimEmbedder(Config(embed_profile="nim")).encode(["q"], kind="query")
+        assert captured.get("input_type") == "passage", "fixed value overrides kind"
+    finally:
+        httpx.post = orig
+        os.environ.clear(); os.environ.update(os_env)
+
+
+def test_lance_retriever_passes_passage_on_add_query_on_search():
+    # the retriever is what supplies kind: add() docs are passages, search() text is a query.
+    kinds = []
+
+    class _Spy:
+        def encode(self, texts, kind="passage"):
+            kinds.append(kind)
+            return [[1.0, 0.0] for _ in texts]
+
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    r = LanceRetriever(_Spy(), d)
+    r.add(CORPUS)
+    r.search("bgp", k=1)
+    assert kinds == ["passage", "query"], kinds
+
+
 def _run():
     test_add_then_search_returns_ranked_hits_with_provenance()
     test_node_filter_on_all_none_node_corpus_does_not_crash()
@@ -158,6 +209,8 @@ def _run():
     test_store_and_embedder_satisfy_the_protocols()
     test_embedder_swap_is_config_only_and_lazy()
     test_nim_embedder_body_gates_input_type_on_env()
+    test_nim_embedder_auto_input_type_follows_kind()
+    test_lance_retriever_passes_passage_on_add_query_on_search()
     print("copilot.retrieval self-check OK")
 
 

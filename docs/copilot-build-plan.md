@@ -179,7 +179,9 @@ with anything it shares a row with.
 6. **#42 (E1) — DONE.** The real end-to-end run: `copilot/e2e/harness.py` drives real gpt-oss-20b
    (NVIDIA-hosted nim) + live dataapi + real nv-embedqa KB, **zero doubles**. `/chat` answers end
    to end. Record: `copilot/e2e/REPORT.md` + `traces/`. Regressions filed, not patched: **#43**
-   (gpt-oss range/unicode citations the gate rejects), **#44** (embedder query/passage asymmetry),
+   (gpt-oss range/unicode citations the gate rejects), **#44** (embedder query/passage asymmetry —
+   **fixed**: `encode(texts, kind)`, add=passage/search=query, `NimEmbedder` maps kind→input_type
+   under `COPILOT_EMBED_INPUT_TYPE=auto`),
    **#45** (harmony `<|channel|>` leak into tool-call names), **#46** (all-None-node retrieval
    crash — **fixed** in the E1 commit: `store.py` pins the pyarrow schema).
 7. **#17 → #18** (memory), then **#20 → #21** (emulator) → **#41 (T1, trust gate)**.

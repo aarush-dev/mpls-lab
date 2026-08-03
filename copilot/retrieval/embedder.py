@@ -39,18 +39,19 @@ class NimEmbedder:
         self._model = os.environ.get("COPILOT_EMBED_MODEL_NIM", "bge-large-en-v1.5")
         # NVIDIA-hosted retrieval embedders (nv-embedqa-*) REJECT the plain OpenAI /embeddings
         # body -- they require input_type (+truncate). Env-gated so a plain OpenAI/local server
-        # gets the unmodified body. ponytail: single input_type for both add() and search() --
-        # nv-embedqa is asymmetric (query vs passage differ), so this is a symmetric approximation
-        # good enough at N=15; proper query/passage split is a contract change (filed ticket).
+        # gets the unmodified body. nv-embedqa is ASYMMETRIC (query vs passage embed differently):
+        # COPILOT_EMBED_INPUT_TYPE=auto -> input_type follows encode()'s kind (add=passage,
+        # search=query, I2a); a fixed value (e.g. "query") is sent as-is for symmetric models;
+        # unset -> plain body.
         self._input_type = os.environ.get("COPILOT_EMBED_INPUT_TYPE", "")
         self._truncate = os.environ.get("COPILOT_EMBED_TRUNCATE", "")
 
-    def encode(self, texts: list[str]) -> list[list[float]]:
+    def encode(self, texts: list[str], kind: str = "passage") -> list[list[float]]:
         import httpx
         key = self._cfg.embed_api_key
         body = {"model": self._model, "input": list(texts)}
         if self._input_type:
-            body["input_type"] = self._input_type
+            body["input_type"] = kind if self._input_type == "auto" else self._input_type
         if self._truncate:
             body["truncate"] = self._truncate
         r = httpx.post(
@@ -72,7 +73,7 @@ class LocalEmbedder:
         self._model_name = os.environ.get("COPILOT_EMBED_MODEL_LOCAL", "BAAI/bge-large-en-v1.5")
         self._model = None
 
-    def encode(self, texts: list[str]) -> list[list[float]]:
+    def encode(self, texts: list[str], kind: str = "passage") -> list[list[float]]:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self._model_name)
@@ -90,7 +91,7 @@ class HashEmbedder:
     def __init__(self, dim: int = 64):
         self.dim = dim
 
-    def encode(self, texts: list[str]) -> list[list[float]]:
+    def encode(self, texts: list[str], kind: str = "passage") -> list[list[float]]:
         out = []
         for t in texts:
             v = [0.0] * self.dim

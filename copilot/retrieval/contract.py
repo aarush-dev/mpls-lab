@@ -31,7 +31,10 @@ class Hit:
 
 @runtime_checkable
 class Embedder(Protocol):
-    def encode(self, texts: list[str]) -> list[list[float]]: ...
+    # kind distinguishes asymmetric retrieval models (nv-embedqa): a passage and a query for
+    # the same text must embed with different input_type to land in the right relative space.
+    # add(docs)->passage, search(query)->query. Symmetric embedders (Hash/Local) ignore it.
+    def encode(self, texts: list[str], kind: str = "passage") -> list[list[float]]: ...
 
 
 @runtime_checkable

@@ -34,7 +34,7 @@ class LanceRetriever:
         docs = list(docs)
         if not docs:
             return
-        vecs = self._embedder.encode([d.text for d in docs])
+        vecs = self._embedder.encode([d.text for d in docs], kind="passage")
         rows = [{"id": d.id, "text": d.text, "source": d.source,
                  "node": d.node, "ts": d.ts, "vector": v}
                 for d, v in zip(docs, vecs)]
@@ -55,7 +55,7 @@ class LanceRetriever:
                nodes: set[str] | None = None) -> list[Hit]:
         if self._name not in self._db.table_names():
             return []                                    # nothing added yet
-        vec = self._embedder.encode([query])[0]
+        vec = self._embedder.encode([query], kind="query")[0]
         q = self._db.open_table(self._name).search(vec).metric("cosine")
         # prefilter=True filters BEFORE the ANN scan -> true top-k WITHIN the scope (a
         # post-filter would trim an all-out-of-scope top-k to nothing, so a nearby

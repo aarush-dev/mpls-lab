@@ -1181,7 +1181,10 @@ four findings (three filed, one fixed). Harness + record: `copilot/e2e/harness.p
   plain OpenAI `/embeddings` body (HTTP 500); it needs `input_type` + `truncate`. `NimEmbedder`
   adds them only when the env is set (a local/plain server still gets the plain body). nv-embedqa
   is *asymmetric* (query vs passage) but our Embedder is one `encode()`, so E1 uses a single
-  input_type — a symmetric approximation, fine at N=13 docs. Proper split = **#44**.
+  input_type — a symmetric approximation, fine at N=13 docs. Proper split = **#44 (RESOLVED)**:
+  `Embedder.encode(texts, kind="passage")`; `LanceRetriever.add` passes `passage`, `.search`
+  passes `query`. `NimEmbedder` maps kind→input_type only under `COPILOT_EMBED_INPUT_TYPE=auto`;
+  a fixed value (symmetric model) is sent as-is, unset → plain body. Hash/Local ignore `kind`.
 - **Citation format in `SYSTEM_PROMPT`** — the I4a gate requires `[source:id]` tokens; the prompt
   only said "cite the evidence ids". A real model needs the literal shown ("e.g. [metrics:0] …
   list each id separately, NEVER a range"). This flipped answers from gate-blocked → cited.
