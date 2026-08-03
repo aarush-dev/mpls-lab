@@ -1350,3 +1350,59 @@ still-active tail is NULL. Result on the `d0.2_n12` sample: **40.3% of rows
 `valid_to=NULL`** (was 0%), **all 12 topologies show ≥1 reroute**, max path-id
 group 13 rows. Example: `[ce_branch1,ce_hub1]` (preferred) → `[ce_branch1,ce_hub2]`
 (failover window) → `[ce_branch1,ce_hub1]` `valid_to=NULL` (recovered).
+
+### Full-scale generation run (2026-08-04)
+
+Ran via the memory-safe `generate_full` driver (streamed one (topology, stream)
+block at a time; a process-pool variant fanned the 24 blocks across 8 workers,
+biggest-first, to use the free cores). Output = a per-seed tranche directory of
+Parquet part files (a dataset dir, not one file) + `events`/`topology_edges`/
+`paths` companions + `manifest.json` (schema version, generator commit, per-part
+SHA-256, row counts). Parameters: `scale=6.0`; train seed 42 `d=1.2`, holdout
+seed 43 `d=0.6`; 12 topologies x {F, N}; `hard_neg_per_topo` 300/200.
+
+**TRAIN tranche (seed 42): 102,926,592 rows — ALL ACCEPTANCE CHECKS PASSED**
+(`verify_full_memsafe.py`, the batched equivalent of the spec's
+`verify_full_generation.py`, which OOMs on 100M rows in pandas):
+- all 21 fault types >= 800 primary instances; 21 types present
+- 12 topologies; held_out KV = `topo_p8_pe24_r3_full,topo_p8_pe16_r2_cv`
+- Stream F fault rate 12.56%, Stream N 0.000% (clean split; sampler composes the
+  8-11%/0.5-1%/0.3-1% train/cal/eval prevalences from the F/N mix)
+- hard negatives 89,646 (>= 4,000); concurrent-pair episodes 5,777; cascade
+  episodes 6,418; lead_time_s CV 0.837; error counters all zero; vrf list-typed
+- companions scale with volume: events 62,170 / edges 325,691 / paths 31,586
+
+**HOLDOUT tranche (seed 43): 51,463,296 rows** — d0.6, ~half volume, a disjoint
+within-topology episode holdout (not sized to hit 800/type on its own; the
+cross-topology LOTO holdout is the 2 held_out topologies present in BOTH tranches).
+Companions: events 31,164 / edges 177,211 / paths 16,338.
+
+Measured episode yield: **~138 episodes/type per (topology × scale-day) unit**,
+linear (no concurrency-lock saturation at scale 6). At scale 6 that is ~800/type
+per ~0.97 simulated days across the 12 topologies — the d1.2 train run clears it
+with margin. (Supersedes the old 25-sim-day-per-stream estimate.)
+
+Tranches live under `synthetic/output/full/full_seed{42,43}/` (gitignored;
+regenerate with `generate.py --full`). The manifest per tranche is the air-gap
+handoff artifact — pin the training repo to those SHA-256s. **Schema stays frozen
+at 59 columns; this is the last point it is open to change.**
+
+### Live-lab realism set — tagging (never trained on)
+
+The real captures under `dataapi/datasets/*.parquet` are the live-lab realism set.
+They are distinguished from synthetic tranches structurally: synthetic files carry
+`synthetic=true` in file KV metadata and live under `synthetic/output/`; real
+captures carry no such KV and live under `dataapi/datasets/`. Any training-corpus
+assembly MUST exclude `dataapi/datasets/` and anything without `synthetic=true`.
+
+### G5 real capture — STARTED (recalibration is the follow-up)
+
+The >=7h de-bias capture is running: `faults/orchestrator.py --campaign
+--duration 27000 --mean-gap 120 --seed 7` (campaign `campaign-de8c5b164f6a`),
+started 2026-08-03T19:12:41Z on the live 148-container lab (control plane verified
+wired: p2 had 6 OSPF Full neighbours). Unattended, survives session end. Follow-up
+once >=7h elapses: `export.py --start 1785784361 --end <start+27000>` over the
+window, then `calibrate.py` to rebuild `profile.json` from a full diurnal cycle,
+then re-run G10. Until then the G10 realism gap (AUC 0.9999) stands — this
+full-scale corpus is calibration-limited and is for pipeline/structure work, not
+real-lab transfer.
