@@ -32,7 +32,13 @@ made later inside an existing dashboard; until then a small demo app shows all a
   nothing.
 - `# ponytail:` demo app is scaffolding; the real UI is the dashboard integration.
 
-## Open (resolve in ticket)
+## Resolved (R5b / #23)
 
-- **Diagnosis output format** — structured fields vs prose for answers and `case.md`. User to supply
-  Claude/large-model transcripts as a reference; finalize inside the ticket.
+- **Diagnosis output format** — **structured header + cited prose body.** `case.md` (and a chat
+  answer) is the agent's cited prose, NOT whole-answer JSON: the loop emits cited prose
+  (`loop.SYSTEM_PROMPT`) and the quality gate enforces a citation per device-claim
+  (`gate.CITE_RE`), so forcing structured JSON would fight both. `case.md` prepends a small
+  STRUCTURED header of verdict fields the Prediction Record already carries (device, predicted
+  cause/family, alert + calibrated p, abstain, model-health, frozen window, model_version) and
+  appends a tool/gate trace footer. Structured where the record is authoritative, prose where the
+  investigation is (`copilot/forensic/case.py:render_case_md`).
