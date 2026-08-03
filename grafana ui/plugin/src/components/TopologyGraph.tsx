@@ -77,15 +77,22 @@ function applyLayout(cy: Core, mode: LayoutMode, positions: Map<string, Point>) 
   if (cy.elements().length === 0) {
     return;
   }
-  const layout =
-    mode === 'auto'
-      ? cy.layout({ name: 'cose', randomize: false, animate: false, fit: true } as cytoscape.LayoutOptions)
-      : cy.layout({
-          name: 'preset',
-          fit: true,
-          positions: (n: cytoscape.NodeSingular) => positions.get(n.id()),
-        } as cytoscape.LayoutOptions);
-  layout.run();
+  if (mode === 'auto') {
+    cy.layout({ name: 'cose', randomize: false, animate: false, fit: true } as cytoscape.LayoutOptions).run();
+    cy.fit(undefined, 30);
+    return;
+  }
+  // Grouped: snap every real node straight back to its computed slot. cose physically moves nodes (and
+  // the compound pop parents), and the `preset` layout's positions-function doesn't reliably restore
+  // that on a round-trip — so set positions directly. Pop parents re-fit around their children.
+  cy.batch(() => {
+    positions.forEach((pt, id) => {
+      const el = cy.getElementById(id);
+      if (el.nonempty()) {
+        el.position({ x: pt.x, y: pt.y });
+      }
+    });
+  });
   cy.fit(undefined, 30);
 }
 
