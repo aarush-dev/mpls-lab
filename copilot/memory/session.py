@@ -8,12 +8,13 @@ persisted log -- no second set). Resume = reload the user/assistant turns and fe
 them back into the loop as `history`.
 
 ponytail: plain files, no server -- the store is append+read-back, nothing more.
-The idempotent-by-id records store is the Event Ledger (SQLite, R2b/#18); a
-per-conversation single-writer lock (ADR-0009 nuance) lands with concurrent chats
-(R6a/#24), not here -- one chatter per session today.
+The idempotent-by-id records store is the Event Ledger (SQLite, R2b/#18). A
+per-conversation single-writer lock (ADR-0009 nuance) guards `append` (R6a/#24: a
+case may now have concurrent chat writers) -- flock, so a turn lands contiguously.
 
 Self-check:  python3 -m copilot.memory.test_session
 """
+import fcntl
 import json
 import os
 
@@ -46,6 +47,12 @@ class SessionStore:
             with open(meta, "w") as f:
                 json.dump({"id": sid}, f)
         with open(os.path.join(d, "events.jsonl"), "a") as f:
+            # R6a (ADR-0009): per-conversation single-writer lock -- one chat may now have
+            # concurrent writers (multi-chat under a case). flock is exclusive per open-fd and
+            # cross-process, so a whole append (a turn's events) lands contiguously; close
+            # releases it. ponytail: advisory flock is enough for our own writers; upgrade to a
+            # broker only if a non-cooperating process ever writes these files.
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             for e in events:
                 f.write(json.dumps(event_wire(e)) + "\n")
 

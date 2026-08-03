@@ -33,7 +33,7 @@ copilot/
   memory/     Session Store (sessions/<id>/events.jsonl+meta.json, resumable) (R2a); Event Ledger (ledger.py — append-only SQLite timeline, gate outcomes) (R2b)
   window/     WindowContext live/query/forensic                        (R3)
   emulator/   PA-emulator: /labels ground truth → §3.3 Prediction Record; emulate_pa seam; abstain→gate, fault_type→skills (R4a)
-  forensic/   trigger: poll-loop + dedup + cursor (R5a); case: freeze->replay-adapter->case.md (R5b); concurrent master (R6)
+  forensic/   trigger: poll-loop + dedup + cursor (R5a); case: freeze->replay-adapter->case.md (R5b); multi-chat + frozen follow-up (R6a); concurrent master (R6b)
 
   # Convergence
   api/        FastAPI, streamed step-trace                             (F4)

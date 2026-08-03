@@ -392,8 +392,55 @@ def test_gate_outcomes_land_in_the_ledger_pass_and_fail():
     assert len(gates) == 4, "pass1(1) + fail1(1) + retry1(2) = 4 distinct gate rows"
 
 
+def test_case_id_routes_to_a_frozen_follow_up_over_http():
+    # R6a acceptance: a case_id routes /chat to a forensic follow-up bound to the case's frozen
+    # window; session_id names the chat under the case. An unknown case_id is a 404, not traversal.
+    import os
+
+    from copilot.config import Config
+    from copilot.forensic.case import create_case
+    from copilot.forensic.chat import case_chats
+    from copilot.api.app import get_cases_root
+    from copilot.window import WindowContext
+
+    root = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    script = [tool_call("query_metrics", {"device": "pe6"}, id="c1"),
+              final("pe6 congestion [metrics:0] [metrics:1]"), final('{"pass": true}')]
+    rec = {"device": "pe6", "scenario_id": "congestion-pe6",
+           "explanation_ref": {"alert_id": "al-pe6"},
+           "decision": {"alert": True}, "risk": {"fault_types": [{"name": "congestion"}]}}
+    win = WindowContext(1000, 1600, frozen=True)
+    case_dir = create_case(rec, win, live_adapter=StubAdapter(metrics_rows=[
+        {"device": "pe6", "ts": 1200, "latency_ms": 40},
+        {"device": "pe6", "ts": 1300, "queue_drops": 5}]),
+        llm=ScriptedLLM(list(script)), cfg=Config(), cases_root=root)
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_cases_root] = lambda: root
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM(list(script))
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=[])  # unused; frozen
+    client = TestClient(app)
+
+    r = client.post("/chat", json={"question": "is pe6 still congested?",
+                                   "case_id": "al-pe6", "session_id": "chatA"})
+    assert r.status_code == 200
+    types = [e["type"] for e in _events(r)]
+    assert "tool_call" in types and "assistant_msg" in types, "the follow-up ran over the frozen case"
+    assert case_chats(case_dir).history("chatA"), "the follow-up persisted under the case chat"
+
+    bad = client.post("/chat", json={"question": "hi", "case_id": "../../etc"})
+    assert bad.status_code == 404, "an unknown/traversal case id is rejected, not resolved"
+
+    # a follow-up asking past the case's frozen T_snapshot (1600) -> 400 with the freeze guidance.
+    past = client.post("/chat", json={"question": "next 10 min?", "case_id": "al-pe6", "end": 9999})
+    assert past.status_code == 400 and "T_snapshot" in past.json()["detail"], \
+        "a past-freeze follow-up is rejected at the adapter, surfaced with guidance"
+
+
 def _run():
     test_chat_streams_tool_call_and_cited_answer()
+    test_case_id_routes_to_a_frozen_follow_up_over_http()
     test_session_persists_and_resumes_over_http()
     test_no_session_id_persists_nothing()
     test_gate_outcomes_land_in_the_ledger_pass_and_fail()

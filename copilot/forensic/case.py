@@ -176,6 +176,17 @@ class ReplayAdapter:
 
 
 # ---------------------------------------------------------------- case.md + create
+def investigate_record(record: dict, question: str, window: WindowContext, adapter, *, llm, cfg,
+                       retriever=None, skills=None, kg=None, invoke=None, history=None):
+    """Run `investigate` with the Prediction Record's steer fields (fault_type/abstain/drift_state,
+    R4a/T1) extracted once -- shared by the initial case run AND R6a follow-ups so a new steer kwarg
+    edits ONE site, not both."""
+    return investigate(question, window, llm=llm, adapter=adapter, cfg=cfg,
+                       retriever=retriever, skills=skills, kg=kg, invoke=invoke, history=history,
+                       fault_type=fault_type(record), abstain=is_abstain(record),
+                       drift_state=drift_state(record))
+
+
 def _case_question(record: dict) -> str:
     """The initial-report prompt (ADR-0014 'generate the initial report'). Auto-derived from the
     record so the agent investigates the predicted fault; names the device so the gate anchors on
@@ -229,14 +240,21 @@ def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
     window_dir = os.path.join(case_dir, "window")
     snapshot_window(live_adapter, record, window, window_dir)
     _dump(os.path.join(case_dir, "prediction.json"), record)
+    _dump(os.path.join(case_dir, "window.json"),   # R6a: follow-ups reload the frozen window bound
+          {"start": window.start, "end": window.end})
 
     replay = ReplayAdapter(window_dir)             # the report is built from disk only (frozen)
-    outcome = investigate(_case_question(record), window, llm=llm, adapter=replay, cfg=cfg,
-                          retriever=retriever, skills=skills, kg=kg,
-                          fault_type=fault_type(record), abstain=is_abstain(record),
-                          drift_state=drift_state(record))
+    outcome = investigate_record(record, _case_question(record), window, replay,
+                                 llm=llm, cfg=cfg, retriever=retriever, skills=skills, kg=kg)
     with open(os.path.join(case_dir, "case.md"), "w") as fh:
         fh.write(render_case_md(record, window, outcome, cid))
+    # R6a: persist the creation run as the first chat so a follow-up resumes it (ADR-0014 "spawn
+    # chats"). Function-local import: chat.py imports ReplayAdapter from here, so top-level would cycle.
+    # Seed only if empty -- an idempotent re-fire (backstop) must not double the chat's history.
+    from copilot.forensic.chat import INITIAL_CHAT, case_chats
+    chats = case_chats(case_dir)
+    if not chats.read(INITIAL_CHAT):
+        chats.append(INITIAL_CHAT, outcome.events)
     return case_dir
 
 

@@ -19,12 +19,13 @@ import json
 import os
 import time
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from copilot.adapter import HttpAdapter, ToolAdapter
+from copilot.adapter import FilterError, HttpAdapter, ToolAdapter
 from copilot.agent import Outcome, event_wire, investigate
+from copilot.forensic.chat import INITIAL_CHAT, follow_up, resolve_case_dir
 from copilot.config import Config, load
 from copilot.llm import LLMClient, make_client
 from copilot.memory import Ledger, SessionStore
@@ -41,6 +42,7 @@ class ChatRequest(BaseModel):
     end: int | None = None            # window end, epoch s
     skills: list[str] | None = None   # I5: skill names to manually invoke (bodies preloaded)
     session_id: str | None = None     # R2a: resume this session; None = a one-off, unpersisted chat
+    case_id: str | None = None        # R6a: follow-up on a forensic case; session_id names the chat
 
 
 def get_config() -> Config:
@@ -114,6 +116,13 @@ def get_retriever(cfg: Config = Depends(get_config)) -> Retriever | None:
     return _KB_CACHE[uri]
 
 
+def get_cases_root() -> str:
+    # R6a: root of the forensic case dirs (cases/<id>/), where a case_id chat resolves. Env
+    # (COPILOT_CASES_DIR) else ./cases -- same env-override pattern; the R5b case writer uses
+    # the matching cases_root. Tests override with a tmpdir.
+    return os.environ.get("COPILOT_CASES_DIR", "cases")
+
+
 def get_sessions() -> SessionStore:
     # R2a (ADR-0009): the file-backed session store. Root from env (COPILOT_SESSIONS_DIR),
     # else ./sessions -- mirrors the env-override pattern the other backends use. Tests
@@ -150,7 +159,25 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
          kg: dict[str, str] | None = Depends(get_kg),
          skills: dict[str, Skill] | None = Depends(get_skills),
          sessions: SessionStore = Depends(get_sessions),
+         cases_root: str = Depends(get_cases_root),
          ledger: Ledger = Depends(get_ledger)) -> StreamingResponse:
+    # R6a: a case_id routes to a forensic follow-up -- pinned to the case's FROZEN window + a
+    # ReplayAdapter over cases/<id>/window/ (disk only; the injected live adapter is unused, a
+    # frozen case never reads live, ADR-0002). session_id names the chat under the case (default
+    # the initial-report chat); n chats coexist addressably, each resuming only its own history.
+    if req.case_id:
+        try:
+            case_dir = resolve_case_dir(cases_root, req.case_id)   # untrusted id -> real dir or reject
+        except ValueError:
+            raise HTTPException(status_code=404, detail="unknown case")   # don't echo raw input
+        try:
+            outcome = follow_up(case_dir, req.session_id or INITIAL_CHAT, req.question,
+                               llm=llm, cfg=cfg, requested_end=req.end,
+                               retriever=retriever, kg=kg, skills=skills, invoke=req.skills)
+        except FilterError as e:
+            # a follow-up asking past the case's frozen T_snapshot -> the adapter guard's guidance.
+            raise HTTPException(status_code=400, detail=str(e))
+        return StreamingResponse(_sse(outcome), media_type="text/event-stream")
     # R2a: a session_id resumes the conversation -- prior turns are reconstructed from the
     # session's events.jsonl and threaded into the loop, and this turn's events are appended
     # back (write-through). No session_id -> a stateless one-off chat, nothing persisted.
