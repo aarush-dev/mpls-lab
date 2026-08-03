@@ -88,23 +88,40 @@ def frame(text: str) -> str:
     return f"{EVIDENCE_OPEN}\n{sanitize(text)}\n{EVIDENCE_CLOSE}"
 
 
-def hops_within_links(links, focus: str, n: int) -> set[str]:
-    """BFS the undirected topology from `focus`, returning every node within `n` hops
-    (inclusive of focus at hop 0). `links` is the /topology link list -- this is the ONE
-    place that knows its `{source,target}` shape, so adapters share it and callers don't.
-    Cheap: ~148 nodes (ADR-0007)."""
+def bfs_hops(links, focus: str, n: int) -> dict[str, int]:
+    """Deterministic BFS on the undirected topology from `focus` -> {node: hop-distance}
+    for every node within `n` hops (focus at hop 0). `links` is the /topology link list --
+    this is the ONE place that knows its `{source,target}` shape, so adapters share it and
+    callers never touch raw link dicts (ADR-0006). Cheap: ~148 nodes (ADR-0007)."""
     adj: dict[str, set[str]] = {}
     for lk in links:
         a, b = lk["source"], lk["target"]
         adj.setdefault(a, set()).add(b)
         adj.setdefault(b, set()).add(a)
-    seen, frontier = {focus}, {focus}
-    for _ in range(n):
-        frontier = {nb for node in frontier for nb in adj.get(node, ()) if nb not in seen}
+    hop = {focus: 0}
+    frontier = {focus}
+    for d in range(1, n + 1):
+        frontier = {nb for node in frontier for nb in adj.get(node, ()) if nb not in hop}
         if not frontier:
             break
-        seen |= frontier
-    return seen
+        for node in frontier:
+            hop[node] = d
+    return hop
+
+
+def hops_within_links(links, focus: str, n: int) -> set[str]:
+    """Every node within `n` hops of `focus` (inclusive). I2b's incident hop-filter needs
+    only the set; I3's walk needs the distances -> both derive from `bfs_hops`."""
+    return set(bfs_hops(links, focus, n))
+
+
+@dataclass(frozen=True)
+class NodeState:
+    """One node in a topology walk (I3): its BFS hop-distance from the focus + a compact
+    live-status string enriched from /metrics. The subgraph is a tuple of these."""
+    node: str
+    hop: int
+    status: str
 
 
 @runtime_checkable
@@ -117,6 +134,9 @@ class ToolAdapter(Protocol):
     def flows(self, filters: Filters) -> Result: ...
     # Topology proximity (ADR-0007): every node within `n` hops of `focus`, inclusive.
     # The adapter owns the /topology shape (ADR-0006: only this layer knows endpoint
-    # shapes) so callers never touch raw link dicts. I2b's incident hop-filter uses it;
-    # I3's walk_topology_graph builds BFS + /metrics enrich on the same wiring.
+    # shapes) so callers never touch raw link dicts. I2b's incident hop-filter uses it.
     def hops_within(self, focus: str, n: int) -> set[str]: ...
+    # Topology walk (I3, ADR-0007): deterministic BFS on real edges from `focus` within `n`
+    # hops, each node enriched with live status from /metrics in `window`. The adapter owns
+    # the topology+metrics join (a batched /metrics query per frontier for the HTTP adapter).
+    def walk_topology(self, focus: str, n: int, window: tuple[int, int]) -> tuple[NodeState, ...]: ...

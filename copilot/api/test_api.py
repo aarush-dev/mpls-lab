@@ -16,7 +16,8 @@ from fastapi.testclient import TestClient
 
 from copilot.adapter import StubAdapter
 from copilot.agent import EVENT_TYPES, Event
-from copilot.api.app import app, get_adapter, get_llm, get_retriever
+from copilot.api.app import app, get_adapter, get_kg, get_llm, get_retriever
+from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
 
@@ -147,6 +148,47 @@ def test_fault_returns_cited_runbook_and_nearby_incident_over_http():
     assert evs[-1]["content"] == "bgp hold-timer expiry [rb-bgp]; matches past incident [inc-near]"
 
 
+def test_walk_topology_graph_streams_enriched_blast_radius_over_http():
+    # I3 acceptance: ask for the blast radius -> a cited subgraph enriched with live status
+    # over the HTTP seam. Line pe1-pe2-pe3-pe4; metrics only on pe1.
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLM([
+        tool_call("walk_topology_graph", {"device": "pe1", "hops": 2}, id="c1"),
+        final("blast radius is pe1->pe2->pe3; pe1 cpu hot"),
+    ])
+    pe1_metrics = [{"device": "pe1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=pe1_metrics,
+                                                                topology=TOPOLOGY)
+    resp = TestClient(app).post("/chat", json={"question": "downstream of pe1?",
+                                               "start": 100, "end": 200})
+    evs = _events(resp)
+    assert [e["name"] for e in evs if e["type"] == "tool_call"] == ["walk_topology_graph"]
+    tr = next(e for e in evs if e["type"] == "tool_result")
+    assert "[topo:pe1] hop 0: cpu=92" in tr["content"], "focus cited + enriched with live metric"
+    assert "[topo:pe2] hop 1: no metrics" in tr["content"] and "[topo:pe3] hop 2" in tr["content"]
+    assert "pe4" not in tr["content"], "beyond the hop radius"
+
+
+def test_get_kg_respects_flag_and_source():
+    # ADR-0007: kg_enabled is default-on, off-able, and the curated KG is loaded only when ON
+    # AND a source is seeded. This is what makes "identical with kg off" real (not vacuous):
+    # OFF -> None regardless of source, so the walk is KG-free.
+    import os
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    path = f"{d}/kg.json"
+    with open(path, "w") as f:
+        json.dump({"pe2": "curated: flaps under load"}, f)
+    os.environ.pop("COPILOT_KG_URI", None)
+    assert get_kg(Config(kg_enabled=True)) is None, "enabled but no source -> None (nothing seeded)"
+    os.environ["COPILOT_KG_URI"] = path
+    try:
+        assert get_kg(Config(kg_enabled=False)) is None, "flag OFF -> None even with a source"
+        assert get_kg(Config(kg_enabled=True)) == {"pe2": "curated: flaps under load"}
+    finally:
+        os.environ.pop("COPILOT_KG_URI", None)
+
+
 def test_unfiltered_call_rejected_through_http_seam():
     # over-broad tool call (no device/pattern) -> F2 contract guidance as a tool_result,
     # never rows (acceptance: unfiltered rejected).
@@ -203,6 +245,8 @@ def _run():
     test_chat_streams_tool_call_and_cited_answer()
     test_device_question_streams_cited_log_and_flow_rows()
     test_fault_returns_cited_runbook_and_nearby_incident_over_http()
+    test_walk_topology_graph_streams_enriched_blast_radius_over_http()
+    test_get_kg_respects_flag_and_source()
     test_unfiltered_call_rejected_through_http_seam()
     test_every_event_carries_ts_and_canonical_type()
     test_ask_back_streams_question_no_tool_call()

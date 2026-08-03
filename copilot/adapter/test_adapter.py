@@ -87,6 +87,26 @@ def test_hops_within_is_undirected_and_depth_bounded():
     assert a.hops_within("nope", 3) == {"nope"}             # unknown focus -> itself only
 
 
+def test_walk_topology_bfs_is_hop_ordered_and_enriched():
+    # I3 (ADR-0007): deterministic BFS on real edges + per-node /metrics live status.
+    # line r1-r2-r3-r4; only r1/r3 have metrics -> the rest read "no metrics".
+    line = {"nodes": [], "links": [{"source": "r1", "target": "r2"},
+                                   {"source": "r2", "target": "r3"},
+                                   {"source": "r3", "target": "r4"}]}
+    metrics = [{"device": "r1", "ts": 100, "cpu": 40}, {"device": "r1", "ts": 150, "cpu": 91},
+               {"device": "r3", "ts": 120, "cpu": 55}]
+    a = StubAdapter(metrics_rows=metrics, topology=line)
+    states = a.walk_topology("r1", 2, (100, 200))
+    # blast radius from r1 within 2 hops, ordered by (hop, node) -> deterministic
+    assert [(s.node, s.hop) for s in states] == [("r1", 0), ("r2", 1), ("r3", 2)]
+    by = {s.node: s.status for s in states}
+    assert by["r1"] == "cpu=91", "enriched with the LATEST metric row for the node"
+    assert by["r3"] == "cpu=55"
+    assert by["r2"] == "no metrics", "node with no live data still appears in the subgraph"
+    # unknown focus -> empty walk, never a fabricated node presented as real topology
+    assert a.walk_topology("ghost", 2, (100, 200)) == ()
+
+
 def test_stub_satisfies_protocol():
     assert isinstance(StubAdapter(), ToolAdapter)
 
@@ -97,6 +117,7 @@ def _run():
     test_results_capped_with_provenance_and_paging()
     test_injected_instruction_is_framed_as_data()
     test_hops_within_is_undirected_and_depth_bounded()
+    test_walk_topology_bfs_is_hop_ordered_and_enriched()
     test_stub_satisfies_protocol()
     print("copilot.adapter self-check OK")
 

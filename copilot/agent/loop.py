@@ -1,9 +1,9 @@
 """copilot.agent.loop -- the owned think->tool->observe->decide->answer loop (ADR-0005).
 
 ~150 lines, no framework. Rides the F1 LLM seam (copilot.llm) + the F2 tool adapter
-(copilot.adapter), dispatching every tool call through the I1 registry (copilot.tools:
-query_metrics, search_logs, flows). Emits canonical trace events (ADR-0009 enum) for F4
-to stream / persist. A step
+(copilot.adapter), dispatching every tool call through the registry (copilot.tools:
+query_metrics/search_logs/flows + search_runbooks/search_incidents + walk_topology_graph).
+Emits canonical trace events (ADR-0009 enum) for F4 to stream / persist. A step
 cap + tool-call cap (config, ADR-0005) stop runaway; ask-back returns a clarifying
 question to the human instead of a tool call.
 
@@ -55,9 +55,10 @@ SYSTEM_PROMPT = (
     "(query_metrics, search_logs, flows) to gather evidence within the given time "
     "window -- narrow every such call by device or pattern -- and the knowledge-base "
     "tools (search_runbooks, search_incidents) to find the matching runbook and similar "
-    "past incidents (pass a device to search_incidents to focus on nearby topology). "
-    "Cite the evidence ids you rely on. If the request is too vague to investigate, ask "
-    "one clarifying question instead of calling a tool."
+    "past incidents (pass a device to search_incidents to focus on nearby topology). Use "
+    "walk_topology_graph to see the blast-radius / downstream devices of a fault and their "
+    "live status. Cite the evidence ids you rely on. If the request is too vague to "
+    "investigate, ask one clarifying question instead of calling a tool."
 )
 
 # TOOL_SPECS + dispatch live in copilot.tools (the registry, I1) -- re-exported here so
@@ -85,8 +86,11 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
 
 def investigate(question: str, window: tuple[int, int], *,
                 llm: LLMClient, adapter: ToolAdapter, cfg: Config,
-                retriever: Retriever | None = None) -> Outcome:
-    """Run the loop until the model answers, asks back, or a cap trips."""
+                retriever: Retriever | None = None,
+                kg: dict[str, str] | None = None) -> Outcome:
+    """Run the loop until the model answers, asks back, or a cap trips. `kg` is the optional
+    curated-KG hint map (ADR-0007): additive, never load-bearing -- the caller passes it only
+    when cfg.kg_enabled (get_kg), so it's None here whenever the flag is off."""
     events: list[Event] = []
 
     def emit(type_: str, **data) -> None:
@@ -117,7 +121,7 @@ def investigate(question: str, window: tuple[int, int], *,
                 return _capped(events, "tool_call_cap")
             tool_calls += 1
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
-            observation, n = dispatch(tc.name, tc.arguments, adapter, window, retriever)
+            observation, n = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
             emit("tool_result", id=tc.id, name=tc.name, content=observation, n=n)
             messages.append({"role": "tool", "tool_call_id": tc.id,
                              "name": tc.name, "content": observation})

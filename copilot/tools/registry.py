@@ -1,10 +1,10 @@
-"""copilot.tools.registry -- the investigation tool table + one dispatch (I1).
+"""copilot.tools.registry -- the investigation tool table + one dispatch (I1/I2b/I3).
 
-Every investigation tool is the SAME filtered read -- window + device/pattern +
-capped limit + paging (ADR-0015) -- against a different adapter method. So a tool is
-just a (adapter method, description) pair, and the loop dispatches every call through
-one table instead of a per-tool branch. query_metrics + search_logs + flows ride it
-today; I3's topology walk and the search_* retrieval tools register here later.
+The read tools (query_metrics + search_logs + flows) are the SAME filtered read -- window
++ device/pattern + capped limit + paging (ADR-0015) -- against a different adapter method,
+so each is just a (adapter method, description) pair dispatched through one table. The
+retrieval tools (search_runbooks/search_incidents, I2b) and the topology walk
+(walk_topology_graph, I3) don't fit that shape, so `dispatch` routes them ahead of the table.
 
 ponytail: a dict + getattr, not a plugin system -- three tools that differ only by
 which adapter method they hit and share one arg shape. Upgrade to per-tool arg
@@ -56,15 +56,23 @@ TOOL_SPECS = [{
      "parameters": {"type": "object", "required": ["query"], "properties": {
          "query": {"type": "string"}, "k": {"type": "integer"},
          "device": {"type": "string"}, "hops": {"type": "integer"}}}},
+    {"name": "walk_topology_graph",
+     "description": "Blast-radius / downstream: BFS the real topology from a focus `device` "
+                    "(within `hops`) and enrich each node with its live status.",
+     "parameters": {"type": "object", "required": ["device"], "properties": {
+         "device": {"type": "string"}, "hops": {"type": "integer"}}}},
 ]
 
 
 def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
-             window: tuple[int, int], retriever: Retriever | None = None) -> tuple[str, int]:
+             window: tuple[int, int], retriever: Retriever | None = None,
+             kg: dict[str, str] | None = None) -> tuple[str, int]:
     """Run one tool call: narrow -> validate -> read -> render. Returns
     (observation_text, n_rows). An unknown tool or a FilterError comes back AS the
     observation (ADR-0015 guidance) so the model can correct and retry, never as a raise.
     """
+    if name == "walk_topology_graph":                    # I3: topology walk, not a windowed read
+        return _walk(arguments, adapter, window, kg)
     if name in RETRIEVAL_TOOLS:                          # I2b: KB search, not a windowed read
         return _retrieve(name, arguments, retriever, adapter)
     entry = TOOLS.get(name)
@@ -118,9 +126,8 @@ def _retrieve(name: str, args: dict, retriever: Retriever | None,
     nodes = None
     focus = args.get("device")
     if name == "search_incidents" and focus:             # hop-proximity narrowing (ADR-0007)
-        try:
-            hops = int(args["hops"]) if "hops" in args else DEFAULT_HOPS
-        except (TypeError, ValueError):
+        hops = _hops(args)
+        if hops is None:
             return "error: hops must be an integer", 0
         # adapter owns the /topology shape (ADR-0006); node-less incidents fall out of the
         # `node IN (...)` prefilter, so proximity is enforced in the DB, not post-hoc.
@@ -132,6 +139,43 @@ def _retrieve(name: str, args: dict, retriever: Retriever | None,
     k = max(1, min(k, MAX_LIMIT))                        # same low ceiling as the read cap
     hits = retriever.search(query, k=k, source=source, nodes=nodes)
     return _render_hits(hits), len(hits)
+
+
+def _walk(args: dict, adapter: ToolAdapter, window: tuple[int, int],
+          kg: dict[str, str] | None) -> tuple[str, int]:
+    """I3 topology walk (ADR-0007): BFS the real edges from a focus `device` + per-node live
+    status (the adapter owns the topology+/metrics join). The curated KG, if enabled, only
+    APPENDS a hint per node -- structure + status come from real topology+metrics alone, so
+    correctness is identical with it off (never load-bearing). Missing device / bad hops come
+    back AS guidance (ADR-0015), never a raise.
+    """
+    focus = args.get("device")
+    if not focus:
+        return "error: walk_topology_graph needs a focus 'device'", 0
+    hops = _hops(args)
+    if hops is None:
+        return "error: hops must be an integer", 0
+    states = adapter.walk_topology(focus, hops, window)
+    if not states:                                       # unknown focus -> no fabricated subgraph
+        return f"error: unknown device {focus!r}: not in the topology", 0
+    lines = []
+    for s in states:
+        # [topo:node] is the citable id (the gate checks citations, I4a); status is already
+        # sanitized at the adapter (ADR-0016). KG hint (if enabled) is appended, additive-only.
+        line = f"[topo:{s.node}] hop {s.hop}: {s.status}"
+        if kg and s.node in kg:                          # never load-bearing (ADR-0007)
+            line += f"  [kg: {sanitize(kg[s.node])}]"
+        lines.append(line)
+    return "\n".join(lines), len(states)
+
+
+def _hops(args: dict) -> int | None:
+    """Coerce the optional `hops` arg (default DEFAULT_HOPS); None if it's junk (a weak model
+    may emit null/list/string) so the caller returns guidance, never a raise (ADR-0015)."""
+    try:
+        return int(args["hops"]) if "hops" in args else DEFAULT_HOPS
+    except (TypeError, ValueError):
+        return None
 
 
 def _render_hits(hits: list[Hit]) -> str:

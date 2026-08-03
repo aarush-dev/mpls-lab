@@ -50,6 +50,21 @@ def get_adapter(cfg: Config = Depends(get_config)) -> ToolAdapter:
     raise HTTPException(503, "tool adapter not wired yet (needs live dataapi)")
 
 
+def get_kg(cfg: Config = Depends(get_config)) -> dict[str, str] | None:
+    # Curated KG (ADR-0007): a {node: hint} map, additive & never load-bearing. Gated by
+    # cfg.kg_enabled (default-on, off-able) -- OFF -> None -> the walk is KG-free, so its
+    # correctness is identical with the flag off. ON -> load the curated map from
+    # COPILOT_KG_URI (a JSON file; env, mirroring COPILOT_KB_URI since config.py is another
+    # lane's file); unset -> None (no curated KG seeded yet, S-phase). Tests override this.
+    if not cfg.kg_enabled:
+        return None
+    uri = os.environ.get("COPILOT_KG_URI")
+    if not uri:
+        return None
+    with open(uri) as f:
+        return json.load(f)
+
+
 _KB_CACHE: dict[str, Retriever] = {}
 
 
@@ -100,7 +115,8 @@ def _sse(outcome: Outcome):
 def chat(req: ChatRequest, cfg: Config = Depends(get_config),
          llm: LLMClient = Depends(get_llm),
          adapter: ToolAdapter = Depends(get_adapter),
-         retriever: Retriever | None = Depends(get_retriever)) -> StreamingResponse:
+         retriever: Retriever | None = Depends(get_retriever),
+         kg: dict[str, str] | None = Depends(get_kg)) -> StreamingResponse:
     outcome = investigate(req.question, _window(req, cfg),
-                          llm=llm, adapter=adapter, cfg=cfg, retriever=retriever)
+                          llm=llm, adapter=adapter, cfg=cfg, retriever=retriever, kg=kg)
     return StreamingResponse(_sse(outcome), media_type="text/event-stream")

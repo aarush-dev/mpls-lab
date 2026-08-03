@@ -906,3 +906,41 @@ topology-hop proximity filter (ADR-0006/0007). Wired end to end: a fault questio
   S1/S2 seed a corpus. `None` retriever is why the search tools guard for it.
 - **Deferred:** upsert-on-id + real corpus (S1/S2); the default `/chat` KB wiring is live
   but needs a seeded `COPILOT_KB_URI` + an embedder backend (R1) to return real hits.
+
+## Copilot I3: walk_topology_graph (BFS + /metrics enrich, KG flag)
+
+`walk_topology_graph` = deterministic BFS on the **real** `/topology` edges from a focus
+`device` (within `hops`, default `DEFAULT_HOPS=2`) + per-node live status from `/metrics`
+(ADR-0007). Blast-radius / downstream. Registers in `copilot/tools/registry.py`; `dispatch`
+routes it (and the I2b retrieval tools) ahead of the read-tool table since it isn't a
+windowed filtered read. Wired end to end over `POST /chat` (`copilot.api.test_api`).
+
+- **The adapter owns the topology+/metrics join** (ADR-0006: only the adapter knows endpoint
+  shapes). `adapter.walk_topology(focus, n, window)` returns a `tuple[NodeState,...]`
+  (`node`, `hop`, `status`); the registry never touches raw `/topology` or `/metrics` JSON.
+  BFS is `bfs_hops` (`adapter/contract.py`) — one function, now shared: `hops_within_links`
+  (I2b incident filter) is `set(bfs_hops(...))`, killing the earlier duplicate walk.
+- **BFS is deterministic** (acceptance): `bfs_hops` assigns a node's hop AFTER the frontier
+  comprehension completes, so set-iteration order can't change level assignment; the walk is
+  emitted sorted by `(hop, node)`. Self-check: `test_walk_topology_bfs_is_hop_ordered_and_enriched`.
+- **KG is additive, never load-bearing** (acceptance: identical with `kg_enabled` off).
+  Structure + status come from real topology+metrics ALONE. The curated KG (a `{node: hint}`
+  map) only APPENDS a `[kg: …]` note per node. It is honoured through the flag exactly like
+  the retriever: `get_kg(cfg)` returns `None` when `cfg.kg_enabled` is off (→ walk KG-free) OR
+  when no source is seeded; ON + a seeded `COPILOT_KG_URI` (JSON, env — `config.py` is another
+  lane's file) → the map, threaded loop → `dispatch`. So the flag is real, not vacuous
+  (`test_get_kg_respects_flag_and_source`), yet the load-bearing core never depends on it
+  (`test_walk_topology_graph_identical_with_kg_off`).
+- **No fabricated nodes.** An unknown focus returns `()` from the adapter (not a phantom
+  `{focus: 0}`), and the tool reports `error: unknown device …: not in the topology` — never
+  a made-up subgraph fed to the model.
+- **Provenance + untrusted framing.** Each line is `[topo:<node>] hop <h>: <status>` — the
+  `[topo:…]` id is citable (the I4a gate checks citations). `/metrics` labels are the
+  untrusted side (ADR-0016), so `status` is `sanitize()`d at the adapter.
+- **Bad args are guidance, never a raise** (ADR-0015). Missing `device` and non-int `hops`
+  (incl. `null` → `TypeError`) come back as `error: …`. `_hops` shares the coercion with the
+  incident filter.
+- **Deferred:** the real HTTP adapter batches one PromQL per frontier (the stub scans canned
+  rows per node and ignores `window`); "downstream of link X" is served by focusing on an
+  endpoint device (link-id parsing is YAGNI until a caller needs it); health thresholds on
+  `status` (raw metric summary today); a seeded curated-KG corpus (S-phase, like the KB).

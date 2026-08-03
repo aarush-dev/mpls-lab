@@ -55,7 +55,8 @@ def test_registry_covers_read_and_retrieval_tools():
     assert set(TOOLS) == {"query_metrics", "search_logs", "flows"}
     assert set(RETRIEVAL_TOOLS) == {"search_runbooks", "search_incidents"}
     names = {s["name"] for s in TOOL_SPECS}
-    assert names == set(TOOLS) | set(RETRIEVAL_TOOLS), "every tool advertised in TOOL_SPECS"
+    assert names == set(TOOLS) | set(RETRIEVAL_TOOLS) | {"walk_topology_graph"}, \
+        "every tool advertised in TOOL_SPECS"
     # read tools expose narrowing args only -- NOT start/end (loop owns the window, ADR-0002)
     specs = {s["name"]: set(s["parameters"]["properties"]) for s in TOOL_SPECS}
     for name in TOOLS:
@@ -63,6 +64,46 @@ def test_registry_covers_read_and_retrieval_tools():
     # retrieval tools take a query (+ k); incidents adds the hop-filter narrowing.
     assert specs["search_runbooks"] == {"query", "k"}
     assert specs["search_incidents"] == {"query", "k", "device", "hops"}
+    # I3 walk: a focus device (+ hop radius) -- no window (loop owns it, ADR-0002).
+    assert specs["walk_topology_graph"] == {"device", "hops"}
+
+
+def test_walk_topology_graph_returns_enriched_subgraph():
+    # I3 acceptance: blast-radius from a focus device -> the correct hop-ordered subgraph,
+    # each node enriched with live status from /metrics. Line r1-r2-r3-r4; metrics only on r1.
+    obs, n = dispatch("walk_topology_graph", {"device": "r1", "hops": 2}, _adapter(), WINDOW)
+    assert n == 3, "r1 + 2 hops = r1,r2,r3"
+    # each node cited by a [topo:<node>] id (the I4a gate checks citations)
+    assert "[topo:r1] hop 0: cpu=92" in obs, "focus cited + enriched with its latest metric"
+    assert "[topo:r2] hop 1: no metrics" in obs and "[topo:r3] hop 2: no metrics" in obs
+    assert "r4" not in obs, "beyond the hop radius"
+
+
+def test_walk_topology_graph_unknown_device_reports_guidance():
+    obs, n = dispatch("walk_topology_graph", {"device": "ghost"}, _adapter(), WINDOW)
+    assert n == 0 and obs.startswith("error:") and "topology" in obs
+
+
+def test_walk_topology_graph_identical_with_kg_off():
+    # ADR-0007 acceptance: the KG is additive, never load-bearing. The subgraph + live
+    # status must be byte-identical with the curated KG off; KG only APPENDS a hint.
+    args = {"device": "r1", "hops": 1}
+    off, _ = dispatch("walk_topology_graph", args, _adapter(), WINDOW, kg=None)
+    on, _ = dispatch("walk_topology_graph", args, _adapter(), WINDOW,
+                     kg={"r2": "curated: flaps under load"})
+    for line in off.splitlines():                          # the load-bearing core is unchanged
+        assert line in on, f"kg on dropped/altered a core line: {line!r}"
+    assert "curated: flaps under load" in on and "curated" not in off, "kg is additive-only"
+
+
+def test_walk_topology_graph_missing_device_reports_guidance():
+    obs, n = dispatch("walk_topology_graph", {"hops": 2}, _adapter(), WINDOW)
+    assert n == 0 and obs.startswith("error:") and "device" in obs
+
+
+def test_walk_topology_graph_bad_hops_reports_guidance_not_crash():
+    obs, n = dispatch("walk_topology_graph", {"device": "r1", "hops": None}, _adapter(), WINDOW)
+    assert n == 0 and obs.startswith("error:")
 
 
 def test_search_runbooks_routes_to_retriever_with_full_provenance():
@@ -166,6 +207,11 @@ def test_window_is_supplied_by_caller_not_model():
 
 def _run():
     test_registry_covers_read_and_retrieval_tools()
+    test_walk_topology_graph_returns_enriched_subgraph()
+    test_walk_topology_graph_unknown_device_reports_guidance()
+    test_walk_topology_graph_identical_with_kg_off()
+    test_walk_topology_graph_missing_device_reports_guidance()
+    test_walk_topology_graph_bad_hops_reports_guidance_not_crash()
     test_search_runbooks_routes_to_retriever_with_full_provenance()
     test_search_incidents_hop_filter_narrows_to_nearby_devices()
     test_hop_filter_prefilters_rather_than_trimming_top_k()

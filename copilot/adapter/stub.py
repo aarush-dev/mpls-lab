@@ -7,7 +7,8 @@ VictoriaMetrics/Loki running (spec §Testing).
 from collections.abc import Sequence
 
 from copilot.adapter.contract import (
-    Evidence, Filters, MAX_LIMIT, Result, frame, hops_within_links,
+    Evidence, Filters, MAX_LIMIT, NodeState, Result, bfs_hops, frame, hops_within_links,
+    sanitize,
 )
 
 
@@ -42,6 +43,31 @@ class StubAdapter:
 
     def hops_within(self, focus: str, n: int) -> set[str]:
         return hops_within_links(self._topology.get("links", ()), focus, n)
+
+    def walk_topology(self, focus: str, n: int, window: tuple[int, int]) -> tuple[NodeState, ...]:
+        # BFS the real edges, then enrich each node with its latest metric row. Ordered by
+        # (hop, node) so the walk is deterministic (ADR-0007). Unknown focus -> () (never
+        # fabricate a node that isn't in the topology). ponytail: the stub ignores `window`
+        # (canned rows carry no live clock); the HTTP adapter batches a PromQL over it per
+        # frontier. Status = raw latest metric summary -- health thresholds are a later ticket.
+        links = self._topology.get("links", ())
+        known = ({node["id"] for node in self._topology.get("nodes", ())}
+                 | {x for lk in links for x in (lk["source"], lk["target"])})
+        if focus not in known:
+            return ()
+        hops = bfs_hops(links, focus, n)
+        return tuple(
+            NodeState(node=node, hop=hop, status=self._status(node))
+            for node, hop in sorted(hops.items(), key=lambda kv: (kv[1], kv[0]))
+        )
+
+    def _status(self, device: str) -> str:
+        rows = [r for r in self._rows["metrics"] if r.get("device") == device]
+        if not rows:
+            return "no metrics"
+        latest = max(rows, key=lambda r: r.get("ts", 0))
+        # /metrics labels are the untrusted side (ADR-0016): sanitize before the model sees it.
+        return sanitize(" ".join(f"{k}={v}" for k, v in latest.items() if k not in ("device", "ts")))
 
     def _serve(self, source: str, filters: Filters) -> Result:
         filters.validate(self._max_limit)
