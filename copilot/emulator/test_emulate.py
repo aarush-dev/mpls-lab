@@ -48,6 +48,71 @@ def test_emulate_record_is_a_full_section_3_3_record():
     assert r["n_concurrent"] == 1                         # (b) invented field, >=1
 
 
+def test_oracle_reproduces_ground_truth_exactly():
+    # R4b acceptance #1: oracle = perfect readout -- cause is the true type, no confusion, no
+    # jitter, no abstain, drift healthy, regardless of drift_tick.
+    r = emulate_record(LABEL, error_profile="oracle", drift_tick=99)
+    assert fault_type(r) == "congestion"                  # true cause, never confused
+    assert r["risk"]["fault_types"][0]["time_to_impact"]["median_s"] == 48.5  # exact lead_time
+    assert is_abstain(r) is False and r["health"]["drift_state"] == "R0"
+
+
+def test_drift_state_evolves_over_a_run():
+    # R4b acceptance #4: the faked drift/health scalar climbs the R0-R5 ladder as a run advances
+    # (drift_tick = the predictor tick). oracle is exempt (always healthy).
+    states = [emulate_record(LABEL, error_profile="heavy", drift_tick=t)["health"]["drift_state"]
+              for t in range(0, 18, 3)]
+    ranks = [int(s[1:]) for s in states]
+    assert ranks == sorted(ranks) and ranks[0] < ranks[-1], f"drift must climb: {states}"
+    novs = [emulate_record(LABEL, error_profile="heavy", drift_tick=t)["health"]["codebook_novelty"]
+            for t in range(0, 18, 3)]
+    assert novs == sorted(novs) and novs[0] < novs[-1], f"novelty must rise: {novs}"
+    assert {emulate_record(LABEL, error_profile="oracle", drift_tick=t)["health"]["drift_state"]
+            for t in range(0, 18, 3)} == {"R0"}            # oracle never drifts
+
+
+# a scenario set spanning every family (each family has >=2 members -> confusion is possible).
+_SCEN = [
+    {**LABEL, "scenario_id": f"s{i}", "type": t, "severity": sev, "device": f"d{i}"}
+    for i, (t, sev) in enumerate([
+        ("congestion", "high"), ("core_congestion", "medium"), ("bgp_flap", "high"),
+        ("ospf_area_flap", "low"), ("ldp_session_flap", "medium"), ("tunnel_degrade", "high"),
+        ("gray_failure", "low"), ("node_failure", "critical"), ("pop_isolation", "medium"),
+        ("srlg_cut", "high"), ("asymmetric_loss", "low"), ("policy_drift", "medium"),
+    ])
+]
+
+
+def test_light_and_heavy_confuse_the_cause_measurably():
+    # R4b acceptance #2: light/heavy sometimes report a confusable cause (a same-family sibling --
+    # right family, wrong specific type: the realism that mis-steers skill selection, ADR-0012).
+    # Swept over 60 distinct scenario ids so the *rate* is measurable (occasional != never).
+    sweep = [{**LABEL, "scenario_id": f"bgp_flap-{i}", "type": "bgp_flap"} for i in range(60)]
+    def confused(profile):
+        return sum(fault_type(emulate_record(s, error_profile=profile)) != "bgp_flap"
+                   for s in sweep)
+    assert confused("oracle") == 0                                 # oracle never confuses
+    assert 0 < confused("light") < confused("heavy")               # heavy confuses more -- measurably
+    # a confused cause always stays IN-family (confusable, not random) -- swept + spot set.
+    for s in sweep + _SCEN:
+        r = emulate_record(s, error_profile="heavy")
+        assert family(fault_type(r)) == family(s["type"])
+
+
+def test_tti_jitter_magnitude_grows_with_the_profile():
+    # R4b acceptance #2: TTI jitter is injected *measurably* -- oracle exact, heavy noisier than
+    # light. Spread = mean |reported_tti - true_lead| over the scenario set (each keyed distinctly).
+    def spread(profile):
+        tot = 0.0
+        for s in _SCEN:
+            tti = emulate_record(s, error_profile=profile)["risk"]["fault_types"][0][
+                "time_to_impact"]["median_s"]
+            tot += abs(tti - float(s.get("lead_time") or LABEL["lead_time"]))
+        return tot / len(_SCEN)
+    assert spread("oracle") == 0.0                                 # exact readout, no jitter
+    assert 0 < spread("light") < spread("heavy")                   # heavy noisier -- measurably
+
+
 def test_cumulative_incidence_is_monotone():
     # §3.3: F_k(h) non-decreasing by construction -- a readout can't dip.
     ps = [c["p"] for c in emulate_record(LABEL, error_profile="oracle")
@@ -152,6 +217,10 @@ def test_to_wire_does_not_collide_with_record_keys():
 
 def _run():
     test_emulate_record_is_a_full_section_3_3_record()
+    test_oracle_reproduces_ground_truth_exactly()
+    test_drift_state_evolves_over_a_run()
+    test_light_and_heavy_confuse_the_cause_measurably()
+    test_tti_jitter_magnitude_grows_with_the_profile()
     test_cumulative_incidence_is_monotone()
     test_oracle_is_deterministic()
     test_family_maps_the_five_coarse_families()

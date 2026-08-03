@@ -85,10 +85,34 @@ def _jitter(label: dict, profile: str) -> float:
     return (_hash01(str(label.get("scenario_id", "")), "tti") - 0.5) * 2 * span
 
 
-def _drift(profile: str) -> tuple[str, float]:
+_LADDER = ("R0", "R1", "R2", "R3", "R4", "R5")   # ADR-0003 model-health degradation ladder
+
+
+def _drift(profile: str, tick: int = 0) -> tuple[str, float]:
     """Faked model-health (ADR-0003 §Nuances): the R0-R5 ladder + a rising codebook_novelty.
-    oracle = healthy (R0); light/heavy climb the ladder so the (unbuilt) trust gate has a signal."""
-    return {"oracle": ("R0", 0.01), "light": ("R1", 0.05)}.get(profile, ("R3", 0.18))
+    oracle = healthy (R0) forever; light/heavy START a rung up (light R1, heavy R3) and CLIMB one
+    rung every 3 predictor ticks, capped at R5 (R4b acceptance: the scalar evolves over a run), so
+    the (unbuilt) trust gate has a signal that worsens. novelty tracks the rung."""
+    if profile == "oracle":
+        return ("R0", 0.01)
+    idx = min(len(_LADDER) - 1, (1 if profile == "light" else 3) + max(0, tick) // 3)
+    return (_LADDER[idx], round(0.05 + 0.03 * idx, 3))
+
+
+def _confuse(label: dict, profile: str, ftype: str) -> str:
+    """The reported cause -- oracle reports the true type; light/heavy occasionally report a
+    confusable SIBLING (same §2.1 family, different specific type: right family, wrong call). This
+    is the realism that mis-steers skill selection (ADR-0012). Keyed by scenario_id -> deterministic
+    per scenario; heavy confuses more often than light."""
+    if profile == "oracle":
+        return ftype
+    sibs = sorted(t for t, f in _FAMILY.items() if f == family(ftype) and t != ftype)
+    if not sibs:
+        return ftype
+    sid = str(label.get("scenario_id", ftype))
+    if _hash01(sid, "confuse") < (0.4 if profile == "heavy" else 0.15):
+        return sibs[int(_hash01(sid, "pick") * len(sibs)) % len(sibs)]
+    return ftype
 
 
 def _incidence_curve(conf: float) -> list[dict]:
@@ -99,7 +123,8 @@ def _incidence_curve(conf: float) -> list[dict]:
 
 
 def emulate_record(label: dict, *, error_profile: str = "light",
-                   n_concurrent: int = 1, now: str | None = None) -> dict:
+                   n_concurrent: int = 1, now: str | None = None,
+                   drift_tick: int = 0) -> dict:
     """One ground-truth fault `label` -> a full §3.3 Prediction Record (ADR-0003).
 
     `label` is a `/labels` row (dataapi): {type, target, severity, t_start, t_impact, t_end,
@@ -109,12 +134,13 @@ def emulate_record(label: dict, *, error_profile: str = "light",
     Every number is a deterministic readout of the label -- oracle is exact, light/heavy perturb.
     """
     dev = label.get("device") or (label.get("target") or {}).get("device")
-    ftype = str(label.get("type", "unknown"))
+    true_type = str(label.get("type", "unknown"))
+    ftype = _confuse(label, error_profile, true_type)   # reported cause (confusable sibling, ADR-0012)
     conf = _CONFIDENCE.get(str(label.get("severity")), 0.60)
     lead = float(label.get("lead_time") or 300.0)
     tti = max(1.0, lead * (1 + _jitter(label, error_profile)))
     abstain = _abstain(label, error_profile, conf)
-    drift_state, novelty = _drift(error_profile)
+    drift_state, novelty = _drift(error_profile, drift_tick)
     sid = str(label.get("scenario_id", dev or ftype))
     incidence = _incidence_curve(conf)
     baseline = float(label.get("baseline_value") or 0.0)
@@ -220,7 +246,7 @@ def persist(ledger, record: dict) -> None:
 
 
 def prediction(cfg, labels: list[dict], *, now: str | None = None,
-               real_pa=None) -> dict | None:
+               real_pa=None, drift_tick: int = 0) -> dict | None:
     """The PA seam (ADR-0003): return a Prediction Record for the fault active `now`, WITHOUT the
     caller knowing which stack produced it. `cfg.emulate_pa` routes:
       True  -> the emulator: pick the ground-truth label active at `now` (t_start <= now <= t_end);
@@ -238,7 +264,7 @@ def prediction(cfg, labels: list[dict], *, now: str | None = None,
     if not active:
         return None
     return emulate_record(active[0], error_profile=cfg.error_profile,
-                          n_concurrent=len(active), now=now)
+                          n_concurrent=len(active), now=now, drift_tick=drift_tick)
 
 
 def fetch_labels(base_url: str, *, fetch=None) -> list[dict]:
