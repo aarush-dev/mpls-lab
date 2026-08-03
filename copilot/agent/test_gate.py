@@ -118,6 +118,25 @@ def test_citation_check_expands_range_and_unicode_citations():
     assert not over.ok and any("fabricated" in m for m in over.missing)
 
 
+def test_heavy_profile_stresses_the_trust_gate_more_than_oracle():
+    # #21 acceptance #3, reframed. The ticket's "heavy -> higher block/retry rate" was mechanically
+    # wrong: `abstain` SOFTENS the sufficiency gate (gate.py:85, heavy abstains MORE -> fewer blocks)
+    # and the trust gate FLAGS, never blocks. What IS true and deterministic: over a run, heavy's
+    # faked model-health drifts past the distrust floor, so the TRUST gate fires measurably more than
+    # oracle (healthy R0 forever -> never fires). See ADR-0003 §Nuances.
+    from copilot.emulator import drift_state, emulate_record
+    label = {"scenario_id": "congestion-ce_branch1-87844aed", "type": "congestion",
+             "target": {"device": "ce_branch1", "interface": "eth1"}, "severity": "high",
+             "t_start": "2026-06-21T14:55:14Z", "t_impact": "2026-06-21T14:56:02Z",
+             "t_end": "2026-06-21T14:56:14Z", "lead_time": 48.5, "device": "ce_branch1"}
+
+    def trust_hits(profile):
+        return sum(trust_banner(drift_state(emulate_record(label, error_profile=profile,
+                   drift_tick=t)), distrust_at="R3") is not None for t in range(0, 18, 3))
+    assert trust_hits("oracle") == 0                       # healthy R0 forever -> never distrusted
+    assert trust_hits("heavy") > trust_hits("oracle")      # heavy drifts past R3 -> trust gate fires
+
+
 def test_citation_check_rejects_answer_with_no_citations():
     r = citation_check("everything looks fine", set())
     assert not r.ok
@@ -181,6 +200,7 @@ def _run():
     test_citation_check_rejects_uncited_claim()
     test_citation_check_rejects_fabricated_id()
     test_citation_check_expands_range_and_unicode_citations()
+    test_heavy_profile_stresses_the_trust_gate_more_than_oracle()
     test_citation_check_rejects_answer_with_no_citations()
     test_run_gate_combines_tool_calls_pre_gate_and_citation()
     test_abstain_softens_sufficiency_but_not_integrity()

@@ -49,6 +49,16 @@ other team.
    prediction (PA.md §3.5). The emulator fakes the **output scalar only** — the real 6-signal detector
    + LoRA ladder is the prediction stack's job.
 
+**#21: how a profile hits the gates — two OPPOSITE directions.** `error_profile` touches two
+different gates, so "heavy stresses the gate" (the R4b ticket's phrasing) was mechanically wrong:
+- **Sufficiency gate** (`pre_gate`) — heavy's extra `abstain` **softens** it (ADR-0008 §Nuances drops
+  the evidence floor). More heavy → *fewer* sufficiency blocks, not more.
+- **Trust gate** (`trust_banner`) — heavy's `drift_state` climbs past `drift_distrust_at`, so it
+  **flags** (never blocks) measurably more than oracle (healthy R0, never flags). This is the
+  deterministic, real "heavy stresses more" signal (`test_heavy_profile_stresses_the_trust_gate_…`).
+The confusable-cause path can raise sufficiency blocks by mis-steering the loop, but only under a
+*live* LLM — not deterministically reproducible with `ScriptedLLM`.
+
 ## Consequences
 
 - Copilot is buildable + testable now against fixture records.
