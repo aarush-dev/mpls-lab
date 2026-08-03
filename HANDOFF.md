@@ -94,10 +94,32 @@ with `hops_within`) + per-node `/metrics` live status, the join owned by
 cited `[topo:<node>]`; unknown focus → guidance, not a fabricated node; status `sanitize()`d
 (ADR-0016). All self-checks green: config/llm/adapter/agent/tools/api/retrieval, plus dataapi's
 `python3 test_flows_window.py`.
-**Next ticket:** I3 unblocks nothing new. Grabbable in Lane-Investigation:
-#13 (I4a), #15 (I5), #26 (I6) — user picks order.
-**Not done:** forensic end-freeze guard / full `WindowContext` (R3), real HTTP adapter (R1);
-upsert-on-id + real KB corpus (S1/S2 seeding); default `/chat` KB needs a seeded `COPILOT_KB_URI`.
+**Nothing in `copilot/` has ever called `dataapi` or an LLM.** `POST /chat` returns
+`503 {"detail":"LLM backend not wired yet (R1)"}` (`copilot/api/app.py:47`); behind it
+`get_adapter` raises too (`:52`). F1/F2 shipped `ScriptedLLM` + `StubAdapter` **as their stated
+scope**, and the original 31-ticket plan contained **no ticket that replaced them** — so I1–I5 are
+real logic that has only ever seen canned rows. The one exception is I2a: `LanceRetriever` runs
+against a genuine embedded LanceDB (its embedder is the `HashEmbedder` double). I4a's gate is pure
+functions with no doubles at all.
+
+**Plan repaired 2026-08-03.** Three missing tickets created — **#38** (codependency rule + graph
+repair), **#39** (redeploy lab + verify dataapi live), **#40** (real HTTP tool adapter). #16–#27
+rewritten with `Modifies` + `Consumes stub` sections and corrected `blocked_by` edges; #9–#15
+closed. The two-lane disjoint-ownership rule is **withdrawn** — 6 of 10 R tickets must edit
+I/F-lane files. Order is now `#38/#39 → #19 → #40 → #16`, and **#16 closing is the first moment
+`/chat` answers a real question end to end**. Full detail + both dependency graphs:
+`docs/copilot-build-plan.md`.
+
+**Known landmines for whoever wires the real adapter (#40):** `Evidence.ts` is `int | None` epoch
+(`copilot/adapter/contract.py:65`) and the gate compares numerically (`copilot/agent/gate.py:66`),
+but `/events` emits ISO strings (`dataapi/sources.py:95`) and `/flows` emits nfacctd
+`stamp_updated` (`:143`) — pass-through raises `TypeError` inside the gate. `/metrics` takes
+**PromQL only** (`dataapi/app.py:53-58`), no device/pattern/limit/offset. `/events` and `/flows`
+have no `pattern` and no `offset`. `StubAdapter._serve` (`stub.py:72`) never filters by ts, so
+every existing windowing test is vacuous at the adapter.
+
+**Not done:** everything above, plus upsert-on-id + real KB corpus (S1/S2), skills content (S3);
+default `/chat` KB needs a seeded `COPILOT_KB_URI`.
 
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.
