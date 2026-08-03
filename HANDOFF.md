@@ -97,17 +97,23 @@ cited `[topo:<node>]`; unknown focus → guidance, not a fabricated node; status
 **Nothing in `copilot/` has ever called `dataapi` or an LLM.** `POST /chat` returns
 `503 {"detail":"LLM backend not wired yet (R1)"}` (`copilot/api/app.py:47`); behind it
 `get_adapter` raises too (`:52`). F1/F2 shipped `ScriptedLLM` + `StubAdapter` **as their stated
-scope**, and the original 31-ticket plan contained **no ticket that replaced them** — so I1–I5 are
-real logic that has only ever seen canned rows. The one exception is I2a: `LanceRetriever` runs
-against a genuine embedded LanceDB (its embedder is the `HashEmbedder` double). I4a's gate is pure
-functions with no doubles at all.
+scope**. The **adapter** stub had **no replacing ticket** in the original 34 (#4–#37) — that gap is
+**#40 (A1)**. The **LLM** stub was **not** in the same boat: `ScriptedLLM` was always owned by
+**R1 (#16)** (`copilot/api/app.py:46` — `R1 ships the real HTTP one`). So the finished-state-`503`
+was caused by the missing **adapter** ticket alone. I1–I5 are real logic that has only ever seen
+canned rows; the one exception is I2a: `LanceRetriever` runs against a genuine embedded LanceDB (its
+embedder is the `HashEmbedder` double). I4a's gate is pure functions with no doubles at all.
 
-**Plan repaired 2026-08-03.** Three missing tickets created — **#38** (codependency rule + graph
-repair), **#39** (redeploy lab + verify dataapi live), **#40** (real HTTP tool adapter). #16–#27
-rewritten with `Modifies` + `Consumes stub` sections and corrected `blocked_by` edges; #9–#15
-closed. The two-lane disjoint-ownership rule is **withdrawn** — 6 of 10 R tickets must edit
-I/F-lane files. Order is now `#38/#39 → #19 → #40 → #16`, and **#16 closing is the first moment
-`/chat` answers a real question end to end**. Full detail + both dependency graphs:
+**Plan repaired 2026-08-03, audited same day.** Repair created **#38** (codependency rule + graph
+repair), **#39** (redeploy lab + verify dataapi live), **#40** (real HTTP tool adapter); #16–#27
+rewritten with `Modifies` + `Consumes stub` sections + corrected `blocked_by`; #9–#15 closed. The
+audit then: narrowed **#16 (R1)** back to a config-swap tested against a fake OpenAI server + one
+smoke call (**not** gated on the live lab; `blocked_by #40` removed); created **#42 (E1)** as the
+real end-to-end gate (real model + real dataapi + seeded KB); created **#41 (T1)** the trust gate
+(spec story 14 — consumes #21's drift scalar). Single builder, so lanes are moot; 9 of 10 R tickets
+touch I/F-lane files anyway. Count: **39 tickets** (#4–#42); the original set was 34 (#4–#37), not
+"31". Order is `#39/#19 → #40 → #16 → (S1–S3) → #42`; **#42 closing is the first moment `/chat`
+answers a real question end to end** (not #16). Full detail + both graphs:
 `docs/copilot-build-plan.md`.
 
 **Known landmines for whoever wires the real adapter (#40):** `Evidence.ts` is `int | None` epoch

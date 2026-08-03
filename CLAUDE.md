@@ -6,7 +6,7 @@ Before deploying, run the Phase 0 kernel checklist in docs/PHASE0ENVIRONMENT.md.
 - Apply **YAGNI** and run **`/ponytail:ponytail full`** on all work (and `/caveman` for prose). Laziest solution that actually works; no redundant code; shortest working diff.
 - **Agent model strategy:** **code / config / reasoning → opus at medium effort.** **Low-stakes work (docs, prose, counts, mechanical edits) → sonnet at medium effort.** **Parallelise**: prefer **workflows**, or fan out **multiple agents in parallel**, whenever the work splits cleanly. Give parallel agents **disjoint file ownership** so they never collide.
 - **Workflow fan-out:** any workflow step spawning **>10 subagents** uses **sonnet at `effort: 'high'`** (`agent(..., {model: 'sonnet', effort: 'high'})`), not opus — opus only where a wide step genuinely needs it. Pick this when authoring the script; a running workflow cannot be edited.
-- **Codependency check (before any ticket is `ready-for-agent`).** Every ticket declares **both** directions: what must close *before* it starts, and what existing files it will *modify* when it lands. A ticket that can only be satisfied against a stub is **staged, not done** — it names the stub it consumes and the ticket that replaces that stub. If no ticket replaces it, that is a missing ticket: write it. Lanes are only disjoint if the **modification** graph says so; a start-order graph does not prove it. *Why: the copilot's F/I suites built cleanly to spec against `StubAdapter` + `ScriptedLLM`, and nothing ran — no ticket in 31 owned replacing them.*
+- **Codependency check (before any ticket is `ready-for-agent`).** Every ticket declares **both** directions: what must close *before* it starts, and what existing files it will *modify* when it lands. A ticket that can only be satisfied against a stub is **staged, not done** — it names the stub it consumes and the ticket that replaces that stub. If no ticket replaces it, that is a missing ticket: write it. Lanes are only disjoint if the **modification** graph says so; a start-order graph does not prove it. *Why: the copilot's F/I suites built cleanly to spec against `StubAdapter`, and `/chat` still returned 503 — no ticket in the original 34 owned replacing the adapter stub (that gap is #40). The LLM stub was fine — R1/#16 always owned `ScriptedLLM`. The lesson holds: a produced stub with no replacing ticket, or a produced signal with no consumer, is a missing ticket.*
 
 # Standard workflow — run automatically after every substantial change
 1. **Plan** the code + the agents (and how to parallelise).
@@ -16,9 +16,12 @@ Before deploying, run the Phase 0 kernel checklist in docs/PHASE0ENVIRONMENT.md.
 5. **Commit + push** the change to `main`.
 
 # Documentation (AUTO — never wait to be asked)
-Docs are part of the change, not a follow-up. Any commit that touches code, config, topology, or counts MUST update the affected docs **in the same commit**.
+Docs are part of the change, not a follow-up. But cadence differs by doc class:
+- **Minor tracking docs** (`PLAN.md` status, `HANDOFF.md`, `docs/copilot-build-plan.md`, component `README.md`) — update **in the same commit as the code**, every substantial change.
+- **Decision records** (`docs/adr/`, `docs/SPEC-NOTES.md`) — update **when the decision changes** (e.g. resolving an ADR §Open inside a ticket), in that commit. Recording a decision ≠ rewriting a doc.
+- **Major docs** (`docs/01_PROJECT_OVERVIEW.md` … `docs/05_TECHNICAL_GLOSSARY.md`) — rewrite **only at a milestone / sub-part boundary** (e.g. after *all* I-series tickets land), **not per sub-ticket**. Batch the counts/scope/flow updates once the sub-part is done.
 
-- **Trigger:** the moment code lands, run a documentation agent (or parallel agents with disjoint file ownership) over the docs that the change touches. Never ask permission to update docs; never leave "docs to follow".
+- **Trigger:** the moment code lands, update the **tracking/decision** docs the change touches; hold the **major** docs for the milestone. Never ask permission to update docs; never leave "docs to follow".
 - **Scope map** — update whichever apply:
   - `docs/01_PROJECT_OVERVIEW.md`, `docs/02_ARCHITECTURE_ANALOGIES.md` — scope, counts, component list, flow.
   - `docs/03_TECHNICAL_CODE_GUIDE.md` — code walkthroughs, snippets, function/flag/schema names.
