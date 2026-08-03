@@ -23,13 +23,13 @@ interface Props {
   onHoverNode?: (id: string | null, pos: { x: number; y: number } | null) => void;
 }
 
-const POP_PREFIX = 'pop::';
+export const POP_PREFIX = 'pop::';
 
 function edgeId(l: TopologyLink, i: number): string {
   return `${l.source}->${l.target}::${i}`;
 }
 
-function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[], positions: Map<string, Point>): ElementDefinition[] {
+export function buildElements(nodes: TopologyNodeLive[], links: TopologyLink[], positions: Map<string, Point>): ElementDefinition[] {
   const pops = new Set<string>();
   nodes.forEach((n) => n.pop && pops.add(n.pop));
 
@@ -70,22 +70,32 @@ function nodeSetKey(nodes: TopologyNodeLive[], links: TopologyLink[]): string {
   return `${nodes.map((n) => n.id).join(',')}|${links.map((l) => `${l.source}-${l.target}`).join(',')}`;
 }
 
-// Grouped = tidy preset positions (computePositions); auto = Cytoscape's built-in cose (force-directed
-// crossing-minimizer, in core — no extra dependency), seeded non-random from the current positions so
-// it's stable/repeatable. Preset restores the grouped positions explicitly, so a toggle round-trips.
-function applyLayout(cy: Core, mode: LayoutMode, positions: Map<string, Point>) {
+// Grouped = tidy preset positions (computePositions). Auto = Cytoscape's built-in cose (force-directed
+// crossing-minimizer, in core — no extra dependency), seeded non-random from current positions so it's
+// stable/repeatable. cose corrupts to NaN on a COMPOUND graph, so Auto first detaches the pop parents
+// (and hides the now-empty pop boxes); Grouped re-parents nodes to their pop + snaps positions back, so
+// a toggle round-trips exactly. parentById maps node id -> its pop parent id (POP_PREFIX + pop).
+export function applyLayout(cy: Core, mode: LayoutMode, positions: Map<string, Point>, parentById: Map<string, string>) {
   if (cy.elements().length === 0) {
     return;
   }
   if (mode === 'auto') {
+    cy.nodes('[!isPop]').move({ parent: null }); // detach: cose NaNs on compounds
+    cy.nodes('[?isPop]').addClass('cy-hidden'); // hide the emptied pop boxes
     cy.layout({ name: 'cose', randomize: false, animate: false, fit: true } as cytoscape.LayoutOptions).run();
     cy.fit(undefined, 30);
     return;
   }
-  // Grouped: snap every real node straight back to its computed slot. cose physically moves nodes (and
-  // the compound pop parents), and the `preset` layout's positions-function doesn't reliably restore
-  // that on a round-trip — so set positions directly. Pop parents re-fit around their children.
+  // Grouped: restore pop membership + exact slots. cose leaves nodes detached/moved; re-parent and set
+  // positions directly (preset's positions-function doesn't reliably restore a round-trip).
+  cy.nodes('[?isPop]').removeClass('cy-hidden');
   cy.batch(() => {
+    parentById.forEach((par, id) => {
+      const el = cy.getElementById(id);
+      if (el.nonempty()) {
+        el.move({ parent: par }); // idempotent if already parented
+      }
+    });
     positions.forEach((pt, id) => {
       const el = cy.getElementById(id);
       if (el.nonempty()) {
@@ -102,6 +112,7 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
   const cyRef = useRef<Core | null>(null);
   const setKeyRef = useRef<string>('');
   const positionsRef = useRef<Map<string, Point>>(new Map());
+  const parentByIdRef = useRef<Map<string, string>>(new Map());
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grouped');
   const layoutModeRef = useRef(layoutMode);
   layoutModeRef.current = layoutMode;
@@ -186,6 +197,11 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
           selector: 'edge.state-amber',
           style: { 'line-color': colorForState('amber') },
         },
+        {
+          // Auto mode detaches nodes from pops; hide the emptied pop boxes so they don't float.
+          selector: '.cy-hidden',
+          style: { display: 'none' },
+        },
       ],
       layout: { name: 'grid' },
     });
@@ -228,8 +244,11 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
     if (setChanged) {
       cy.elements().remove();
       positionsRef.current = computePositions(nodes);
+      parentByIdRef.current = new Map(
+        nodes.filter((n) => n.pop).map((n) => [n.id, POP_PREFIX + n.pop])
+      );
       cy.add(buildElements(nodes, links, positionsRef.current));
-      applyLayout(cy, layoutModeRef.current, positionsRef.current);
+      applyLayout(cy, layoutModeRef.current, positionsRef.current, parentByIdRef.current);
       setKeyRef.current = key;
     } else {
       // Same topology shape: just recolor nodes/edges for the new cursor tick.
@@ -254,7 +273,7 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
   useEffect(() => {
     const cy = cyRef.current;
     if (cy) {
-      applyLayout(cy, layoutMode, positionsRef.current);
+      applyLayout(cy, layoutMode, positionsRef.current, parentByIdRef.current);
     }
   }, [layoutMode]);
 
