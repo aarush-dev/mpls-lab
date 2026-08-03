@@ -23,8 +23,10 @@
 
 ## Telemetry evidence
 
-- **Metrics:** no clean single-metric signal — `bgp_vrf_prefix_count{device="ce_branch12",vrf="CORP"}`
-  stays flat (prefix count unchanged, only path preference shifts).
+- **Metrics:** no metric signal at all — `bgp_vrf_prefix_count` is PE-only (never
+  emitted for a CE), so on ce_branch12 there is no gauge to read; and it would not
+  move anyway (only path preference shifts, prefix count unchanged). Label + `show
+  bgp vrf` is the only signal.
 - **Events:** soft-clear ADJCHANGE line + local-pref change log entry in Loki
   right after t_start.
 - **Flows:** possible suboptimal-path traffic shift on CORP; no volume drop.

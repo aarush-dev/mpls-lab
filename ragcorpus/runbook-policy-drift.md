@@ -14,9 +14,9 @@ these are the hardest faults to spot without the label. Both are `modelled`
 ## Telemetry signature
 
 - **Metrics**:
-  - `policy_drift` — no dedicated metric. `bgp_vrf_prefix_count{device,vrf}`
-    may not even move (routes still present, just less-preferred). Confirm in
-    `show bgp vrf vrf_CORP` (local-pref lowered), not in a gauge.
+  - `policy_drift` — no metric. `bgp_vrf_prefix_count` is PE-only (not emitted on
+    a CE), and would not move anyway (routes still present, just less-preferred).
+    Confirm in `show bgp vrf vrf_CORP` (local-pref lowered), never a gauge.
   - `controller_drift` — `sdwan_controller_drift_active{site}` rises to 1
     for the drifted site (labelled `site`, not `device`); failover that should
     fire does not.

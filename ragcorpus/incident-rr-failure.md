@@ -23,8 +23,9 @@
 
 ## Telemetry evidence
 
-- **Metrics:** `bgp_peer_established{device="pe1"}` 11 → 0 (10 RR clients + pe2);
-  clients (pe3-pe12) each see their pe1 session drop too.
+- **Metrics:** `bgp_peer_established{device="pe1"}` drops out entirely — dead bgpd
+  means the sidecar scrape fails, so no sample (not a measured 0). The observable is
+  each RR client (pe3-pe12) seeing its own count fall by 1 as the pe1 session drops.
 - **Events:** bgpd process gap in Loki (no ADJCHANGE logged from the dead
   process itself); watchfrr respawn log line ~90s later.
 - **Flows:** brief VPNv4 prefix-propagation stall across all VRFs, no clean

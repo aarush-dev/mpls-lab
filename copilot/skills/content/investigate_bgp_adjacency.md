@@ -2,7 +2,7 @@
 name: investigate_bgp_adjacency
 description: BGP session down or flapping (bgp_flap, node_failure) — pairs runbook-bgp-adjacency-down.
 ---
-Faults: `bgp_flap` (transient clears, self-recovers) and `node_failure` (a PE dies, all its
+Faults: `bgp_flap` (transient clears, self-recovers) and `node_failure` (a node dies, all its
 sessions drop at once).
 
 1. `search_logs device=<suspect> pattern=ADJCHANGE` — count the BGP clears. A burst that
