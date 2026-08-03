@@ -10,7 +10,6 @@ import { NodeDetailPage } from './pages/NodeDetailPage';
 import { TelemetryPage } from './pages/TelemetryPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { CopilotPage } from './pages/CopilotPage';
-import { ForensicPage } from './pages/ForensicPage';
 import { StatusPage } from './pages/StatusPage';
 
 import { FaultInjectionPage } from './pages/FaultInjectionPage';
@@ -120,7 +119,6 @@ function AppInner(_props: AppRootProps) {
         <Route path={`${path}/telemetry`} component={TelemetryPage} />
         <Route path={`${path}/incidents`} component={IncidentsPage} />
         <Route path={`${path}/copilot`} component={CopilotPage} />
-        <Route path={`${path}/forensics`} component={ForensicPage} />
         <Route path={`${path}/inject`} component={FaultInjectionPage} />
         <Route path={`${path}/status`} component={StatusPage} />
       </Switch>

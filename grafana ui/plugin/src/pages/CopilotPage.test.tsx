@@ -17,40 +17,6 @@ import { DataClientProvider } from '../data/DataClientContext';
 (global as any).TextDecoder = require('util').TextDecoder;
 const { CopilotPage } = require('./CopilotPage');
 
-// api mode (default) drives the real CopilotClient, which POSTs /chat and reads an SSE trace.
-// Stub fetch: an SSE answer for /chat, empty JSON for the dataapi endpoints (getIncidents etc).
-const ANSWER = 'r1 cpu is pegged [metrics:0]';
-const CHAT_SSE = [
-  { type: 'user_msg', content: 'q' },
-  { type: 'tool_call', name: 'query_metrics', arguments: { device: 'r1' }, id: 'c1' },
-  { type: 'tool_result', name: 'query_metrics', id: 'c1', content: '[metrics:0] cpu 95', n: 3 },
-  { type: 'gate', ok: true, missing: [], retry: 0 },
-  { type: 'assistant_msg', content: ANSWER },
-]
-  .map((e) => `data: ${JSON.stringify(e)}\n\n`)
-  .join('');
-
-beforeEach(() => {
-  global.fetch = jest.fn(async (url: any) => {
-    if (String(url).includes('/chat')) {
-      const bytes = new (require('util').TextEncoder)().encode(CHAT_SSE);
-      let done = false;
-      return {
-        ok: true,
-        status: 200,
-        body: { getReader: () => ({ read: () => (done ? Promise.resolve({ done: true }) : ((done = true), Promise.resolve({ done: false, value: bytes }))) }) },
-        text: () => Promise.resolve(CHAT_SSE),
-      } as any;
-    }
-    return { ok: true, status: 200, json: async () => ({ rows: [], nodes: [], links: [], result: [] }), text: async () => '' } as any;
-  }) as unknown as typeof fetch;
-});
-
-afterEach(() => {
-  // @ts-expect-error reset
-  delete global.fetch;
-});
-
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -85,9 +51,6 @@ describe('CopilotPage', () => {
 
     // The user turn is echoed as a chat bubble.
     expect(await screen.findByText(suggestion)).toBeInTheDocument();
-
-    // The live copilot's cited answer lands in the thread.
-    expect(await screen.findByText(ANSWER)).toBeInTheDocument();
 
     // Wait for the mock client's async reply (~120ms) to land and grow the thread.
     await waitFor(

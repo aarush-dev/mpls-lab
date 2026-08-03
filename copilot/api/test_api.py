@@ -528,27 +528,7 @@ def test_case_id_routes_to_a_frozen_follow_up_over_http():
         "a past-freeze follow-up is rejected at the adapter, surfaced with guidance"
 
 
-def test_cors_allows_the_grafana_origin():
-    # UI-1 (#50): the browser plugin at :3000 must reach POST /chat cross-origin.
-    client = _client([
-        tool_call("query_metrics", {"device": "r1", "limit": 5}, id="c1"),
-        final("r1 cpu is pegged [metrics:0]"),
-        final('{"pass": true}'),
-    ])
-    origin = "http://localhost:3000"
-    resp = client.post("/chat", json={"question": "hi", "start": 100, "end": 200},
-                       headers={"Origin": origin})
-    assert resp.headers.get("access-control-allow-origin") == origin
-    # preflight the plugin's JSON POST triggers is answered
-    pre = client.options("/chat", headers={"Origin": origin,
-                                           "Access-Control-Request-Method": "POST",
-                                           "Access-Control-Request-Headers": "content-type"})
-    assert pre.status_code in (200, 204)
-    assert pre.headers.get("access-control-allow-origin") == origin
-
-
 def _run():
-    test_cors_allows_the_grafana_origin()
     test_chat_streams_tool_call_and_cited_answer()
     test_case_id_routes_to_a_frozen_follow_up_over_http()
     test_session_persists_and_resumes_over_http()

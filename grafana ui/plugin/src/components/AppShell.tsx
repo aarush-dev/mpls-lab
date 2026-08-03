@@ -16,7 +16,6 @@ const NAV_LINKS = [
   { to: 'telemetry', label: 'Telemetry' },
   { to: 'incidents', label: 'Incidents' },
   { to: 'copilot', label: 'Copilot' },
-  { to: 'forensics', label: 'Forensics' },
   { to: 'inject', label: 'Fault Injection' },
   { to: 'status', label: 'Status' },
 ];

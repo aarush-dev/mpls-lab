@@ -10,12 +10,7 @@ function createDataClient(): DataClient {
   if (appConfig.mode === 'mock') {
     return new MockDataClient();
   }
-  return new HttpDataClient(
-    appConfig.apiBaseUrl,
-    appConfig.requestTimeoutMs,
-    appConfig.copilotBaseUrl,
-    appConfig.copilotTimeoutMs
-  );
+  return new HttpDataClient(appConfig.apiBaseUrl, appConfig.requestTimeoutMs);
 }
 
 /**

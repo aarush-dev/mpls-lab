@@ -20,7 +20,6 @@ import os
 import time
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -36,16 +35,6 @@ from copilot.window import WindowContext
 from copilot.workspace import Executor, for_session
 
 app = FastAPI(title="NOC Copilot", version="1.0")
-
-# UI-1 (#50): the browser plugin (Grafana :3000) reaches POST /chat cross-origin. Mirrors
-# dataapi's allow-list -- GET+POST, localhost-only; this is the same origin boundary the
-# rest of the stack uses (ADR-0010 local-only). The one copilot change the UI needs.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
 
 
 class ChatRequest(BaseModel):
