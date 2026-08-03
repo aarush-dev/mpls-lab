@@ -135,6 +135,16 @@ here from their producer (PA-emulator, #20/#23). `COPILOT_LEDGER_PATH` (default 
 Self-check: `python3 -m copilot.memory.test_ledger` (+ a pass/fail gate-outcome case in the `api`
 suite). Unblocks **R4a (#20)** / **B4**.
 
+**B0 (#28) landed — Milestone B starts.** Workspace cage (`copilot/workspace/policy.py`): per-session
+`scratchpad/`+`artifacts/` under `sessions/<id>/` (`for_session`, `Workspace.make`, idempotent) + the
+one path check the workspace tools gate writes/exec on — `Workspace.writable(path)` returns the
+`realpath` iff inside `scratchpad/`, else `PathPolicyError`. `realpath` defeats `..`, absolute-outside,
+symlink-escape, prefix-sibling (all in the self-check). Reads unrestricted (ADR-0011/0013:
+read-only-outside == only writes gated); `artifacts/` is created but NOT writable via the policy
+(B3b writes it a separate way). No tool yet — **B1 (#29)** wires `for_session` into session creation
+and calls `writable` from `write`/`edit`; **B2 (#30)** uses `scratchpad` as exec `cwd`. Self-check:
+`python3 copilot/workspace/policy.py`.
+
 **R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
 seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth
 `/labels` fault into a full-fidelity §3.3 record — every block (risk/forecast/localization/anomaly/

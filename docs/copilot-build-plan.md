@@ -59,6 +59,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | I4b | 14 | quality gate: self-judge + ≤2 agentic retry | `ScriptedLLM` (verdicts are test literals) |
 | I5 | 15 | diagnostic skills loader (progressive disclosure, manual invoke) | real loader, **no content** (S3) |
 | X0 | 38 | codependency rule + graph repair | — |
+| B0 | 28 | workspace scaffolding (`copilot/workspace/`) + path policy | real (no doubles) |
 
 ### The spine — makes the above true
 | Code | # | Delivers |
@@ -90,7 +91,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 ### Milestone B — coding agent (after A)
 | Code | # | Delivers |
 |---|---|---|
-| B0 | 28 | workspace scaffolding + path policy |
+| B0 | 28 | workspace scaffolding + path policy | **done** |
 | B1 | 29 | workspace file tools `read/write/edit` + invariants |
 | B2 | 30 | subprocess executor (no-net, timeout, cwd) |
 | B3a | 31 | wire the `bash` tool to the executor |
