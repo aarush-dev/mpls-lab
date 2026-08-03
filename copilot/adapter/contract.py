@@ -117,11 +117,18 @@ def serve_rows(source: str, filters: Filters, rows, max_limit: int = MAX_LIMIT) 
     Both adapters ride it so the mandatory-filter/cap/framing guarantees are byte-identical on
     canned (stub) and live (HTTP) data; the two adapters differ ONLY in how they fetch `rows`.
 
-    `rows` are plain dicts shaped like a dataapi endpoint: a `device`, a `ts` (epoch seconds),
-    and payload fields. A row outside [start,end] -- or with no ts to prove it in-window (as
+    `rows` is either a list of dicts (stub: canned) or a ZERO-ARG CALLABLE returning them (HTTP:
+    the dataapi fetch). validate() runs FIRST, then the callable -- so an over-broad or
+    freeze-violating call (ADR-0015/0002) is rejected BEFORE any network read fires; passing an
+    already-fetched list would leak a wire read past T_snapshot before the guard bites.
+
+    Rows are plain dicts shaped like a dataapi endpoint: a `device`, a `ts` (epoch seconds), and
+    payload fields. A row outside [start,end] -- or with no ts to prove it in-window (as
     gate.pre_gate does over WINDOWED_SOURCES, ADR-0002) -- is not served; paging offsets index
     the IN-WINDOW rows, not raw."""
     filters.validate(max_limit)
+    if callable(rows):
+        rows = rows()
     rows = [r for r in rows
             if r.get("ts") is not None and filters.start <= r["ts"] <= filters.end]
     window = rows[filters.offset:filters.offset + filters.limit]

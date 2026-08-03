@@ -36,12 +36,14 @@ from copilot.adapter.contract import (
 )
 from copilot.window import WindowContext
 
-_TIMEOUT = 15.0
-_STEP = 30            # /metrics range step seconds (mirrors dataapi's default)
+_TIMEOUT = 25.0      # > dataapi's /flows subprocess budget (docker logs, 20s, sources.py) so a
+                     # slow-but-healthy flow read is not cut off client-side as a false outage.
+_STEP = 30           # /metrics range step seconds (mirrors dataapi's default)
 # ponytail: one bounded fetch per read, then filter+page adapter-side. The window (X min,
-# ADR-0002) already bounds the row count, so this covers the low cap (<=50) and typical
-# offsets; paging PAST this batch under-reports next_page. Upgrade to server-side paging
-# only if a single window ever holds > _FETCH_CAP rows.
+# ADR-0002) already bounds the row count, so this covers the low cap (<=50) and typical offsets.
+# KNOWN CEILING: a window holding > _FETCH_CAP rows (only a fault storm) is truncated by the
+# source, so the older/newer tail is dropped AND next_page reads exhausted off the truncated set
+# -- partial coverage read as complete. Upgrade to server-side paging if that window is real.
 _FETCH_CAP = 1000
 
 
@@ -79,36 +81,55 @@ def _latest_sample(series: dict):
     return tuple(samples[-1]) if samples else None
 
 
+def _matches(row: dict, pattern: str) -> bool:
+    """`pattern` substring-narrow for endpoints that lack a server-side one (/events, /flows).
+    Searched over the PAYLOAD fields only -- `ts` is excluded so a numeric pattern ('443')
+    can't spuriously match an epoch/byte count; both endpoints search the same set so one tool
+    arg has one contract (device/app/severity/line for events, the flow tuple for flows)."""
+    p = pattern.lower()
+    return p in row_text({k: v for k, v in row.items() if k != "ts"}).lower()
+
+
 class HttpAdapter:
     """ToolAdapter over a live dataapi. `fetch` is the injectable transport seam (path, params)
     -> parsed JSON; the default hits dataapi with httpx and maps any HTTP fault to AdapterError.
     Tests pass a canned/faulty fetch to exercise the shape-mapping without a live stack."""
 
     def __init__(self, base_url: str, *, timeout: float = _TIMEOUT, fetch=None,
-                 max_limit: int = MAX_LIMIT):
+                 transport=None, max_limit: int = MAX_LIMIT):
         self._base = base_url.rstrip("/")
         self._timeout = timeout
+        self._transport = transport      # test seam: an httpx.MockTransport drives _http_get
         self._max_limit = max_limit
         self._fetch = fetch or self._http_get
 
     # -- transport -----------------------------------------------------------
     def _http_get(self, path: str, params: dict) -> dict:
+        # ponytail: a short-lived client per call (closed by `with`) -- no pool to leak, matches
+        # dataapi/sources.py's per-call httpx.get; <=6 calls/investigation makes reuse moot.
         try:
-            r = httpx.get(self._base + path, params=params, timeout=self._timeout)
-            r.raise_for_status()
-            return r.json()
-        except httpx.HTTPError as e:                 # connect refusal, 5xx, timeout, bad body
+            with httpx.Client(base_url=self._base, timeout=self._timeout,
+                              transport=self._transport) as c:
+                r = c.get(path, params=params)
+                r.raise_for_status()
+                return r.json()
+        # httpx.HTTPError = connect refusal / 5xx / timeout; ValueError = a non-JSON body
+        # (JSONDecodeError, e.g. an HTML proxy error page -- NOT an httpx.HTTPError);
+        # httpx.InvalidURL = a malformed COPILOT_DATAAPI_URL. None may escape as a raise.
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
             raise AdapterError(f"dataapi {path} unavailable: {e}") from e
 
     # -- windowed reads (share F2's serve_rows) ------------------------------
+    # Fetch is passed as a THUNK: serve_rows validates FIRST, so an over-broad / freeze-violating
+    # call is rejected before any network read fires (never a wire read past T_snapshot).
     def metrics(self, filters: Filters) -> Result:
-        return serve_rows("metrics", filters, self._metrics_rows(filters), self._max_limit)
+        return serve_rows("metrics", filters, lambda: self._metrics_rows(filters), self._max_limit)
 
     def events(self, filters: Filters) -> Result:
-        return serve_rows("events", filters, self._events_rows(filters), self._max_limit)
+        return serve_rows("events", filters, lambda: self._events_rows(filters), self._max_limit)
 
     def flows(self, filters: Filters) -> Result:
-        return serve_rows("flows", filters, self._flows_rows(filters), self._max_limit)
+        return serve_rows("flows", filters, lambda: self._flows_rows(filters), self._max_limit)
 
     def _metrics_rows(self, filters: Filters) -> list[dict]:
         data = self._fetch("/metrics", {"query": _selector(filters), "start": filters.start,
@@ -120,7 +141,10 @@ class HttpAdapter:
             if sample is None:
                 continue
             ts, val = sample
-            row = {k: v for k, v in labels.items() if k not in ("__name__", "device")}
+            # drop the names row.update sets below too, so a Prometheus label literally called
+            # `metric`/`value`/`ts` can't be reported in place of the real field.
+            row = {k: v for k, v in labels.items()
+                   if k not in ("__name__", "device", "metric", "value", "ts")}
             row.update(metric=labels.get("__name__"), value=val,
                        device=labels.get("device"), ts=int(float(ts)))
             rows.append(row)
@@ -128,25 +152,23 @@ class HttpAdapter:
 
     def _events_rows(self, filters: Filters) -> list[dict]:
         # /events has no pattern/offset: fetch the window, normalise ISO ts, then filter by
-        # pattern (substring over the log `line`) adapter-side; serve_rows owns offset paging.
+        # pattern (substring over the payload, _matches) adapter-side; serve_rows owns offset.
         data = self._fetch("/events", {"start": filters.start, "end": filters.end,
                                        "device": filters.device, "limit": _FETCH_CAP})
         rows = [{**r, "ts": _iso_to_epoch(r.get("ts"))} for r in data.get("rows", ())]
         if filters.pattern:
-            p = filters.pattern.lower()
-            rows = [r for r in rows if p in str(r.get("line", "")).lower()]
+            rows = [r for r in rows if _matches(r, filters.pattern)]
         return rows
 
     def _flows_rows(self, filters: Filters) -> list[dict]:
         # /flows windows via `docker logs --since/--until` = log PRINT time (approximate):
         # a relevant flow can print outside [start,end] and read as out-of-window at the gate.
-        # No pattern/offset at the endpoint -> pattern filtered adapter-side over the whole row.
+        # No pattern/offset at the endpoint -> pattern filtered adapter-side over the payload.
         data = self._fetch("/flows", {"limit": _FETCH_CAP, "device": filters.device,
                                       "start": filters.start, "end": filters.end})
         rows = [{**r, "ts": _iso_to_epoch(r.get("ts"))} for r in data.get("rows", ())]
         if filters.pattern:
-            p = filters.pattern.lower()
-            rows = [r for r in rows if p in row_text(r).lower()]
+            rows = [r for r in rows if _matches(r, filters.pattern)]
         return rows
 
     # -- topology ------------------------------------------------------------

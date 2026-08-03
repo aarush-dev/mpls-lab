@@ -5,8 +5,10 @@ stack is needed; the live-lab path is verified separately (the ticket's acceptan
 Prior art: dataapi/check_dataset.py (assert + __main__, no framework).
 Run:  python3 -m copilot.adapter.test_http
 """
+import httpx
+
 from copilot.adapter import (
-    AdapterError, Evidence, Filters, HttpAdapter, NodeState, ToolAdapter,
+    AdapterError, Evidence, FilterError, Filters, HttpAdapter, NodeState, ToolAdapter,
 )
 from copilot.adapter.http import _iso_to_epoch, _selector
 from copilot.tools import dispatch
@@ -81,6 +83,69 @@ def test_metrics_selector_and_latest_sample():
     assert "value=91" in ev.content and "metric=node_cpu_pct" in ev.content
 
 
+def test_validate_runs_before_any_fetch():
+    # critical: serve_rows must validate BEFORE the fetch thunk fires, or an over-broad / frozen
+    # call does a wire read (past T_snapshot!) before the guard bites. Count fetches to prove it.
+    calls = []
+
+    def counting(path, params):
+        calls.append(path)
+        return {"result": [], "rows": []}
+
+    a = HttpAdapter("http://x", fetch=counting)
+    for bad in (Filters(start=W_START, end=W_END, limit=10),                     # over-broad
+                Filters(start=W_START, end=W_END, device="pe1", limit=10,        # end > T_snapshot
+                        t_snapshot=W_START)):
+        try:
+            a.metrics(bad)
+        except FilterError:
+            pass
+        else:
+            raise AssertionError(f"must reject before fetch: {bad}")
+    assert calls == [], f"validate must run before any fetch, got {calls}"
+
+
+def test_http_get_maps_faults_to_adaptererror():
+    # the ONLY code that maps httpx faults -> AdapterError; drive it through a real MockTransport.
+    def _t(handler):
+        return HttpAdapter("http://x", transport=httpx.MockTransport(handler))
+
+    def _refuse(_req):
+        raise httpx.ConnectError("connection refused")
+
+    cases = [
+        _t(lambda req: httpx.Response(502, text="bad gateway")),          # 5xx
+        _t(_refuse),                                                       # connect refusal
+        _t(lambda req: httpx.Response(200, text="<html>proxy error")),    # non-JSON body (ValueError)
+    ]
+    for a in cases:
+        try:
+            a._http_get("/metrics", {})
+        except AdapterError:
+            pass
+        else:
+            raise AssertionError("httpx fault must map to AdapterError")
+
+
+def test_flows_pattern_ignores_ts_digits():
+    # pattern must search PAYLOAD only, not the normalised epoch ts, or a numeric pattern
+    # spuriously matches the ts / byte counts.
+    routes = {"/flows": {"rows": [
+        {"ts": "2026-08-03 10:30:31", "device": "pe1", "ip_src": "10.0.0.1", "bytes": 56},
+    ]}}
+    a = _adapter(routes)
+    assert a.flows(_filters(pattern="1785753031")).evidence == (), "ts epoch must not match"
+    assert a.flows(_filters(pattern="10.0.0.1")).evidence != (), "real payload field matches"
+
+
+def test_events_pattern_searches_all_payload_fields():
+    # same tool arg, same contract as flows: severity/app are real event columns (sources.py).
+    routes = {"/events": {"rows": [
+        {"ts": "2026-08-03T05:20:07Z", "device": "pe1", "severity": "critical", "line": "x"},
+    ]}}
+    assert _adapter(routes).events(_filters(pattern="critical")).evidence != ()
+
+
 def test_events_pattern_and_offset_work_adapterside():
     # /events has NO pattern/offset -> both are adapter-side (fetch-then-filter + serve_rows page).
     rows = [{"ts": "2026-08-03T05:20:07Z", "device": "pe1", "line": f"msg {i} bgp"} for i in range(5)]
@@ -151,6 +216,10 @@ def _run():
     test_events_ts_reaches_evidence_as_int_no_typeerror_at_gate()
     test_flows_stamp_reaches_evidence_as_int()
     test_metrics_selector_and_latest_sample()
+    test_validate_runs_before_any_fetch()
+    test_http_get_maps_faults_to_adaptererror()
+    test_flows_pattern_ignores_ts_digits()
+    test_events_pattern_searches_all_payload_fields()
     test_events_pattern_and_offset_work_adapterside()
     test_walk_topology_bfs_enriched_and_unknown_focus()
     test_transport_fault_raises_adaptererror_not_bare_exception()
