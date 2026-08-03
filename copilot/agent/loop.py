@@ -25,6 +25,7 @@ frozen}` into every tool call, so the agent cannot read outside its window. When
 (forensic), the adapter freeze guard rejects any read past T_snapshot (Filters.validate).
 """
 import json
+import re
 from dataclasses import dataclass
 
 from copilot.adapter import ToolAdapter
@@ -106,10 +107,16 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
     a single JSON object {"name": ..., "arguments": {...}} (the ToolCall shape) in the
     completion. Returns () for plain prose, so a normal answer falls through to terminal.
 
-    ponytail: one JSON object, one key spelling -- the simplest thing a weak model
-    reliably emits. Upgrade to a multi-step ReAct grammar only if a real backend needs it.
+    R1 hardening: the call JSON must be the WHOLE trimmed turn or sit in a ```json fence --
+    NOT scanned out of the middle of prose. gpt-oss-20b (and any real model) quotes JSON inside
+    an ordinary answer ("the call would be {...}"); the old first-`{...}` scan read that as a
+    tool call. A tool-call turn is one where the model emits only the call, so requiring it to
+    lead (bare) or be fenced removes the false positive without losing the intended format.
+
+    ponytail: one JSON object, one key spelling -- the simplest thing a weak model reliably
+    emits. Upgrade to a multi-step ReAct grammar only if a real backend needs it.
     """
-    obj = _first_json_object(content or "")
+    obj = _tool_call_json(content or "")
     if not isinstance(obj, dict):
         return ()
     name = obj.get("name")
@@ -200,8 +207,11 @@ def investigate(question: str, window: WindowContext, *,
 
         if native and reply.content:                     # reasoning alongside a call
             emit("think", content=reply.content)
-        messages.append({"role": "assistant",
-                         "content": reply.content or _render_calls(calls)})
+        # R1 hard break (ADR-0004): the requested calls MUST ride the assistant turn's
+        # `tool_calls` field -- an OpenAI-compatible server rejects the following `tool`
+        # message otherwise. Native reasoning stays in `content`; a parsed (owned-fallback)
+        # call has none (its JSON IS the call), so content=None there.
+        messages.append(_assistant_turn(reply.content if native else None, calls))
 
         for tc in calls:
             if tool_calls >= cfg.tool_call_cap:
@@ -263,8 +273,27 @@ def _capped(events: list[Event], why: str) -> Outcome:
     return Outcome(answer=msg, events=tuple(events), stopped=why)
 
 
-def _render_calls(calls: tuple[ToolCall, ...]) -> str:
-    return json.dumps([{"name": c.name, "arguments": c.arguments} for c in calls])
+def _assistant_turn(content: str | None, calls: tuple[ToolCall, ...]) -> dict:
+    """The assistant message that carries the model's tool calls in OpenAI wire shape (R1).
+    Every `tool` message the loop appends next matches one of these `tool_calls` by id, so a
+    real backend accepts the round trip (the F1 stub ignores the shape)."""
+    return {"role": "assistant", "content": content, "tool_calls": [
+        {"id": c.id or f"call_{i}", "type": "function",
+         "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
+        for i, c in enumerate(calls)]}
+
+
+def _tool_call_json(text: str) -> dict | None:
+    """The tool-call object only when it's the whole turn or fenced (R1) -- never scanned from
+    inside prose. A ```json (or bare ```) fence wins; else the trimmed turn must START with `{`.
+    Prose that merely quotes JSON returns None, so it falls through to a terminal answer."""
+    t = text.strip()
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", t, re.DOTALL)
+    if fence:
+        return _first_json_object(fence.group(1))
+    if t.startswith("{"):
+        return _first_json_object(t)
+    return None
 
 
 def _first_json_object(text: str) -> dict | None:

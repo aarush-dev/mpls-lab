@@ -9,22 +9,24 @@ primitive the C1 demo consumes via EventSource.
 
 Run:  uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100
 
-The LLM client + tool adapter are FastAPI dependencies: tests (and later R1) override
-them via `app.dependency_overrides`. The defaults 503 until the real backends are wired.
+The LLM client + tool adapter are FastAPI dependencies: tests override them via
+`app.dependency_overrides`. The defaults are now real backends -- the config-selected
+OpenAI client (R1) and the HTTP dataapi adapter (A1); a dead endpoint surfaces per-request,
+not as a startup 503. The live end-to-end run on a real model + seeded corpora is E1/#42.
 """
 import json
 import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from copilot.adapter import HttpAdapter, ToolAdapter
 from copilot.agent import Event, Outcome, investigate
 from copilot.config import Config, load
-from copilot.llm import LLMClient
+from copilot.llm import LLMClient, make_client
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
 from copilot.window import WindowContext
@@ -44,8 +46,11 @@ def get_config() -> Config:
 
 
 def get_llm(cfg: Config = Depends(get_config)) -> LLMClient:
-    # ponytail: no runnable client yet (R1 ships the real HTTP one); tests override this.
-    raise HTTPException(503, "LLM backend not wired yet (R1)")
+    # R1 (#16): the real OpenAI-compatible client, selected by cfg.llm_profile (config-only
+    # swap, ADR-0004). Endpoint/model come from env (COPILOT_LLM_BASE_URL / *_MODEL_*), key
+    # from cfg.llm_api_key. A dead endpoint surfaces per-request as a transport error, not a
+    # 503 here -- the live end-to-end run against a real model is E1/#42. Tests override this.
+    return make_client(cfg)
 
 
 def get_adapter(cfg: Config = Depends(get_config)) -> ToolAdapter:

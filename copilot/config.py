@@ -47,6 +47,7 @@ _SECRET_ENV = {
 class Config:
     # -- profiles (ADR-0004 / ADR-0006): swap backend with one line ------------
     llm_profile: str = "nim"          # nim (interim) | unsloth-local (final, air-gapped)
+                                      # read by llm.make_client (R1) to pick the backend
     embed_profile: str = "nim"        # follows the LLM profile pattern
 
     # -- feature flags --------------------------------------------------------
@@ -67,7 +68,7 @@ class Config:
                                                 # (env COPILOT_DATAAPI_URL overrides, app.py)
 
     # -- secrets (from env / .env only; never committed) ----------------------
-    llm_api_key: str = field(default="", repr=False)
+    llm_api_key: str = field(default="", repr=False)  # sent as Bearer by llm.OpenAIClient (R1)
     embed_api_key: str = field(default="", repr=False)
 
     def __post_init__(self):

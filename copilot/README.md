@@ -54,6 +54,26 @@ cfg = load()          # defaults ← config.yaml ← env secrets, validated
 
 Self-check: `python3 copilot/config.py`. Fields + ADR provenance: `config.py` docstring.
 
+## LLM client (F1/R1)
+
+`copilot/llm/` is the one boundary to the model (ADR-0004/0005). F1 ships the `LLMClient`
+seam + shapes (`Reply`, `ToolCall`) + `ScriptedLLM` (deterministic test double). R1 ships:
+
+- `http.py` — `make_client(cfg)` dispatches on `cfg.llm_profile` (`nim` interim / gpt-oss-20b
+  | `unsloth-local` final, air-gapped) → one `OpenAIClient` over `/chat/completions` (both
+  profiles are HTTP; only base URL + model + key differ). The client is the **one place** the
+  flat tool-spec shape is wrapped into the chat-completions `{"type":"function",...}` wire form,
+  so neither registry literal is touched. Swap backend = one config line, no loop changes.
+- The loop (`agent/loop.py`) carries the model's calls on the assistant turn's `tool_calls`
+  field so a real server accepts the following `tool` message (was dropped pre-R1), and
+  `parse_tool_calls` only reads a call that is the whole turn or ```json-fenced — prose that
+  quotes JSON is no longer misread as a call.
+
+Env (not secrets; kept out of the committed YAML): `COPILOT_LLM_BASE_URL`,
+`COPILOT_LLM_MODEL_NIM`, `COPILOT_LLM_MODEL_LOCAL`; key = `COPILOT_LLM_API_KEY` (`.env`).
+Self-check: `python3 -m copilot.llm.test_http`; live smoke (needs an endpoint):
+`COPILOT_LLM_SMOKE=1 python3 -m copilot.llm.test_http`.
+
 ## Chat endpoint (F4)
 
 `POST /chat` drives the F3 loop and **streams** the canonical ADR-0009 trace events
@@ -65,9 +85,11 @@ uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only
 ```
 
 The LLM client + tool adapter are injected deps: tests override them via
-`app.dependency_overrides`. `get_adapter` now returns the real `HttpAdapter`
-(`cfg.dataapi_url`, env `COPILOT_DATAAPI_URL` wins) — A1 replaced the F2 stub; the LLM
-default still `503`s until R1. Self-check (stubbed, over HTTP): `python3 -m copilot.api.test_api`.
+`app.dependency_overrides`. `get_adapter` returns the real `HttpAdapter`
+(`cfg.dataapi_url`, env `COPILOT_DATAAPI_URL` wins) — A1 replaced the F2 stub; `get_llm`
+returns the config-selected `OpenAIClient` (R1) — a dead endpoint surfaces per-request, not
+as a startup `503`. The live end-to-end run is E1/#42. Self-check (stubbed, over HTTP):
+`python3 -m copilot.api.test_api`.
 
 ## Tools (I1)
 
