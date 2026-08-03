@@ -109,7 +109,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 | S1 | 34 | incident corpus seed (from 21 fault types) |
 | S2 | 35 | runbook corpus expand |
 | S3 | 36 | diagnostic skills content seed |
-| S4 | 37 | eval scenarios seed (labelled) |
+| S4 | 37 | eval scenarios seed (labelled) — `copilot/eval/scenarios.jsonl`: 21-scenario starter set (one per fault type, all 5 §2.1 families), each a projection of a `faults/labels/labels.jsonl` row → expected fault-type/family/root-cause/TTI for the deferred replay harness (ADR-0017) |
 
 S1–S3 have no technical blockers, but until they land, `search_runbooks`, `search_incidents` and
 `load_skill` are **inert at runtime** — real code over an empty corpus. Grab them before E1 (#42).
