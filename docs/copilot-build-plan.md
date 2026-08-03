@@ -64,6 +64,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | B2 | 30 | subprocess executor (no-net `unshare -n` + timeout + cwd, fail-closed) | **real sandbox** |
 | B3a | 31 | wire the `bash` tool to the executor (loop + HTTP, per-session) | real (no doubles) |
 | B3b | 32 | snapshot-on-present into `artifacts/` + `artifact` event (backend) | real (no doubles) |
+| B4 | 33 | `ledger→KB` loop: case verdict → KB incident doc (flag `ledger_to_kb`, default on) | real (LanceDB) |
 
 ### The spine — makes the above true
 | Code | # | Delivers |
@@ -100,7 +101,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 | B2 | 30 | subprocess executor (no-net, timeout, cwd) | **done** |
 | B3a | 31 | wire the `bash` tool to the executor | **done** |
 | B3b | 32 | artifacts (snapshot-on-present) + `artifact` event | **backend done** (render = C1/#27) |
-| B4 | 33 | `ledger→KB` loop (flag, default on) |
+| B4 | 33 | `ledger→KB` loop (flag, default on) | **done** |
 
 ### Seeding — content, non-blocking, grab any time
 | Code | # | Delivers |

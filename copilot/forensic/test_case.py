@@ -171,6 +171,34 @@ def test_replay_reproduces_live_case_run_evidence_ids():
             "disk-only replay serves the same evidence ids the live case run cited"
 
 
+def test_verdict_feeds_kb_iff_flag_on():
+    # B4 (ADR-0009): on case finalise the verdict is embedded into the KB as an `incident` doc,
+    # so it becomes a future search_incidents hit -- gated by cfg.ledger_to_kb (echo-risk toggle).
+    import atexit
+    import shutil
+
+    from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
+    script = [tool_call("query_metrics", {"device": "pe6"}),
+              final("pe6 shows congestion: high latency [metrics:0] and queue drops [metrics:1]."),
+              final('{"pass": true}')]
+
+    def _run(flag):
+        d = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, d, ignore_errors=True)
+        r = LanceRetriever(HashEmbedder(), os.path.join(d, "kb"))
+        # pre-seed an unrelated incident so the flag-off branch is non-vacuous: search returns a
+        # hit either way, only the case-<cid> doc is conditional on the flag (not an empty store).
+        r.add([Doc(id="inc-seed", text="unrelated past congestion incident", source="incident")])
+        create_case(REC, WIN, live_adapter=_stub_live(), llm=ScriptedLLM(list(script)),
+                    cfg=Config(ledger_to_kb=flag), cases_root=os.path.join(d, "cases"), retriever=r)
+        return [h.doc.id for h in r.search("pe6 congestion", k=5, source="incident")]
+
+    cid = case_id(REC)
+    assert f"case-{cid}" in _run(True), "flag on -> case verdict is a search_incidents hit"
+    off = _run(False)
+    assert "inc-seed" in off and f"case-{cid}" not in off, "flag off -> verdict is NOT embedded"
+
+
 def _run():
     test_snapshot_then_replay_reproduce_evidence_ids()
     test_replay_adapter_satisfies_tool_adapter_protocol()
@@ -179,6 +207,7 @@ def _run():
     test_iso_ts_normalised_to_epoch_int_on_disk()
     test_create_case_writes_dir_prediction_and_report()
     test_replay_reproduces_live_case_run_evidence_ids()
+    test_verdict_feeds_kb_iff_flag_on()
     print("copilot.forensic.test_case OK")
 
 

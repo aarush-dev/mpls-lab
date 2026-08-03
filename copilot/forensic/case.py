@@ -39,6 +39,7 @@ from copilot.adapter import Filters, MAX_LIMIT, NodeState, Result, row_text, ser
 from copilot.adapter.contract import EVIDENCE_CLOSE, EVIDENCE_OPEN
 from copilot.agent import investigate
 from copilot.emulator import drift_state, fault_type, is_abstain
+from copilot.retrieval.contract import Doc   # contract only: no lancedb import cost, no cycle
 from copilot.window import WindowContext
 
 _SOURCES = ("metrics", "events", "flows")
@@ -229,6 +230,23 @@ def render_case_md(record: dict, window: WindowContext, outcome, cid: str) -> st
     return "\n".join(lines) + "\n"
 
 
+def _verdict_to_kb(record: dict, md: str, cid: str, window: WindowContext, retriever, cfg) -> None:
+    """B4 (ADR-0009): embed the finalised case verdict into the KB as an `incident` Doc, so it
+    becomes a future search_incidents hit. Gated by cfg.ledger_to_kb -- the flag is the ONLY echo
+    guard (reinforcing an earlier wrong call); a gate-failed verdict embeds like any other, per spec
+    #33 "Echo risk = why it's a toggle". Deterministic id (`case-<cid>`) so a future upsert-on-id
+    store dedups a re-fire; today the caller's first-creation guard is the dedup. node=device feeds
+    the hop filter; ts=window.end is the incident's epoch-int time (record.window_end_ts is ISO,
+    store ts is int64)."""
+    if not cfg.ledger_to_kb or retriever is None:
+        return
+    if int(record.get("n_concurrent", 1)) > 1:
+        return   # ponytail: for a concurrent case the finalised verdict is the master synthesis
+        #          (R6b), not this initial md -- embedding that master is staged to R6b/#25.
+    retriever.add([Doc(id=f"case-{cid}", text=md, source="incident",
+                       node=record.get("device"), ts=window.end)])
+
+
 def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
                 cases_root: str = "cases", retriever=None, skills=None, kg=None) -> str:
     """The production forensic `handle` (ADR-0014): freeze the window to disk, write the record,
@@ -246,8 +264,9 @@ def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
     replay = ReplayAdapter(window_dir)             # the report is built from disk only (frozen)
     outcome = investigate_record(record, _case_question(record), window, replay,
                                  llm=llm, cfg=cfg, retriever=retriever, skills=skills, kg=kg)
+    md = render_case_md(record, window, outcome, cid)
     with open(os.path.join(case_dir, "case.md"), "w") as fh:
-        fh.write(render_case_md(record, window, outcome, cid))
+        fh.write(md)
     # R6a: persist the creation run as the first chat so a follow-up resumes it (ADR-0014 "spawn
     # chats"). Function-local import: chat.py imports ReplayAdapter from here, so top-level would cycle.
     # Seed only if empty -- an idempotent re-fire (backstop) must not double the chat's history.
@@ -255,6 +274,9 @@ def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
     chats = case_chats(case_dir)
     if not chats.read(INITIAL_CHAT):
         chats.append(INITIAL_CHAT, outcome.events)
+        # B4: embed the verdict once, on first creation. ponytail: dedup rides this chat-seeding
+        # guard; move to store upsert-on-id when LanceRetriever.add supports it (store.py:41).
+        _verdict_to_kb(record, md, cid, window, retriever, cfg)
     # R6b: concurrent faults -> n per-fault chats + a master synthesis (ADR-0014). Single-fault
     # cases stop at the initial chat above. Function-local import: synthesis imports from here.
     if int(record.get("n_concurrent", 1)) > 1:
