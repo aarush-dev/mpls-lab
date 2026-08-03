@@ -31,7 +31,7 @@
 | I2a | 10 | Retriever interface + embedded LanceDB + embedder profile — **done** |
 | I2b | 11 | `search_runbooks` + `search_incidents` (+ topology-hop filter) — **done** |
 | I3 | 12 | `walk_topology_graph` (BFS + `/metrics` enrich, `kg` flag) — **done** |
-| I4a | 13 | quality gate: deterministic pre-gate + citation check |
+| I4a | 13 | quality gate: deterministic pre-gate + citation check — **done** |
 | I4b | 14 | quality gate: self-judge + ≤2 agentic retry |
 | I5 | 15 | diagnostic skills loader (progressive disclosure, manual invoke) |
 | I6 | 26 | history compaction (config-gated) |

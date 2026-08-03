@@ -944,3 +944,48 @@ windowed filtered read. Wired end to end over `POST /chat` (`copilot.api.test_ap
   rows per node and ignores `window`); "downstream of link X" is served by focusing on an
   endpoint device (link-id parsing is YAGNI until a caller needs it); health thresholds on
   `status` (raw metric summary today); a seeded curated-KG corpus (S-phase, like the KB).
+
+## Copilot I4a: quality gate — deterministic pre-gate + citation check
+
+Stage 1 of the ADR-0008 two-stage gate: pure code, fail-fast, no LLM. Sits between "gathered
+evidence" and "allowed to answer" in the F3 loop. Lives in `copilot/agent/gate.py`; the loop
+(`investigate`) runs `run_gate` on the terminal answer. Stage 2 (self-judge LLM) + the bounded
+agentic retry on fail are **I4b (#14)** — not built here.
+
+- **Structured evidence channel (`Cite`).** `dispatch` now returns `(observation, cites)` where
+  each `Cite` is a content-BLIND `{id, source, device, ts}` projection unifying the three source
+  shapes (adapter `Evidence.device`, retrieval `Doc.node`, topology node). The gate decides on
+  provenance only — never re-parses rendered text (ADR-0006) and can't be swayed by untrusted
+  evidence content (ADR-0016). `n_rows = len(cites)`; the loop accumulates cites for the gate.
+- **Four deterministic checks (`pre_gate` + `tool_calls_ok`), all ADR-0008:**
+  1. **tool calls succeeded** — a guidance error (ADR-0015) from any call → block (I4b retries it).
+  2. **≥ N items** (`cfg.gate_min_evidence`, N=2) — thin evidence blocked.
+  3. **in-window** — each *windowed* (`metrics|events|flows`) item's ts ∈ the window; a null ts on
+     a windowed item **fails** (can't be proven in-window), never skips.
+  4. **on-topic** — every entity named in the question has ≥1 support, AND no windowed read is on a
+     device the question never named.
+- **Topicality is scoped to windowed reads; KB + topo are exempt** — this honours *both* the
+  ADR-0008 clause ("evidence device ∈ question entities") *and* ADR-0007 without overriding either.
+  KB incidents are hop-relevant and topology walks are blast-radius neighbours (ADR-0007): both
+  legitimately cover devices the question never named, so a strict per-item reverse check would
+  wrongly block them. Only live telemetry reads must be about the device under investigation.
+- **Citation check** (`citation_check`): every device-anchored sentence must carry a `[id]`; a
+  non-empty answer must cite something; no citation may name an id absent from the gathered
+  evidence (fabricated → block). Directly implements acceptance #2 (uncited claim rejected).
+- **On fail the `missing[]` list IS the message** (ADR-0008). The loop emits a `gate` event
+  (`{ok:false, missing:[…]}`, ADR-0009 enum, streamed by F4) and returns `cannot answer yet: …`
+  instead of the answer. `stopped` stays caps-only (a gate block is not a runaway).
+- **Ask-back bypasses the gate.** A clarifying question before any evidence (ADR-0005) is not an
+  answer. `ponytail:` detected by a trailing `?` on a no-evidence turn — a known-ceiling heuristic
+  (upgrade path: an explicit ask-back signal from the loop/model).
+- **Entity extraction is a role-prefix whitelist** (`r|rr|p|pe|ce|asbr` + digits), not NER. This
+  is deliberate: a looser `\w+\d+` over-matched protocol/interface tokens (`as65001`, `ge0`, `v4`)
+  → each became a "required entity" no evidence could satisfy, wedging the question. `ponytail:`
+  upgrade path = intersect with the adapter's topology node set.
+- **Review** (Opus-5, two-axis, pre-merge): wired the missing "tool calls succeeded" check;
+  implemented the dropped reverse-topicality clause (windowed-scoped, KB/topo exempt); tightened
+  the entity regex to kill false-positive required-entities; failed windowed null-ts now blocks;
+  moved gate composition into `gate.run_gate` (was loop-level, Feature Envy).
+- **Deferred (I4b, #14):** the self-judge LLM call for relevance/sufficiency/consistency, and the
+  bounded (`gate_max_retries`, 2) agentic retry that re-fetches `missing[]` — the gate is terminal
+  until then, so a failed exploratory call blocks rather than retries.

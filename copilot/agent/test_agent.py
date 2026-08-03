@@ -133,6 +133,55 @@ def test_owned_parser_handles_non_native_toolcall():
         == "query_metrics"
 
 
+def test_gate_passes_cited_sufficient_answer():
+    # I4a: enough in-window, on-topic, cited evidence -> the answer flows through, no gate block.
+    llm = ScriptedLLM([
+        tool_call("query_metrics", {"device": "r1"}, id="c1"),
+        final("r1 cpu pegged [metrics:0][metrics:1]"),
+    ])
+    out = investigate("why is r1 slow?", WINDOW,
+                      llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
+    assert out.of_type("gate") == (), "a passing answer emits no gate block"
+    assert out.answer == "r1 cpu pegged [metrics:0][metrics:1]"
+
+
+def test_gate_blocks_uncited_answer():
+    # I4a acceptance: a device-anchored claim with no citation -> blocked, not answered.
+    llm = ScriptedLLM([
+        tool_call("query_metrics", {"device": "r1"}, id="c1"),
+        final("r1 is on fire"),                           # claim, no [id]
+    ])
+    out = investigate("why is r1 slow?", WINDOW,
+                      llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
+    g = out.of_type("gate")
+    assert len(g) == 1 and g[0].data["ok"] is False
+    assert out.answer.startswith("cannot answer yet")
+    assert any("uncited" in m for m in g[0].data["missing"])
+
+
+def test_gate_blocks_off_topic_thin_evidence():
+    # I4a acceptance: question about r1 but evidence only for r9 -> off-topic + thin -> blocked.
+    llm = ScriptedLLM([
+        tool_call("query_metrics", {"device": "r9"}, id="c1"),
+        final("r1 looks fine [metrics:0]"),
+    ])
+    out = investigate("what is wrong with r1?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=[{"device": "r9", "ts": 150, "cpu": 10}]),
+                      cfg=_cfg())
+    g = out.of_type("gate")
+    assert g and g[0].data["ok"] is False
+    assert any("off-topic" in m for m in g[0].data["missing"])
+
+
+def test_ask_back_bypasses_the_gate():
+    # a clarifying question before any evidence is not an answer -> the gate must not block it.
+    llm = ScriptedLLM([final("Which device or link should I look at?")])
+    out = investigate("is the network ok?", WINDOW,
+                      llm=llm, adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg())
+    assert out.of_type("gate") == ()
+    assert out.answer.startswith("Which device")
+
+
 def test_bad_event_type_rejected():
     try:
         Event("not_a_real_type", {})
@@ -151,6 +200,10 @@ def _run():
     test_filter_error_is_fed_back_as_observation()
     test_think_event_emitted_with_reasoning()
     test_owned_parser_handles_non_native_toolcall()
+    test_gate_passes_cited_sufficient_answer()
+    test_gate_blocks_uncited_answer()
+    test_gate_blocks_off_topic_thin_evidence()
+    test_ask_back_bypasses_the_gate()
     test_bad_event_type_rejected()
     print("copilot.agent self-check OK")
 

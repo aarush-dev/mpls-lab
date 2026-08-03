@@ -7,6 +7,12 @@ Emits canonical trace events (ADR-0009 enum) for F4 to stream / persist. A step
 cap + tool-call cap (config, ADR-0005) stop runaway; ask-back returns a clarifying
 question to the human instead of a tool call.
 
+Before an answer is allowed out, the I4a quality gate (copilot.agent.gate, ADR-0008 stage 1)
+runs over the structured `Cite`s gathered from tool calls: the deterministic pre-gate
+(sufficiency / in-window / on-topic) + the citation check. On fail the answer is blocked and
+the `missing[]` reasons become the message (a `gate` event is emitted). Ask-back bypasses the
+gate. Stage-2 (the self-judge LLM) + the bounded agentic retry on fail are I4b (#14).
+
 Windowing (ADR-0002): the loop -- not the model -- passes the window's (start, end)
 into every tool call, so the agent cannot read outside its window. F3 threads a bare
 `(start, end)` epoch pair (basic form); R3 swaps in the full WindowContext {start, end,
@@ -16,10 +22,11 @@ import json
 from dataclasses import dataclass
 
 from copilot.adapter import ToolAdapter
+from copilot.agent.gate import GateResult, citation_check, extract_entities, pre_gate
 from copilot.config import Config
 from copilot.llm import LLMClient, ToolCall
 from copilot.retrieval import Retriever
-from copilot.tools import TOOL_SPECS, dispatch
+from copilot.tools import Cite, TOOL_SPECS, dispatch
 
 # canonical event enum (ADR-0009) -- ONE vocabulary for the live stream AND the
 # persisted events.jsonl. F3 emits a subset; the gate/artifact types land later.
@@ -100,14 +107,28 @@ def investigate(question: str, window: tuple[int, int], *,
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": question}]
     tool_calls = 0
+    evidence: list[Cite] = []                            # structured cites gathered, for the gate
 
     for _ in range(cfg.step_cap):
         reply = llm.chat(messages, tools=TOOL_SPECS)
         native = reply.tool_calls
         calls = native or parse_tool_calls(reply.content)
 
-        if not calls:                                    # terminal: answer or ask-back
+        if not calls:                                    # terminal: answer, ask-back, or gate
             text = reply.content or ""
+            # ask-back (ADR-0005): a clarifying question asked BEFORE any evidence is not an
+            # answer, so the quality gate doesn't apply to it.
+            if not evidence and text.rstrip().endswith("?"):
+                emit("assistant_msg", content=text)
+                return Outcome(answer=text, events=tuple(events))
+            gate = _gate(text, evidence, window, question, cfg)
+            if not gate.ok:
+                # ADR-0008: honest failure -- the missing[] IS the message. I4b (#14) adds the
+                # self-judge stage + the bounded agentic retry that re-fetches missing[].
+                emit("gate", ok=False, missing=list(gate.missing))
+                msg = "cannot answer yet: " + "; ".join(gate.missing)
+                emit("assistant_msg", content=msg)
+                return Outcome(answer=msg, events=tuple(events))
             emit("assistant_msg", content=text)
             return Outcome(answer=text, events=tuple(events))
 
@@ -121,12 +142,23 @@ def investigate(question: str, window: tuple[int, int], *,
                 return _capped(events, "tool_call_cap")
             tool_calls += 1
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
-            observation, n = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
-            emit("tool_result", id=tc.id, name=tc.name, content=observation, n=n)
+            observation, cites = dispatch(tc.name, tc.arguments, adapter, window, retriever, kg)
+            evidence.extend(cites)
+            emit("tool_result", id=tc.id, name=tc.name, content=observation, n=len(cites))
             messages.append({"role": "tool", "tool_call_id": tc.id,
                              "name": tc.name, "content": observation})
 
     return _capped(events, "step_cap")
+
+
+def _gate(answer: str, evidence: list[Cite], window: tuple[int, int],
+          question: str, cfg: Config) -> GateResult:
+    """I4a stage-1 quality gate (ADR-0008): deterministic pre-gate + citation check, combined.
+    Stage-2 (self-judge LLM) + the bounded agentic retry on fail are I4b (#14)."""
+    pre = pre_gate(evidence, window=window, entities=extract_entities(question),
+                   min_evidence=cfg.gate_min_evidence)
+    cite = citation_check(answer, {c.id for c in evidence})
+    return GateResult(pre.ok and cite.ok, pre.missing + cite.missing)
 
 
 def _capped(events: list[Event], why: str) -> Outcome:

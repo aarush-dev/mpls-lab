@@ -2,7 +2,8 @@
 
 Prior art: dataapi/check_dataset.py (assert + __main__, no framework).
 Seam under test: the registry -- TOOLS / TOOL_SPECS / dispatch(name, args, adapter,
-window) -> (observation, n) -- with a canned StubAdapter (spec #3 §Testing).
+window) -> (observation, cites) -- with a canned StubAdapter (spec #3 §Testing).
+`cites` is the structured evidence channel the I4a gate consumes; n_rows = len(cites).
 Run:  python3 -m copilot.tools.test_tools
 """
 import atexit
@@ -11,7 +12,7 @@ import tempfile
 
 from copilot.adapter import StubAdapter
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
-from copilot.tools import RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
+from copilot.tools import Cite, RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
 
 WINDOW = (100, 200)
 METRICS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
@@ -68,11 +69,25 @@ def test_registry_covers_read_and_retrieval_tools():
     assert specs["walk_topology_graph"] == {"device", "hops"}
 
 
+def test_dispatch_surfaces_structured_cites_for_the_gate():
+    # I4a: dispatch returns structured Cites (id + provenance) so the gate never re-parses
+    # rendered text. Read cites carry a live ts; KB cites the historical doc ts; topo none.
+    _, reads = dispatch("query_metrics", {"device": "r1"}, _adapter(), WINDOW)
+    assert reads[0] == Cite(id="metrics:0", source="metrics", device="r1", ts=100)
+    _, walk = dispatch("walk_topology_graph", {"device": "r1", "hops": 1}, _adapter(), WINDOW)
+    assert walk[0] == Cite(id="topo:r1", source="topo", device="r1", ts=None)
+    _, kb = dispatch("search_runbooks", {"query": "bgp neighbor flap"},
+                     _adapter(), WINDOW, _retriever())
+    assert any(c.id == "rb-bgp" and c.source == "runbook" and c.ts == 1000 for c in kb)
+    # error paths surface no cites (the gate reads that as thin/failed)
+    assert dispatch("query_metrics", {}, _adapter(), WINDOW)[1] == ()
+
+
 def test_walk_topology_graph_returns_enriched_subgraph():
     # I3 acceptance: blast-radius from a focus device -> the correct hop-ordered subgraph,
     # each node enriched with live status from /metrics. Line r1-r2-r3-r4; metrics only on r1.
-    obs, n = dispatch("walk_topology_graph", {"device": "r1", "hops": 2}, _adapter(), WINDOW)
-    assert n == 3, "r1 + 2 hops = r1,r2,r3"
+    obs, cites = dispatch("walk_topology_graph", {"device": "r1", "hops": 2}, _adapter(), WINDOW)
+    assert len(cites) == 3, "r1 + 2 hops = r1,r2,r3"
     # each node cited by a [topo:<node>] id (the I4a gate checks citations)
     assert "[topo:r1] hop 0: cpu=92" in obs, "focus cited + enriched with its latest metric"
     assert "[topo:r2] hop 1: no metrics" in obs and "[topo:r3] hop 2: no metrics" in obs
@@ -80,8 +95,8 @@ def test_walk_topology_graph_returns_enriched_subgraph():
 
 
 def test_walk_topology_graph_unknown_device_reports_guidance():
-    obs, n = dispatch("walk_topology_graph", {"device": "ghost"}, _adapter(), WINDOW)
-    assert n == 0 and obs.startswith("error:") and "topology" in obs
+    obs, cites = dispatch("walk_topology_graph", {"device": "ghost"}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error:") and "topology" in obs
 
 
 def test_walk_topology_graph_identical_with_kg_off():
@@ -97,19 +112,19 @@ def test_walk_topology_graph_identical_with_kg_off():
 
 
 def test_walk_topology_graph_missing_device_reports_guidance():
-    obs, n = dispatch("walk_topology_graph", {"hops": 2}, _adapter(), WINDOW)
-    assert n == 0 and obs.startswith("error:") and "device" in obs
+    obs, cites = dispatch("walk_topology_graph", {"hops": 2}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error:") and "device" in obs
 
 
 def test_walk_topology_graph_bad_hops_reports_guidance_not_crash():
-    obs, n = dispatch("walk_topology_graph", {"device": "r1", "hops": None}, _adapter(), WINDOW)
-    assert n == 0 and obs.startswith("error:")
+    obs, cites = dispatch("walk_topology_graph", {"device": "r1", "hops": None}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error:")
 
 
 def test_search_runbooks_routes_to_retriever_with_full_provenance():
-    obs, n = dispatch("search_runbooks", {"query": "bgp neighbor flap"},
-                      _adapter(), WINDOW, _retriever())
-    assert n >= 1
+    obs, cites = dispatch("search_runbooks", {"query": "bgp neighbor flap"},
+                          _adapter(), WINDOW, _retriever())
+    assert len(cites) >= 1
     assert "[rb-bgp]" in obs, "hit cited by its doc id (gate needs the citation)"
     # full provenance triple rides the observation (ADR-0006 / I4a gate): source, node, ts.
     assert "source=runbook" in obs and "node=r1" in obs and "ts=1000" in obs
@@ -117,9 +132,9 @@ def test_search_runbooks_routes_to_retriever_with_full_provenance():
 
 def test_search_incidents_hop_filter_narrows_to_nearby_devices():
     # acceptance: hop-filter narrows incidents to devices near the focus (r1, hops<=2).
-    obs, n = dispatch("search_incidents",
-                      {"query": "interface congestion drops", "device": "r1", "hops": 2},
-                      _adapter(), WINDOW, _retriever())
+    obs, cites = dispatch("search_incidents",
+                          {"query": "interface congestion drops", "device": "r1", "hops": 2},
+                          _adapter(), WINDOW, _retriever())
     assert "[inc-near]" in obs, "1-hop incident kept"
     assert "[inc-far]" not in obs, "3-hop incident filtered out"
 
@@ -128,85 +143,86 @@ def test_hop_filter_prefilters_rather_than_trimming_top_k():
     # the far incident is the STRONGER match for this query, so a post-filter over a
     # top-1 global search would surface inc-far then drop it -> "no matches". A prefilter
     # searches WITHIN the near set and returns the weaker-but-nearby inc-near.
-    obs, n = dispatch("search_incidents",
-                      {"query": "bgp session reset hold timer expiry", "device": "r1",
-                       "hops": 2, "k": 1}, _adapter(), WINDOW, _retriever())
-    assert "[inc-near]" in obs and n == 1, f"prefilter kept the nearby incident, got: {obs}"
+    obs, cites = dispatch("search_incidents",
+                          {"query": "bgp session reset hold timer expiry", "device": "r1",
+                           "hops": 2, "k": 1}, _adapter(), WINDOW, _retriever())
+    assert "[inc-near]" in obs and len(cites) == 1, f"prefilter kept the nearby incident, got: {obs}"
     assert "no matches" not in obs
 
 
 def test_search_incidents_without_device_skips_hop_filter():
-    obs, n = dispatch("search_incidents", {"query": "incident"},
-                      _adapter(), WINDOW, _retriever())
+    obs, cites = dispatch("search_incidents", {"query": "incident"},
+                          _adapter(), WINDOW, _retriever())
     assert "[inc-near]" in obs and "[inc-far]" in obs, "no focus device -> no hop narrowing"
 
 
 def test_retrieval_tool_missing_query_reports_guidance_not_crash():
-    obs, n = dispatch("search_runbooks", {}, _adapter(), WINDOW, _retriever())
-    assert n == 0 and obs.startswith("error:") and "query" in obs
+    obs, cites = dispatch("search_runbooks", {}, _adapter(), WINDOW, _retriever())
+    assert cites == () and obs.startswith("error:") and "query" in obs
 
 
 def test_retrieval_tool_null_k_reports_guidance_not_crash():
     # a weak model may emit k/hops as null (not just a bad string) -> TypeError, which must
     # still come back AS guidance (ADR-0015), never crash the loop/stream.
-    obs, n = dispatch("search_runbooks", {"query": "x", "k": None},
-                      _adapter(), WINDOW, _retriever())
-    assert n == 0 and obs.startswith("error:")
-    obs2, n2 = dispatch("search_incidents", {"query": "x", "device": "r1", "hops": None},
-                        _adapter(), WINDOW, _retriever())
-    assert n2 == 0 and obs2.startswith("error:")
+    obs, cites = dispatch("search_runbooks", {"query": "x", "k": None},
+                          _adapter(), WINDOW, _retriever())
+    assert cites == () and obs.startswith("error:")
+    obs2, cites2 = dispatch("search_incidents", {"query": "x", "device": "r1", "hops": None},
+                            _adapter(), WINDOW, _retriever())
+    assert cites2 == () and obs2.startswith("error:")
 
 
 def test_retrieval_tool_without_retriever_reports_guidance_not_crash():
-    obs, n = dispatch("search_incidents", {"query": "x"}, _adapter(), WINDOW)  # no retriever
-    assert n == 0 and obs.startswith("error:")
+    obs, cites = dispatch("search_incidents", {"query": "x"}, _adapter(), WINDOW)  # no retriever
+    assert cites == () and obs.startswith("error:")
 
 
 def test_search_logs_routes_to_events():
-    obs, n = dispatch("search_logs", {"device": "r1"}, _adapter(), WINDOW)
-    assert n == 2, "search_logs served the events rows"
+    obs, cites = dispatch("search_logs", {"device": "r1"}, _adapter(), WINDOW)
+    assert len(cites) == 2, "search_logs served the events rows"
     assert "[events:0]" in obs and "link flap 0" in obs
 
 
 def test_flows_routes_to_flows():
-    obs, n = dispatch("flows", {"device": "r1"}, _adapter(), WINDOW)
-    assert n == 4
+    obs, cites = dispatch("flows", {"device": "r1"}, _adapter(), WINDOW)
+    assert len(cites) == 4
     assert "[flows:0]" in obs and "bytes=1000" in obs
 
 
 def test_query_metrics_still_routes_to_metrics():
-    obs, n = dispatch("query_metrics", {"device": "r1"}, _adapter(), WINDOW)
-    assert n == 3 and "[metrics:0]" in obs
+    obs, cites = dispatch("query_metrics", {"device": "r1"}, _adapter(), WINDOW)
+    assert len(cites) == 3 and "[metrics:0]" in obs
 
 
 def test_unfiltered_call_rejected_with_guidance():
     # inherits the F2 mandatory-filter contract: no device/pattern -> guidance, not rows.
-    obs, n = dispatch("search_logs", {}, _adapter(), WINDOW)
-    assert n == 0 and obs.startswith("error:") and "device" in obs
+    obs, cites = dispatch("search_logs", {}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error:") and "device" in obs
 
 
 def test_unknown_tool_reports_error_not_raise():
-    obs, n = dispatch("delete_everything", {"device": "r1"}, _adapter(), WINDOW)
-    assert n == 0 and obs.startswith("error: unknown tool")
+    obs, cites = dispatch("delete_everything", {"device": "r1"}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error: unknown tool")
 
 
 def test_non_int_limit_reports_error_not_raise():
     # a weak model may emit limit/offset as junk; that must come back AS guidance
     # (ADR-0015), never crash the loop/stream.
-    obs, n = dispatch("search_logs", {"device": "r1", "limit": "lots"}, _adapter(), WINDOW)
-    assert n == 0 and obs.startswith("error:")
+    obs, cites = dispatch("search_logs", {"device": "r1", "limit": "lots"}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error:")
 
 
 def test_window_is_supplied_by_caller_not_model():
     # a tool arg trying to widen the window is ignored -- dispatch only reads device/
     # pattern/limit/offset; start/end come from the loop's window (ADR-0002/0015).
-    obs, n = dispatch("flows", {"device": "r1", "start": 0, "end": 9_999_999_999},
-                      _adapter(), WINDOW)
-    assert n == 4, "extra start/end args do not widen the read"
+    obs, cites = dispatch("flows", {"device": "r1", "start": 0, "end": 9_999_999_999},
+                          _adapter(), WINDOW)
+    assert len(cites) == 4, "extra start/end args do not widen the read"
 
 
 def _run():
     test_registry_covers_read_and_retrieval_tools()
+    test_dispatch_surfaces_structured_cites_for_the_gate()
     test_walk_topology_graph_returns_enriched_subgraph()
     test_walk_topology_graph_unknown_device_reports_guidance()
     test_walk_topology_graph_identical_with_kg_off()

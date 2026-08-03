@@ -8,6 +8,6 @@ the incident topology-hop filter. I3: walk_topology_graph -- deterministic BFS o
 topology + per-node /metrics enrich, curated-KG additive behind `kg_enabled` (ADR-0007).
 Owner lane builds here; do not edit from the other lane.
 """
-from copilot.tools.registry import RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
+from copilot.tools.registry import Cite, RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
 
-__all__ = ["TOOLS", "RETRIEVAL_TOOLS", "TOOL_SPECS", "dispatch"]
+__all__ = ["TOOLS", "RETRIEVAL_TOOLS", "TOOL_SPECS", "dispatch", "Cite"]

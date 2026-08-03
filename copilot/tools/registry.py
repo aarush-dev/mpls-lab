@@ -11,8 +11,22 @@ which adapter method they hit and share one arg shape. Upgrade to per-tool arg
 schemas only when a tool needs args beyond the shared narrowing (device/pattern/
 limit/offset).
 """
+from dataclasses import dataclass
+
 from copilot.adapter import FilterError, Filters, MAX_LIMIT, Result, ToolAdapter, sanitize
 from copilot.retrieval import Hit, Retriever
+
+
+@dataclass(frozen=True)
+class Cite:
+    """One cited evidence item surfaced to the quality gate (I4a, ADR-0008): its citation id
+    + the provenance the deterministic pre-gate checks. The tools layer is the ONE place that
+    knows each source's shape (ADR-0006), so it builds these -- the gate never re-parses
+    rendered observation text."""
+    id: str
+    source: str            # metrics | events | flows | runbook | incident | topo
+    device: str | None
+    ts: int | None
 
 # name -> (adapter method, description advertised to the model). The adapter method
 # is the seam: swapping stub<->HTTP never touches this table (ADR-0006).
@@ -66,10 +80,11 @@ TOOL_SPECS = [{
 
 def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
              window: tuple[int, int], retriever: Retriever | None = None,
-             kg: dict[str, str] | None = None) -> tuple[str, int]:
+             kg: dict[str, str] | None = None) -> tuple[str, tuple[Cite, ...]]:
     """Run one tool call: narrow -> validate -> read -> render. Returns
-    (observation_text, n_rows). An unknown tool or a FilterError comes back AS the
-    observation (ADR-0015 guidance) so the model can correct and retry, never as a raise.
+    (observation_text, cites) -- the structured `Cite`s feed the I4a quality gate
+    (n_rows = len(cites)). An unknown tool or a FilterError comes back AS the observation
+    with no cites (ADR-0015 guidance) so the model can correct and retry, never as a raise.
     """
     if name == "walk_topology_graph":                    # I3: topology walk, not a windowed read
         return _walk(arguments, adapter, window, kg)
@@ -77,7 +92,7 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
         return _retrieve(name, arguments, retriever, adapter)
     entry = TOOLS.get(name)
     if entry is None:                                    # unknown tool -> guidance, no crash
-        return f"error: unknown tool {name!r}", 0
+        return f"error: unknown tool {name!r}", ()
     method, _ = entry
     # ponytail: window is a bare (start,end) pair (F3 basic form); R3 swaps in the full
     # WindowContext {start,end,frozen} + the forensic end-freeze guard (ADR-0002).
@@ -92,12 +107,13 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
                 narrow[k] = int(arguments[k])
         filters = Filters(start=start, end=end, **narrow)
     except ValueError as e:
-        return f"error: {e}", 0
+        return f"error: {e}", ()
     try:
         result = getattr(adapter, method)(filters)
     except FilterError as e:                             # mandatory-filter reject (ADR-0015)
-        return f"error: {e}", 0
-    return _render(result), len(result.evidence)
+        return f"error: {e}", ()
+    cites = tuple(Cite(ev.id, ev.source, ev.device, ev.ts) for ev in result.evidence)
+    return _render(result), cites
 
 
 def _render(res: Result) -> str:
@@ -110,17 +126,17 @@ def _render(res: Result) -> str:
 
 
 def _retrieve(name: str, args: dict, retriever: Retriever | None,
-              adapter: ToolAdapter) -> tuple[str, int]:
+              adapter: ToolAdapter) -> tuple[str, tuple[Cite, ...]]:
     """Run one retrieval tool: (for incidents with a focus device) resolve the topology-hop
     node set -> source+node-scoped KB search (prefiltered, so the top-k is WITHIN scope) ->
     render cited hits. Missing retriever/query and junk k/hops come back AS guidance
     (ADR-0015), never a raise -- a weak model may emit null/list/string for an int.
     """
     if retriever is None:                                # KB unwired (default get_retriever)
-        return "error: retrieval backend not available", 0
+        return "error: retrieval backend not available", ()
     query = args.get("query")
     if not query:
-        return f"error: {name} needs a 'query' to search for", 0
+        return f"error: {name} needs a 'query' to search for", ()
     source = RETRIEVAL_TOOLS[name][0]
 
     nodes = None
@@ -128,21 +144,24 @@ def _retrieve(name: str, args: dict, retriever: Retriever | None,
     if name == "search_incidents" and focus:             # hop-proximity narrowing (ADR-0007)
         hops = _hops(args)
         if hops is None:
-            return "error: hops must be an integer", 0
+            return "error: hops must be an integer", ()
         # adapter owns the /topology shape (ADR-0006); node-less incidents fall out of the
         # `node IN (...)` prefilter, so proximity is enforced in the DB, not post-hoc.
         nodes = adapter.hops_within(focus, hops)
     try:
         k = int(args["k"]) if "k" in args else 5
     except (TypeError, ValueError):
-        return "error: k must be an integer", 0
+        return "error: k must be an integer", ()
     k = max(1, min(k, MAX_LIMIT))                        # same low ceiling as the read cap
     hits = retriever.search(query, k=k, source=source, nodes=nodes)
-    return _render_hits(hits), len(hits)
+    # KB ts is HISTORICAL (the past incident's time), so the gate exempts runbook/incident
+    # from its window check (ADR-0008) -- source rides each Cite to make that distinction.
+    cites = tuple(Cite(h.doc.id, h.doc.source, h.doc.node, h.doc.ts) for h in hits)
+    return _render_hits(hits), cites
 
 
 def _walk(args: dict, adapter: ToolAdapter, window: tuple[int, int],
-          kg: dict[str, str] | None) -> tuple[str, int]:
+          kg: dict[str, str] | None) -> tuple[str, tuple[Cite, ...]]:
     """I3 topology walk (ADR-0007): BFS the real edges from a focus `device` + per-node live
     status (the adapter owns the topology+/metrics join). The curated KG, if enabled, only
     APPENDS a hint per node -- structure + status come from real topology+metrics alone, so
@@ -151,13 +170,13 @@ def _walk(args: dict, adapter: ToolAdapter, window: tuple[int, int],
     """
     focus = args.get("device")
     if not focus:
-        return "error: walk_topology_graph needs a focus 'device'", 0
+        return "error: walk_topology_graph needs a focus 'device'", ()
     hops = _hops(args)
     if hops is None:
-        return "error: hops must be an integer", 0
+        return "error: hops must be an integer", ()
     states = adapter.walk_topology(focus, hops, window)
     if not states:                                       # unknown focus -> no fabricated subgraph
-        return f"error: unknown device {focus!r}: not in the topology", 0
+        return f"error: unknown device {focus!r}: not in the topology", ()
     lines = []
     for s in states:
         # [topo:node] is the citable id (the gate checks citations, I4a); status is already
@@ -166,7 +185,9 @@ def _walk(args: dict, adapter: ToolAdapter, window: tuple[int, int],
         if kg and s.node in kg:                          # never load-bearing (ADR-0007)
             line += f"  [kg: {sanitize(kg[s.node])}]"
         lines.append(line)
-    return "\n".join(lines), len(states)
+    # topology nodes carry no ts -> the gate exempts source "topo" from the window check.
+    cites = tuple(Cite(f"topo:{s.node}", "topo", s.node, None) for s in states)
+    return "\n".join(lines), cites
 
 
 def _hops(args: dict) -> int | None:
