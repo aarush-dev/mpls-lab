@@ -232,6 +232,13 @@ def is_abstain(record: dict | None) -> bool:
     return bool(record and (record.get("decision") or {}).get("abstain"))
 
 
+def drift_state(record: dict | None) -> str | None:
+    """The PA's model-health rung (ADR-0003 R0-R5 ladder) the trust gate distrusts (spec #3 story
+    14; T1). Read from `health.drift_state` -- the location #20 resolved (ADR-0003 folds it into the
+    ONE seam record, over PA.md §3.5's separate surface). None if no record / no health block."""
+    return (record.get("health") or {}).get("drift_state") if record else None
+
+
 def to_wire(record: dict) -> dict:
     """Wrap a Prediction Record as an Event-Ledger row (ADR-0009: the ledger holds records too).
     `type`/`ts` are the ledger's index columns; the §3.3 record rides nested + verbatim under

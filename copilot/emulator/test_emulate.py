@@ -14,7 +14,8 @@ import tempfile
 
 from copilot.config import Config
 from copilot.emulator import (
-    emulate_record, fault_type, family, fetch_labels, is_abstain, persist, prediction, to_wire,
+    drift_state, emulate_record, fault_type, family, fetch_labels, is_abstain, persist,
+    prediction, to_wire,
 )
 from copilot.memory import Ledger
 
@@ -147,6 +148,14 @@ def test_fault_type_and_is_abstain_accessors():
     assert is_abstain(None) is False
 
 
+def test_drift_state_accessor_reads_the_resolved_location():
+    # T1: the trust gate reads health.drift_state (ADR-0003 won §3.5; #20). oracle = R0 (healthy),
+    # heavy starts high on the R0-R5 ladder. None record -> None (no signal).
+    assert drift_state(emulate_record(LABEL, error_profile="oracle")) == "R0"
+    assert drift_state(emulate_record(LABEL, error_profile="heavy")) in {"R3", "R4", "R5"}
+    assert drift_state(None) is None
+
+
 def test_prediction_seam_emulate_pa_true_returns_a_record():
     r = prediction(_cfg(emulate_pa=True, error_profile="oracle"), [LABEL],
                    now="2026-06-21T14:55:30Z")
@@ -226,6 +235,7 @@ def _run():
     test_family_maps_the_five_coarse_families()
     test_error_profile_light_can_abstain_on_low_severity()
     test_fault_type_and_is_abstain_accessors()
+    test_drift_state_accessor_reads_the_resolved_location()
     test_prediction_seam_emulate_pa_true_returns_a_record()
     test_prediction_seam_counts_concurrent_faults()
     test_prediction_seam_emulate_pa_false_takes_the_real_pa_path()

@@ -8,11 +8,12 @@ accessors -- skill selection (ADR-0012) + gate softening (ADR-0008). The periodi
 writes records every ~predict_interval_s is R4b (ADR-0014).
 """
 from copilot.emulator.emulate import (
-    emulate_record, family, fault_type, fetch_labels, is_abstain, persist, prediction, to_wire,
+    drift_state, emulate_record, family, fault_type, fetch_labels, is_abstain, persist,
+    prediction, to_wire,
 )
 from copilot.emulator.predictor import predict_once, run_predictor
 
 __all__ = [
-    "emulate_record", "family", "fault_type", "fetch_labels", "is_abstain", "persist",
-    "predict_once", "prediction", "run_predictor", "to_wire",
+    "drift_state", "emulate_record", "family", "fault_type", "fetch_labels", "is_abstain",
+    "persist", "predict_once", "prediction", "run_predictor", "to_wire",
 ]

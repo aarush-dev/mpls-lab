@@ -7,6 +7,7 @@ Run:  python3 -m copilot.agent.test_gate
 """
 from copilot.agent.gate import (
     GateResult, citation_check, extract_entities, pre_gate, run_gate, tool_calls_ok,
+    trust_banner,
 )
 from copilot.tools import Cite
 from copilot.window import WindowContext
@@ -137,6 +138,20 @@ def test_abstain_softens_sufficiency_but_not_integrity():
     assert not forged.ok and any("fabricated citation" in m for m in forged.missing)
 
 
+def test_trust_banner_flags_a_degraded_model():
+    # T1 / story 14: at/above the distrust rung the answer is flagged; below it, untouched.
+    healthy = trust_banner("R0", distrust_at="R3")
+    assert healthy is None                               # ordinary investigation unaffected
+    assert trust_banner("R2", distrust_at="R3") is None  # below threshold -> no flag
+    at = trust_banner("R3", distrust_at="R3")            # exactly at threshold -> flag
+    assert at and "R3" in at
+    past = trust_banner("R5", distrust_at="R3")          # well past -> flag
+    assert past and "R5" in past
+    # no signal / unknown rung -> no fabricated distrust
+    assert trust_banner(None, distrust_at="R3") is None
+    assert trust_banner("healthy", distrust_at="R3") is None
+
+
 def _run():
     test_extract_entities_pulls_device_names()
     test_tool_calls_ok_flags_failed_calls()
@@ -154,6 +169,7 @@ def _run():
     test_citation_check_rejects_answer_with_no_citations()
     test_run_gate_combines_tool_calls_pre_gate_and_citation()
     test_abstain_softens_sufficiency_but_not_integrity()
+    test_trust_banner_flags_a_degraded_model()
     print("copilot.agent.gate self-check OK")
 
 

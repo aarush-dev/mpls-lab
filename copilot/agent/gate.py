@@ -32,6 +32,13 @@ WINDOWED_SOURCES = frozenset({"metrics", "events", "flows"})
 ENTITY_RE = re.compile(r"\b(?:rr|r|pe|p|ce|asbr)\d+\b", re.IGNORECASE)
 CITE_RE = re.compile(r"\[([^\[\]]+)\]")
 
+# ADR-0003 model-health degradation ladder (research/07): R0 healthy .. R5 fully degraded.
+# ponytail: a frozen 6-rung taxonomy, mirrored (not shared) across gate/emulator/config -- config
+# can't import this (config <- gate <- tools <- retrieval <- embedder <- config cycle), and the
+# gate stays decoupled from any one producer (a real PA emits these same rungs). Single source of
+# truth is ADR-0003; a rung never gets added.
+DRIFT_LADDER = ("R0", "R1", "R2", "R3", "R4", "R5")
+
 
 @dataclass(frozen=True)
 class GateResult:
@@ -109,6 +116,26 @@ def run_gate(answer: str, cites, *, window, question, min_evidence, tool_errors=
                    min_evidence=min_evidence, soft=abstain)
     cite = citation_check(answer, {c.id for c in cites})
     return _result([*calls.missing, *pre.missing, *cite.missing])
+
+
+def trust_banner(drift_state, *, distrust_at) -> str | None:
+    """T1 / spec #3 story 14: distrust a degraded model. When the PA's model-health rung
+    (`health.drift_state` -- ADR-0003's R0-R5 ladder, the location #20 resolved: ADR-0003 folds
+    it INTO the record over PA.md §3.5's separate surface) has climbed to/past `distrust_at`,
+    return a banner flagging the answer as resting on a degraded model; a healthy rung, no signal,
+    or an unrecognized one returns None, leaving the answer byte-identical.
+
+    Sibling to pre_gate/citation_check but it FLAGS, never BLOCKS: a drifting model still answers,
+    it just says so -- refusing to answer whenever drift climbs would be worse than a caveated
+    answer. The loop (copilot.agent.loop) prepends the banner to the passing answer."""
+    try:
+        rung, floor = DRIFT_LADDER.index(drift_state), DRIFT_LADDER.index(distrust_at)
+    except ValueError:
+        return None                                      # no/unknown signal -> no fabricated distrust
+    if rung < floor:
+        return None
+    return (f"⚠ low trust: model health has drifted to {drift_state} (≥ {distrust_at}); "
+            f"verify this prediction independently before acting.")
 
 
 def _sentences(text: str) -> list[str]:

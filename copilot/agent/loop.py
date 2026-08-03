@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from copilot.adapter import ToolAdapter
-from copilot.agent.gate import GateResult, run_gate
+from copilot.agent.gate import GateResult, run_gate, trust_banner
 from copilot.config import Config
 from copilot.llm import LLMClient, ToolCall
 from copilot.retrieval import Retriever
@@ -153,7 +153,8 @@ def investigate(question: str, window: WindowContext, *,
                 invoke: list[str] | None = None,
                 history: list[dict] | None = None,
                 fault_type: str | None = None,
-                abstain: bool = False) -> Outcome:
+                abstain: bool = False,
+                drift_state: str | None = None) -> Outcome:
     """Run the loop until the model answers, asks back, or a cap trips. `kg` is the optional
     curated-KG hint map (ADR-0007): additive, never load-bearing -- the caller passes it only
     when cfg.kg_enabled (get_kg), so it's None here whenever the flag is off.
@@ -172,8 +173,11 @@ def investigate(question: str, window: WindowContext, *,
     `fault_type` / `abstain` (R4a, ADR-0003) come from the current Prediction Record (via the
     emulator seam, extracted by the caller with copilot.emulator.fault_type / is_abstain):
     `fault_type` is a soft steer for skill selection (ADR-0012, no rigid mapping); `abstain`
-    (the PA made no confident call) softens the quality gate (ADR-0008 §Nuances). Both default
-    to nothing, so the loop is byte-identical to F3 when no prediction is wired."""
+    (the PA made no confident call) softens the quality gate (ADR-0008 §Nuances); `drift_state`
+    (the record's `health.drift_state`, T1) FLAGS the passing answer as low-trust when the model
+    has drifted past cfg.drift_distrust_at -- it never blocks. All three default to nothing, so the
+    loop is byte-identical to F3 when no prediction is wired. The runtime caller that reads the
+    current record and passes these is downstream (R5 forensic chat / the predict loop)."""
     skills = skills or {}
     events: list[Event] = []
 
@@ -249,6 +253,12 @@ def investigate(question: str, window: WindowContext, *,
                 emit("assistant_msg", content=msg)
                 return Outcome(answer=msg, events=tuple(events))
             emit("gate", ok=True, missing=[], retry=retries)  # R2a: gate outcome visible on pass too
+            # T1 (story 14): the PA's model-health rung flags -- never blocks -- the passing answer
+            # when it has drifted past cfg.drift_distrust_at (ADR-0003; drift_state read from the
+            # current record's health.drift_state by the caller). No signal -> byte-identical to F3.
+            banner = trust_banner(drift_state, distrust_at=cfg.drift_distrust_at)
+            if banner:
+                text = banner + "\n\n" + text
             emit("assistant_msg", content=text)
             return Outcome(answer=text, events=tuple(events))
 

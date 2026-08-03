@@ -32,6 +32,9 @@ DEFAULT_YAML = os.path.join(HERE, "config.yaml")
 
 _LLM_PROFILES = frozenset({"nim", "unsloth-local"})
 _ERROR_PROFILES = frozenset({"oracle", "light", "heavy"})
+# ADR-0003 R0-R5 ladder, mirrored (not imported) from gate.DRIFT_LADDER: importing gate here is a
+# cycle (config <- gate <- tools <- retrieval <- embedder <- config). A frozen 6-rung taxonomy.
+_DRIFT_RUNGS = frozenset({"R0", "R1", "R2", "R3", "R4", "R5"})
 
 # yaml carries these; env carries the rest (secrets). Kept explicit so a secret
 # accidentally committed to config.yaml is REJECTED, not silently loaded.
@@ -63,6 +66,8 @@ class Config:
     step_cap: int = 8                 # ADR-0005: max loop turns per investigation
     tool_call_cap: int = 6            # ADR-0005: max tool invocations per investigation
     error_profile: str = "light"      # ADR-0003: oracle | light | heavy
+    drift_distrust_at: str = "R3"     # ADR-0003/story 14 (T1): trust gate flags the answer at/above
+                                      # this R0-R5 model-health rung; "R5" = only the worst rung flags
     predict_interval_s: int = 10      # ADR-0014: predict-loop cadence (seconds)
     dataapi_url: str = "http://127.0.0.1:8000"  # A1/ADR-0006: base URL the HttpAdapter reads
                                                 # (env COPILOT_DATAAPI_URL overrides, app.py)
@@ -78,6 +83,8 @@ class Config:
             f"embed_profile={self.embed_profile!r} not in {sorted(_LLM_PROFILES)}"
         assert self.error_profile in _ERROR_PROFILES, \
             f"error_profile={self.error_profile!r} not in {sorted(_ERROR_PROFILES)}"
+        assert self.drift_distrust_at in _DRIFT_RUNGS, \
+            f"drift_distrust_at={self.drift_distrust_at!r} not a rung in {sorted(_DRIFT_RUNGS)}"
         assert self.window_x_min > 0, "window_x_min must be > 0"
         assert self.predict_interval_s > 0, "predict_interval_s must be > 0"
         assert self.gate_min_evidence >= 1, "gate_min_evidence must be >= 1"
@@ -140,6 +147,7 @@ def _selfcheck():
     assert d.gate_max_retries == 2 and d.error_profile == "light"
     assert d.step_cap == 8 and d.tool_call_cap == 6
     assert d.predict_interval_s == 10
+    assert d.drift_distrust_at == "R3"
     assert d.llm_api_key == "" and d.embed_api_key == ""
 
     # 2. shipped config.yaml must not drift from the code defaults
@@ -165,7 +173,7 @@ def _selfcheck():
     # 4. validation bites on a bad enum / range
     for bad in (dict(llm_profile="gpt4"), dict(error_profile="perfect"),
                 dict(window_x_min=0), dict(gate_max_retries=-1), dict(step_cap=0),
-                dict(tool_call_cap=0)):
+                dict(tool_call_cap=0), dict(drift_distrust_at="R9")):
         try:
             Config(**bad)
         except AssertionError:

@@ -383,6 +383,24 @@ def test_abstain_prediction_softens_the_loop_gate():
     assert contra.answer.startswith("cannot answer") and "contradiction" in contra.answer
 
 
+def test_drift_state_flags_the_answer_but_does_not_block():
+    # T1 / story 14: a degraded model-health rung (>= cfg.drift_distrust_at) prepends a distrust
+    # banner to the SAME answer that a healthy rung leaves untouched; the answer still returns.
+    script = lambda: ScriptedLLM([
+        tool_call("query_metrics", {"device": "r1", "limit": 5}, id="c1"),
+        final("r1 cpu is pegged [metrics:0]"),
+        final('{"pass": true}')])
+    base = "r1 cpu is pegged [metrics:0]"
+    healthy = investigate("why is r1 slow?", WINDOW, llm=script(),
+                          adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(), drift_state="R0")
+    assert healthy.answer == base                        # healthy -> unchanged (regression)
+    drifted = investigate("why is r1 slow?", WINDOW, llm=script(),
+                          adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(), drift_state="R4")
+    assert drifted.answer.endswith(base)                 # the real answer is preserved
+    assert drifted.answer != base and "low trust" in drifted.answer   # flagged on top
+    assert drifted.of_type("gate")[-1].data["ok"] is True             # it PASSED, wasn't blocked
+
+
 def test_history_prior_turns_reach_the_model():
     # R2a: a resumed session threads prior turns between the system prompt and the new
     # question, so the model actually sees where the chat left off (multi-turn loop entry).
@@ -441,6 +459,7 @@ def _run():
     test_load_skill_unknown_is_guidance()
     test_fault_type_steers_skill_selection()
     test_abstain_prediction_softens_the_loop_gate()
+    test_drift_state_flags_the_answer_but_does_not_block()
     test_history_prior_turns_reach_the_model()
     test_no_history_is_a_fresh_single_turn()
     test_bad_event_type_rejected()
