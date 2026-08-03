@@ -1,0 +1,18 @@
+[Unit]
+Description=NOC copilot lab (containerlab topology + telemetry + dataapi)
+# Docker must be up first; a WSL restart brings containers back UNWIRED (veths gone),
+# so sim-up.sh detects that and destroy+redeploys. See restart-unwires-lab memory.
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 148-node containerlab deploy can take minutes -- no start timeout.
+TimeoutStartSec=0
+# Only signal the main script on stop; leave the nohup'd dataapi + docker containers alone.
+KillMode=process
+ExecStart=/root/LAB/sim-up.sh
+
+[Install]
+WantedBy=multi-user.target
