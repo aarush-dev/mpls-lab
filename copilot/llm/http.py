@@ -18,6 +18,7 @@ Live smoke (opt-in, needs a running endpoint):  COPILOT_LLM_SMOKE=1 python3 -m c
 """
 import json
 import os
+import re
 
 from copilot.config import Config
 from copilot.llm.client import Reply, ToolCall
@@ -96,12 +97,19 @@ def _to_reply(msg: dict) -> Reply:
     wire; a weak model can emit malformed JSON, so a bad blob degrades to `{}` (the loop's gate
     then sees an empty call) rather than raising inside chat()."""
     calls = tuple(
-        ToolCall(name=c["function"]["name"],
+        ToolCall(name=_clean_name(c["function"]["name"]),
                  arguments=_loads_obj(c["function"].get("arguments")),
                  id=c.get("id", ""))
         for c in (msg.get("tool_calls") or [])
     )
     return Reply(content=msg.get("content"), tool_calls=calls)
+
+
+def _clean_name(raw: str) -> str:
+    # #45: gpt-oss (harmony) sometimes leaks a channel token into the tool-call name over NIM's
+    # OpenAI-compatible endpoint (e.g. "search_logs<|channel|>commentary"); strip the markup so the
+    # intended tool dispatches. Model-agnostic -- a name that never had markup is unchanged.
+    return re.sub(r"<\|.*?\|>.*$", "", raw).strip()
 
 
 def _loads_obj(s) -> dict:

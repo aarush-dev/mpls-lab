@@ -163,6 +163,20 @@ def test_to_reply_parses_calls_and_degrades_bad_args():
     assert bad.tool_calls[0].arguments == {}
 
 
+def test_to_reply_strips_harmony_channel_leak_from_tool_name():
+    # gpt-oss (harmony format) sometimes leaks a channel token into the tool-call name over NIM's
+    # OpenAI-compatible endpoint; strip it so the intended tool dispatches (#45).
+    r = _to_reply({"content": None, "tool_calls": [
+        {"id": "c1", "function": {"name": "search_logs<|channel|>commentary",
+                                  "arguments": '{"device": "pe8"}'}}]})
+    assert r.tool_calls[0].name == "search_logs"
+    assert r.tool_calls[0].arguments == {"device": "pe8"}
+    # a clean name is model-agnostic -- unchanged
+    clean = _to_reply({"content": None, "tool_calls": [
+        {"id": "c2", "function": {"name": "search_logs", "arguments": "{}"}}]})
+    assert clean.tool_calls[0].name == "search_logs"
+
+
 def test_parse_tool_calls_only_when_the_whole_turn_is_the_call():
     # R1 hardening: a real model quoting a call inside a prose ANSWER is not a tool call -- and
     # neither is reasoning followed by a fenced block. Only a whole-turn call parses.
@@ -233,6 +247,7 @@ def _run():
     test_api_key_sent_only_when_present()
     test_as_function_wraps_flat_and_is_idempotent()
     test_to_reply_parses_calls_and_degrades_bad_args()
+    test_to_reply_strips_harmony_channel_leak_from_tool_name()
     test_parse_tool_calls_only_when_the_whole_turn_is_the_call()
     test_recorded_risk_self_judge_fails_open_on_prose()
     test_recorded_risk_ask_back_without_question_mark_is_gated()
