@@ -1,0 +1,623 @@
+[
+  {
+    "id": "pred-inc-congestion-ce_branch18-fc10a128-0",
+    "deviceId": "ce_branch18",
+    "faultType": "congestion",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785032430000
+  },
+  {
+    "id": "pred-inc-congestion-ce_branch18-fc10a128-1",
+    "deviceId": "ce_branch18",
+    "faultType": "congestion",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032460000
+  },
+  {
+    "id": "pred-inc-node_failure-ce_branch15-b49777d1-0",
+    "deviceId": "ce_branch15",
+    "faultType": "node_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032460000
+  },
+  {
+    "id": "pred-inc-rr_failure-pe1-4cd0f365-0",
+    "deviceId": "pe1",
+    "faultType": "rr_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032460000
+  },
+  {
+    "id": "pred-inc-congestion-ce_branch11-9bea9018-0",
+    "deviceId": "ce_branch11",
+    "faultType": "congestion",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785032520000
+  },
+  {
+    "id": "pred-inc-node_failure-ce_branch23-12ba741a-0",
+    "deviceId": "ce_branch23",
+    "faultType": "node_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032520000
+  },
+  {
+    "id": "pred-inc-rr_failure-pe2-48ec1641-0",
+    "deviceId": "pe2",
+    "faultType": "rr_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032520000
+  },
+  {
+    "id": "pred-inc-congestion-ce_branch11-9bea9018-1",
+    "deviceId": "ce_branch11",
+    "faultType": "congestion",
+    "confidence": 0.775,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785032550000
+  },
+  {
+    "id": "pred-inc-congestion-ce_branch11-9bea9018-2",
+    "deviceId": "ce_branch11",
+    "faultType": "congestion",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032580000
+  },
+  {
+    "id": "pred-inc-rr_failure-pe1-afe01976-0",
+    "deviceId": "pe1",
+    "faultType": "rr_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032610000
+  },
+  {
+    "id": "pred-inc-mpls_underlay_failure-p10-9d0b0ffc-0",
+    "deviceId": "p10",
+    "faultType": "mpls_underlay_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032640000
+  },
+  {
+    "id": "pred-inc-p_node_failure-p9-44844378-0",
+    "deviceId": "p9",
+    "faultType": "p_node_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032730000
+  },
+  {
+    "id": "pred-inc-asymmetric_loss-ce_branch20-281ae4a5-0",
+    "deviceId": "ce_branch20",
+    "faultType": "asymmetric_loss",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032790000
+  },
+  {
+    "id": "pred-inc-policy_drift-ce_branch15-f56d2a8c-0",
+    "deviceId": "ce_branch15",
+    "faultType": "policy_drift",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032850000
+  },
+  {
+    "id": "pred-inc-rr_failure-pe1-110907b9-0",
+    "deviceId": "pe1",
+    "faultType": "rr_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785032970000
+  },
+  {
+    "id": "pred-inc-tunnel_degrade-ce_branch8-60e4355c-0",
+    "deviceId": "ce_branch8",
+    "faultType": "tunnel_degrade",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785033030000
+  },
+  {
+    "id": "pred-inc-asymmetric_loss-ce_branch7-e42ce207-0",
+    "deviceId": "ce_branch7",
+    "faultType": "asymmetric_loss",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785033060000
+  },
+  {
+    "id": "pred-inc-tunnel_degrade-ce_branch8-60e4355c-1",
+    "deviceId": "ce_branch8",
+    "faultType": "tunnel_degrade",
+    "confidence": 0.775,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785033060000
+  },
+  {
+    "id": "pred-inc-asymmetric_loss-ce_branch7-e42ce207-1",
+    "deviceId": "ce_branch7",
+    "faultType": "asymmetric_loss",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785033090000
+  },
+  {
+    "id": "pred-inc-mpls_underlay_failure-p19-f54cba8c-0",
+    "deviceId": "p19",
+    "faultType": "mpls_underlay_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785033090000
+  },
+  {
+    "id": "pred-inc-ospf_area_flap-p13-f5dca984-0",
+    "deviceId": "p13",
+    "faultType": "ospf_area_flap",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785033090000
+  },
+  {
+    "id": "pred-inc-tunnel_degrade-ce_branch8-60e4355c-2",
+    "deviceId": "ce_branch8",
+    "faultType": "tunnel_degrade",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785033090000
+  },
+  {
+    "id": "pred-inc-gray_failure-p13-b2b78192-0",
+    "deviceId": "p13",
+    "faultType": "gray_failure",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785033150000
+  },
+  {
+    "id": "pred-false-alarm-1",
+    "deviceId": "ce_branch12",
+    "faultType": "congestion",
+    "confidence": 0.62,
+    "timeToImpactSeconds": 180.0,
+    "source": "mock",
+    "issuedAtMs": 1785033720000
+  },
+  {
+    "id": "pred-inc-bgp_cascade-ce_branch10-0ab51191-0",
+    "deviceId": "ce_branch10",
+    "faultType": "bgp_cascade",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785033960000
+  },
+  {
+    "id": "pred-inc-bgp_cascade-ce_branch10-0ab51191-1",
+    "deviceId": "ce_branch10",
+    "faultType": "bgp_cascade",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785033990000
+  },
+  {
+    "id": "pred-inc-bgp_cascade-ce_branch10-0ab51191-2",
+    "deviceId": "ce_branch10",
+    "faultType": "bgp_cascade",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785034020000
+  },
+  {
+    "id": "pred-inc-bgp_cascade-ce_branch10-0ab51191-3",
+    "deviceId": "ce_branch10",
+    "faultType": "bgp_cascade",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785034050000
+  },
+  {
+    "id": "pred-inc-brownout-ce_branch1-d73041df-0",
+    "deviceId": "ce_branch1",
+    "faultType": "brownout",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785034440000
+  },
+  {
+    "id": "pred-inc-brownout-ce_branch1-d73041df-1",
+    "deviceId": "ce_branch1",
+    "faultType": "brownout",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785034470000
+  },
+  {
+    "id": "pred-inc-brownout-ce_branch1-d73041df-2",
+    "deviceId": "ce_branch1",
+    "faultType": "brownout",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785034500000
+  },
+  {
+    "id": "pred-inc-brownout-ce_branch1-d73041df-3",
+    "deviceId": "ce_branch1",
+    "faultType": "brownout",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785034530000
+  },
+  {
+    "id": "pred-inc-controller_drift-ce_branch10-751a6d91-0",
+    "deviceId": "ce_branch10",
+    "faultType": "controller_drift",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785034680000
+  },
+  {
+    "id": "pred-inc-bgp_flap-ce_branch21-63ec8431-casc-0",
+    "deviceId": "ce_branch21",
+    "faultType": "bgp_flap",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785034710000
+  },
+  {
+    "id": "pred-inc-controller_drift-ce_branch10-751a6d91-1",
+    "deviceId": "ce_branch10",
+    "faultType": "controller_drift",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785034710000
+  },
+  {
+    "id": "pred-inc-bgp_flap-ce_branch21-63ec8431-casc-1",
+    "deviceId": "ce_branch21",
+    "faultType": "bgp_flap",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785034740000
+  },
+  {
+    "id": "pred-inc-controller_drift-ce_branch10-751a6d91-2",
+    "deviceId": "ce_branch10",
+    "faultType": "controller_drift",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785034740000
+  },
+  {
+    "id": "pred-inc-bgp_flap-ce_branch21-63ec8431-casc-2",
+    "deviceId": "ce_branch21",
+    "faultType": "bgp_flap",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785034770000
+  },
+  {
+    "id": "pred-inc-controller_drift-ce_branch10-751a6d91-3",
+    "deviceId": "ce_branch10",
+    "faultType": "controller_drift",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785034770000
+  },
+  {
+    "id": "pred-inc-bgp_flap-ce_branch21-63ec8431-casc-3",
+    "deviceId": "ce_branch21",
+    "faultType": "bgp_flap",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785034800000
+  },
+  {
+    "id": "pred-inc-bgp_flap-ce_branch21-63ec8431-casc-late",
+    "deviceId": "ce_branch21",
+    "faultType": "bgp_flap",
+    "confidence": 0.55,
+    "timeToImpactSeconds": 0.0,
+    "source": "mock",
+    "issuedAtMs": 1785034830000
+  },
+  {
+    "id": "pred-inc-core_congestion-ce_branch13-6e7f782f-0",
+    "deviceId": "ce_branch13",
+    "faultType": "core_congestion",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785034920000
+  },
+  {
+    "id": "pred-inc-core_congestion-ce_branch13-6e7f782f-1",
+    "deviceId": "ce_branch13",
+    "faultType": "core_congestion",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785034950000
+  },
+  {
+    "id": "pred-inc-core_congestion-ce_branch13-6e7f782f-2",
+    "deviceId": "ce_branch13",
+    "faultType": "core_congestion",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785034980000
+  },
+  {
+    "id": "pred-inc-core_congestion-ce_branch13-6e7f782f-3",
+    "deviceId": "ce_branch13",
+    "faultType": "core_congestion",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785035010000
+  },
+  {
+    "id": "pred-inc-core_partition-ce_branch1-4568d363-0",
+    "deviceId": "ce_branch1",
+    "faultType": "core_partition",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785035160000
+  },
+  {
+    "id": "pred-inc-core_partition-ce_branch1-4568d363-1",
+    "deviceId": "ce_branch1",
+    "faultType": "core_partition",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785035190000
+  },
+  {
+    "id": "pred-inc-core_partition-ce_branch1-4568d363-2",
+    "deviceId": "ce_branch1",
+    "faultType": "core_partition",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785035220000
+  },
+  {
+    "id": "pred-inc-core_partition-ce_branch1-4568d363-3",
+    "deviceId": "ce_branch1",
+    "faultType": "core_partition",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785035250000
+  },
+  {
+    "id": "pred-inc-hub_spoke_congest-ce_branch10-616f80c1-0",
+    "deviceId": "ce_branch10",
+    "faultType": "hub_spoke_congest",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785035400000
+  },
+  {
+    "id": "pred-inc-hub_spoke_congest-ce_branch10-616f80c1-1",
+    "deviceId": "ce_branch10",
+    "faultType": "hub_spoke_congest",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785035430000
+  },
+  {
+    "id": "pred-inc-hub_spoke_congest-ce_branch10-616f80c1-2",
+    "deviceId": "ce_branch10",
+    "faultType": "hub_spoke_congest",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785035460000
+  },
+  {
+    "id": "pred-inc-hub_spoke_congest-ce_branch10-616f80c1-3",
+    "deviceId": "ce_branch10",
+    "faultType": "hub_spoke_congest",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785035490000
+  },
+  {
+    "id": "pred-inc-ldp_session_flap-ce_branch1-84f50d24-0",
+    "deviceId": "ce_branch1",
+    "faultType": "ldp_session_flap",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785035640000
+  },
+  {
+    "id": "pred-inc-ldp_session_flap-ce_branch1-84f50d24-1",
+    "deviceId": "ce_branch1",
+    "faultType": "ldp_session_flap",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785035670000
+  },
+  {
+    "id": "pred-inc-ldp_session_flap-ce_branch1-84f50d24-2",
+    "deviceId": "ce_branch1",
+    "faultType": "ldp_session_flap",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785035700000
+  },
+  {
+    "id": "pred-inc-ldp_session_flap-ce_branch1-84f50d24-3",
+    "deviceId": "ce_branch1",
+    "faultType": "ldp_session_flap",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785035730000
+  },
+  {
+    "id": "pred-inc-path_asymmetry-ce_branch1-0d76815a-0",
+    "deviceId": "ce_branch1",
+    "faultType": "path_asymmetry",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785035880000
+  },
+  {
+    "id": "pred-inc-path_asymmetry-ce_branch1-0d76815a-1",
+    "deviceId": "ce_branch1",
+    "faultType": "path_asymmetry",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785035910000
+  },
+  {
+    "id": "pred-inc-path_asymmetry-ce_branch1-0d76815a-2",
+    "deviceId": "ce_branch1",
+    "faultType": "path_asymmetry",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785035940000
+  },
+  {
+    "id": "pred-inc-path_asymmetry-ce_branch1-0d76815a-3",
+    "deviceId": "ce_branch1",
+    "faultType": "path_asymmetry",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785035970000
+  },
+  {
+    "id": "pred-inc-pop_isolation-ce_branch1-1a88e2e2-0",
+    "deviceId": "ce_branch1",
+    "faultType": "pop_isolation",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785036540000
+  },
+  {
+    "id": "pred-inc-pop_isolation-ce_branch1-1a88e2e2-1",
+    "deviceId": "ce_branch1",
+    "faultType": "pop_isolation",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785036570000
+  },
+  {
+    "id": "pred-inc-pop_isolation-ce_branch1-1a88e2e2-2",
+    "deviceId": "ce_branch1",
+    "faultType": "pop_isolation",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785036600000
+  },
+  {
+    "id": "pred-inc-pop_isolation-ce_branch1-1a88e2e2-3",
+    "deviceId": "ce_branch1",
+    "faultType": "pop_isolation",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785036630000
+  },
+  {
+    "id": "pred-inc-srlg_cut-ce_branch10-5cfca05c-casc-0",
+    "deviceId": "ce_branch10",
+    "faultType": "srlg_cut",
+    "confidence": 0.6,
+    "timeToImpactSeconds": 120.0,
+    "source": "mock",
+    "issuedAtMs": 1785036780000
+  },
+  {
+    "id": "pred-inc-srlg_cut-ce_branch10-5cfca05c-casc-1",
+    "deviceId": "ce_branch10",
+    "faultType": "srlg_cut",
+    "confidence": 0.717,
+    "timeToImpactSeconds": 90.0,
+    "source": "mock",
+    "issuedAtMs": 1785036810000
+  },
+  {
+    "id": "pred-inc-srlg_cut-ce_branch10-5cfca05c-casc-2",
+    "deviceId": "ce_branch10",
+    "faultType": "srlg_cut",
+    "confidence": 0.833,
+    "timeToImpactSeconds": 60.0,
+    "source": "mock",
+    "issuedAtMs": 1785036840000
+  },
+  {
+    "id": "pred-inc-srlg_cut-ce_branch10-5cfca05c-casc-3",
+    "deviceId": "ce_branch10",
+    "faultType": "srlg_cut",
+    "confidence": 0.95,
+    "timeToImpactSeconds": 30.0,
+    "source": "mock",
+    "issuedAtMs": 1785036870000
+  }
+]

@@ -1,0 +1,17 @@
+# The app runs on client-side mock data (no metrics/log store), so no query
+# datasource is provisioned. The one entry here is the local Alertmanager that
+# backs the native Grafana Alerting UI: the plugin pushes synthetic node-down /
+# prediction alerts to it through Grafana's datasource proxy
+# (/api/alertmanager/noc-alertmanager/api/v2/alerts). A future "api" mode would
+# add real query datasources — only once those services exist in the stack.
+apiVersion: 1
+datasources:
+  - name: Alertmanager
+    uid: noc-alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false
+    editable: false
