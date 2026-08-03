@@ -181,12 +181,14 @@ ignored. A ticket is not schedulable in parallel with anything it shares a row w
    same commit).
 6. Clear context. Next ticket.
 
-**Frontier query** (everything grabbable right now):
+**Frontier query** (everything grabbable right now — open, with no open blocker):
 ```bash
-gh issue list --repo aarush-dev/mpls-lab --state open \
-  --json number,title,issueDependenciesSummary \
-  --jq '.[] | select(.issueDependenciesSummary.blockedBy==0) | "\(.number) \(.title)"'
+gh issue list --repo aarush-dev/mpls-lab --state open --limit 40 \
+  --json number,title,blockedBy \
+  --jq '.[]|select([.blockedBy.nodes[]|select(.state=="OPEN")]|length==0)|"\(.number)\t\(.title)"' | sort -n
 ```
+As of the repair: **#19 (R3)** and **#39 (X1)** are the two that move the spine; **#34–#37 (S1–S4)**
+are always grabbable as filler.
 
 ## Milestones
 
