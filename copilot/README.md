@@ -133,9 +133,13 @@ Env for the real embedders (not secrets, kept out of the committed YAML because
 `COPILOT_EMBED_MODEL_NIM`, `COPILOT_EMBED_MODEL_LOCAL`, `COPILOT_EMBED_API_KEY`.
 `COPILOT_KB_URI` points `/chat` at a seeded LanceDB so the search tools work over
 the HTTP seam; unset → the KB is absent and the tools report "backend not available".
+`COPILOT_SKILLS_DIR` points `get_skills` at the seeded diagnostic-skills dir
+(`copilot/skills/content`, S3) so the loop advertises `load_skill` + a catalog;
+unset → no steering (byte-identical to a skills-free run, ADR-0012).
 
-Self-checks (fixture corpus, `HashEmbedder`): `python3 -m copilot.retrieval.test_retrieval`
-and `python3 -m copilot.tools.test_tools`.
+Self-checks (fixture corpus, `HashEmbedder`): `python3 -m copilot.retrieval.test_retrieval`,
+`python3 -m copilot.tools.test_tools`, and `python3 -m copilot.skills.content.test_content`
+(9 seeded skills load + disclose).
 
 Not built yet: the KB corpus is a test fixture — real content is S1/S2 seeding.
 `add` is append-only (no upsert-on-id) until the seeder lands.
