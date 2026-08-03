@@ -10,9 +10,11 @@ from copilot.retrieval.contract import Doc, Embedder, Hit, Retriever
 from copilot.retrieval.embedder import (
     HashEmbedder, LocalEmbedder, NimEmbedder, make_embedder,
 )
+from copilot.retrieval.seed import seed_from_dir
 from copilot.retrieval.store import LanceRetriever
 
 __all__ = [
     "Doc", "Hit", "Embedder", "Retriever", "LanceRetriever",
     "make_embedder", "NimEmbedder", "LocalEmbedder", "HashEmbedder",
+    "seed_from_dir",
 ]
