@@ -33,6 +33,7 @@ import pyarrow.parquet as pq
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "dataapi"))
 from export import COLUMNS, precursor_mask
+from generate import CHURN_FAULTS, CONGEST_FAULTS
 
 OUTDIR = os.path.join(HERE, "output")
 DATASETS = os.path.join(HERE, "..", "dataapi", "datasets")
@@ -141,13 +142,36 @@ def main():
                 "no per-POP temperature spread (spatial correlation missing)"
 
     # Fault rows must be louder than healthy on the counters that faults drive.
-    if ifc.is_fault.any():
-        # DEFECT 2: if_in_discards is structurally zero in this lab now, so the
-        # "louder under fault" gate moves to the counters that are measured.
-        for col in ("if_out_discards", "q_backlog_bytes", "q_drops"):
-            g = ifc.groupby("is_fault")[col].mean()
-            assert g.get(True, 0) > g.get(False, 0), \
-                f"{col} does not rise under fault: {g.to_dict()}"
+    # DEFECT 2: if_in_discards is structurally zero in this lab now, so the
+    # "louder under fault" gate moves to the counters that are measured.
+    # DEFECT 3: each counter is only perturbed by SOME fault kinds (generate.py's
+    # _apply_env) -- gating on ifc.is_fault mixed in kinds that never touch the
+    # column, diluting the signal below noise at low --scale. Filter each counter
+    # to the rows whose primary fault kind actually drives it.
+    # DEFECT 4: even filtered, a pooled mean is Simpson's-paradox bait -- VRF/lo
+    # interfaces (baseline ~5-10) draw disproportionately more fault episodes than
+    # eth* (baseline ~50+), so the pooled fault mean can sit BELOW the pooled
+    # healthy mean while every single entity individually rises. Weight entities
+    # equally: average the per-entity (fault - healthy) delta. A strict "every
+    # entity must rise" is flaky too -- one entity can draw as few as ~250 fault
+    # rows across 8 devices (std ~16), so a lone entity can dip from poisson
+    # noise alone; the mean delta across all driven entities is the stable check.
+    driven_by = {
+        "if_out_discards": CONGEST_FAULTS | CHURN_FAULTS,
+        "q_backlog_bytes": CONGEST_FAULTS,
+        "q_drops": CONGEST_FAULTS | {"gray_failure"},
+    }
+    healthy = ifc[~ifc.is_fault]
+    for col, kinds in driven_by.items():
+        driven = ifc[ifc.fault_type_primary.isin(kinds)]
+        if len(driven):
+            pd_ = driven.groupby("entity")[col].mean()
+            ph = healthy.groupby("entity")[col].mean()
+            common = pd_.index.intersection(ph.index)
+            delta = pd_[common] - ph[common]
+            assert delta.mean() > 0, \
+                f"{col} does not rise under its driving faults on average: " \
+                f"{delta.to_dict()}"
 
     # gray_failure: rx optical power sags while laser bias climbs, with no
     # oper-status change. This divergence is the scenario's only early signal.

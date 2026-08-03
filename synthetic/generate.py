@@ -47,6 +47,17 @@ import leadpriors  # lead-time priors + per-VRF SLA, shared with the live orches
 from trafficgen import VRF_FLOW  # per-VRF flow shapes, for flow_bytes/flow_packets
 
 OUTDIR = os.path.join(HERE, "output")
+
+# Fault types whose signature is control-plane churn (CPU burns during
+# reconvergence) vs dataplane congestion (queues fill, errors climb).
+# Single source of truth for _inject_faults() and check.py's "louder under
+# fault" gate -- a counter only rises for the kinds that actually drive it.
+CHURN_FAULTS = {"bgp_flap", "policy_drift", "node_failure", "rr_failure",
+                "ospf_area_flap", "p_node_failure", "srlg_cut", "pop_isolation",
+                "core_partition", "bgp_cascade", "ldp_session_flap",
+                "mpls_underlay_failure"}
+CONGEST_FAULTS = {"congestion", "core_congestion", "brownout", "tunnel_degrade",
+                   "hub_spoke_congest", "asymmetric_loss"}
 os.makedirs(OUTDIR, exist_ok=True)
 
 
@@ -379,14 +390,8 @@ def _inject_faults(rng, df, inv, prof, times, step, scale):
     active = {}  # kind -> bool array of rows already perturbed by that kind
     floored_n = [0]
 
-    # Fault types whose signature is control-plane churn (CPU burns during
-    # reconvergence) vs dataplane congestion (queues fill, errors climb).
-    _CHURN = {"bgp_flap", "policy_drift", "node_failure", "rr_failure",
-              "ospf_area_flap", "p_node_failure", "srlg_cut", "pop_isolation",
-              "core_partition", "bgp_cascade", "ldp_session_flap",
-              "mpls_underlay_failure"}
-    _CONGEST = {"congestion", "core_congestion", "brownout", "tunnel_degrade",
-                "hub_spoke_congest", "asymmetric_loss"}
+    _CHURN = CHURN_FAULTS
+    _CONGEST = CONGEST_FAULTS
 
     def _prog(mask, t_start, t_impact, t_end, dur, sevmul, p_cross=1.0):
         """Impairment fraction over one episode, on an arbitrary row mask.

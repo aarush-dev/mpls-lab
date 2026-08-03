@@ -803,6 +803,24 @@ top-ranked failure signal (ClusterRCA, arXiv 2506.20673). The fault path's disca
 perturbation moved onto `if_out_discards`, which the lab does measure via
 `tc -s qdisc`. `synthetic/check.py` asserts all three stay zero.
 
+### DEFECT 5: pooled "louder under fault" gate was Simpson's-paradox bait
+
+`check.py`'s gate for `if_out_discards`/`q_backlog_bytes`/`q_drops` rising under
+fault compared the pooled mean over ALL `is_fault` rows against ALL healthy
+rows. Two bugs: (1) each counter only rises for the fault kinds that actually
+perturb it (`generate.py`'s `CHURN_FAULTS`/`CONGEST_FAULTS`, now hoisted to
+module level as the shared source of truth) — mixing in kinds that never
+touch the column dilutes the signal; (2) even filtered to the right kinds, the
+pooled mean confounds composition — VRF/loopback interfaces (baseline ~5–10)
+draw disproportionately more fault episodes than `eth*` (baseline ~50+), so
+the pooled fault mean sat *below* the pooled healthy mean at `--scale 1.0`
+(default) while every individual entity's own rate still rose. The gate now
+averages the **per-entity** (fault − healthy) delta, weighting each entity
+equally instead of by row count — it also tolerates one noisy entity (as few
+as ~250 fault rows can land on a single interface) without going flaky, since
+it checks the average delta rather than requiring every entity to individually
+clear the bar.
+
 ### Multi-label labels, ordinal severity, timestamp `ts`
 
 `export.py` emits every overlapping label instead of collapsing to the
