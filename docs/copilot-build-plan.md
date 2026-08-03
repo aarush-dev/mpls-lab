@@ -101,6 +101,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 | B2 | 30 | subprocess executor (no-net, timeout, cwd) | **done** |
 | B3a | 31 | wire the `bash` tool to the executor | **done** |
 | B3b | 32 | artifacts (snapshot-on-present) + `artifact` event | **backend done** (render = C1/#27) |
+| B3b·54 | 54 | static-serve `GET /sessions/{sid}/artifacts/{name}` (over-cap transport) | **done** |
 | B4 | 33 | `ledger→KB` loop (flag, default on) | **done** |
 
 ### Seeding — content, non-blocking, grab any time

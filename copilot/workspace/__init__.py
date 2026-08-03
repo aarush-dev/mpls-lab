@@ -6,9 +6,9 @@ B2 (#30): Executor -- constrained subprocess (no-net, timeout, cwd). B3a (#31) w
 tool. B3b (#32): snapshot() -- snapshot-on-present into artifacts/ + the `artifact` event payload.
 """
 from copilot.workspace.executor import ExecResult, Executor
-from copilot.workspace.policy import PathPolicyError, Workspace, for_session
+from copilot.workspace.policy import PathPolicyError, Workspace, artifact_path, for_session
 from copilot.workspace.present import Artifact, snapshot
 from copilot.workspace.tools import WorkspaceTools
 
-__all__ = ["PathPolicyError", "Workspace", "for_session", "WorkspaceTools",
+__all__ = ["PathPolicyError", "Workspace", "for_session", "artifact_path", "WorkspaceTools",
            "Executor", "ExecResult", "Artifact", "snapshot"]

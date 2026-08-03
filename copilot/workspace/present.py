@@ -16,7 +16,8 @@ scratchpad can be presented, so the append-only case record can't be fed an arbi
 ponytail: append-only name = a zero-padded count prefix (never reused; single-writer per session,
 ADR-0009 lock, so the count is race-free). Inline payload is capped -- a file over the cap ships as
 a reference (name + on-disk path) without bytes, so a big artifact can't blow up events.jsonl.
-Raise the cap / add a static-serve endpoint only if inline stops sufficing.
+A reference-only artifact is served by `GET /sessions/{sid}/artifacts/{name}` (#54, api/app.py),
+the transport a renderer fetches its bytes from. Raise the cap only if inline stops sufficing.
 
 Self-check: python3 -m copilot.workspace.present
 """

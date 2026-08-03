@@ -21,7 +21,7 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from copilot.adapter import FilterError, HttpAdapter, ToolAdapter
@@ -33,7 +33,7 @@ from copilot.memory import Ledger, SessionStore
 from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
 from copilot.window import WindowContext
-from copilot.workspace import Executor, for_session
+from copilot.workspace import Executor, PathPolicyError, artifact_path, for_session
 
 app = FastAPI(title="NOC Copilot", version="1.0")
 
@@ -162,6 +162,28 @@ def _sse(outcome: Outcome):
     # so `event_wire` reads e.ts -- stream and events.jsonl serialize the SAME shape.
     for e in outcome.events:
         yield f"data: {json.dumps(event_wire(e))}\n\n"
+
+
+@app.get("/sessions/{sid}/artifacts/{name}")
+def get_artifact(sid: str, name: str, sessions: SessionStore = Depends(get_sessions)) -> FileResponse:
+    # B3b#54: the transport for a reference-only (over-cap) `artifact` event -- its payload carries
+    # `path: artifacts/<name>` but no bytes, so C1/#27 renders the over-cap case by GETting here.
+    # Read-only, path-policy confined (artifact_path sanitises + realpath-contains sid AND name):
+    # an untrusted id/name that escapes sessions/<sid>/artifacts/ or names no file is a 404, never a
+    # traversal read.
+    # SECURITY: the bytes are AGENT-produced (a presented scratchpad file, ADR-0009). Served inline
+    # with a sniffed type, an `.svg` (in present._IMAGE_EXT) is `image/svg+xml` and a direct-navigate
+    # executes its embedded <script> in this origin -- stored XSS. So force a non-executable download:
+    # octet-stream + nosniff (no content-sniffing up to svg/html) + attachment (navigate downloads,
+    # never renders). A renderer (C1/#27) fetch()es the bytes and renders from the blob it controls;
+    # Content-Disposition doesn't affect fetch(), so this hardening costs the consumer nothing.
+    try:
+        path = artifact_path(sessions.root, sid, name)
+    except PathPolicyError:
+        raise HTTPException(status_code=404, detail="unknown artifact")
+    return FileResponse(path, media_type="application/octet-stream",
+                        headers={"X-Content-Type-Options": "nosniff",
+                                 "Content-Disposition": "attachment"})
 
 
 @app.post("/chat")

@@ -14,6 +14,7 @@ container/seccomp only if deployed adversarially (ADR-0013 rejected-alternatives
 Self-check: python3 copilot/workspace/policy.py
 """
 import os
+import re
 
 
 class PathPolicyError(Exception):
@@ -49,6 +50,24 @@ class Workspace:
         if full != root and not full.startswith(root + os.sep):
             raise PathPolicyError(f"write outside scratchpad rejected: {path!r}")
         return full
+
+
+def artifact_path(sessions_root: str, sid: str, name: str) -> str:
+    """Map an UNTRUSTED (sid, name) to a real file under sessions/<sid>/artifacts/, or
+    PathPolicyError (#54: the static-serve GET turns it into a 404, never a traversal read).
+    Sanitise each segment then realpath-contain -- mirrors resolve_case_dir (forensic/chat.py):
+    the charset keeps `.`/`..`, so the equality + strict-prefix check is what actually blocks a
+    `..` segment or a symlink planted in artifacts/ from escaping. Read-only: only serves an
+    existing file inside artifacts/ (a browser render target), never writes."""
+    root = os.path.realpath(sessions_root)
+    safe = [re.sub(r"[^A-Za-z0-9._-]", "_", s or "") for s in (sid, name)]
+    if any(not s or s in (".", "..") for s in safe):
+        raise PathPolicyError(f"unknown artifact: {safe[0]}/{safe[1]}")
+    want = os.path.join(root, safe[0], "artifacts", safe[1])
+    full = os.path.realpath(want)
+    if not (full == want and full.startswith(root + os.sep) and os.path.isfile(full)):
+        raise PathPolicyError(f"unknown artifact: {safe[0]}/{safe[1]}")
+    return full
 
 
 def for_session(sessions_root: str, sid: str) -> Workspace:
@@ -102,6 +121,23 @@ def _selfcheck():
             pass
         else:
             raise AssertionError("prefix-sibling escape not rejected")
+
+        # artifact_path (#54): serves a real file inside artifacts/, rejects every escape.
+        with open(os.path.join(ws.artifacts, "0000-c.png"), "wb") as f:
+            f.write(b"PNG")
+        assert artifact_path(root, "s1", "0000-c.png") == os.path.realpath(
+            os.path.join(ws.artifacts, "0000-c.png")), "serves an in-bounds artifact"
+        alink = os.path.join(ws.artifacts, "esc")        # symlink in artifacts/ can't escape
+        os.symlink("/etc", alink)
+        for bad_sid, bad_name in (("s1", "../../etc/passwd"), ("s1", ".."), ("..", "0000-c.png"),
+                                  ("s1", "/etc/passwd"), ("s1", "esc"), ("s1", "nope.png"),
+                                  ("s1", "")):
+            try:
+                artifact_path(root, bad_sid, bad_name)
+            except PathPolicyError:
+                pass
+            else:
+                raise AssertionError(f"expected rejection for {bad_sid}/{bad_name!r}")
 
         print("copilot.workspace.policy self-check OK")
     finally:

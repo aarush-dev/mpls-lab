@@ -548,7 +548,58 @@ def test_cors_allows_the_ui_origin():
     assert pre.headers.get("access-control-allow-origin") == origin
 
 
+def test_get_over_cap_artifact_serves_its_bytes():
+    # #54 acceptance: a reference-only (over-cap) `artifact` event carries a path but no bytes;
+    # GET /sessions/{sid}/artifacts/{name} serves those bytes so C1/#27 can render it. This closes
+    # the produced-signal-with-no-consumer gap from B3b (codependency rule).
+    import os
+
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+    from copilot.workspace import for_session
+    from copilot.workspace.present import _INLINE_CAP, snapshot
+
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    ws = for_session(d, "s")
+    big = os.urandom(_INLINE_CAP + 1)                    # over the inline cap -> reference-only
+    with open(os.path.join(ws.scratchpad, "big.bin"), "wb") as f:
+        f.write(big)
+    art = snapshot(ws, "big.bin")
+    ev = art.event()
+    assert ev.get("content") is None and ev.get("content_b64") is None, "over-cap ships no bytes"
+    assert ev["path"] == "artifacts/" + art.name
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+    resp = TestClient(app).get(f"/sessions/s/artifacts/{art.name}")
+    assert resp.status_code == 200, resp.status_code
+    assert resp.content == big, "the served bytes are the snapshot bytes the event pointed at"
+    # SECURITY: agent-produced bytes are served as a non-executable download, so an .svg artifact
+    # can't run <script> in-origin on a direct navigate (stored-XSS). Renderer fetch()es instead.
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert "attachment" in resp.headers.get("content-disposition", "")
+
+
+def test_get_unknown_artifact_is_404():
+    # #54 security: an artifact that doesn't exist (or a name aimed outside artifacts/) is a 404,
+    # never a traversal read. Confinement is unit-tested in policy._selfcheck; this locks the HTTP
+    # contract the UI sees.
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+
+    d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+    resp = TestClient(app).get("/sessions/s/artifacts/nope.png")
+    assert resp.status_code == 404, resp.status_code
+
+
 def _run():
+    test_get_over_cap_artifact_serves_its_bytes()
+    test_get_unknown_artifact_is_404()
     test_cors_allows_the_ui_origin()
     test_chat_streams_tool_call_and_cited_answer()
     test_case_id_routes_to_a_frozen_follow_up_over_http()
