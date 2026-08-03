@@ -120,6 +120,10 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
   onSelectRef.current = onSelectNode;
   const onHoverRef = useRef(onHoverNode);
   onHoverRef.current = onHoverNode;
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const linksRef = useRef(links);
+  linksRef.current = links;
 
   // Init cytoscape once.
   useEffect(() => {
@@ -269,11 +273,21 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
     }
   }, [nodes, links]);
 
-  // Re-run the chosen layout when the toggle flips (element set unchanged).
+  // Toggle flips. Auto: detach compounds + run cose. Grouped: REBUILD elements from scratch — the same
+  // path a fresh load takes (which lays out correctly). In-place position-restore after cose proved
+  // unreliable in the rendered graph (re-parented but never re-arranged), so replace the elements
+  // outright with the tidy positions baked in.
   useEffect(() => {
     const cy = cyRef.current;
-    if (cy) {
-      applyLayout(cy, layoutMode, positionsRef.current, parentByIdRef.current);
+    if (!cy) {
+      return;
+    }
+    if (layoutMode === 'grouped') {
+      cy.elements().remove();
+      cy.add(buildElements(nodesRef.current, linksRef.current, positionsRef.current));
+      cy.fit(undefined, 30);
+    } else {
+      applyLayout(cy, 'auto', positionsRef.current, parentByIdRef.current);
     }
   }, [layoutMode]);
 
