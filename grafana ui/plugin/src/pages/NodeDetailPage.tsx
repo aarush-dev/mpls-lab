@@ -3,7 +3,7 @@ import { useParams, useHistory } from 'react-router-dom';
 import { css } from '@emotion/css';
 import { PluginPage } from '@grafana/runtime';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { useStyles2, Link, Select } from '@grafana/ui';
+import { useStyles2, Link, Select, FilterInput } from '@grafana/ui';
 
 import { TimeSeriesPanel } from '../components/TimeSeriesPanel';
 import { EmptyState } from '../components/EmptyState';
@@ -32,6 +32,7 @@ export function NodeDetailPage() {
   const [flows, setFlows] = useState<FlowRecord[]>([]);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [q, setQ] = useState('');
 
   // Clear telemetry only when the selected device changes (not on refresh) so switching nodes shows
   // a clean "Loading…" instead of the previous node's charts, without per-refresh blinking.
@@ -100,6 +101,13 @@ export function NodeDetailPage() {
   const injected = injectedFaults.find((f) => f.node === id);
   const panels = telemetry ? groupSeries(telemetry) : [];
 
+  // Live search: filter metric panels + fixed sections by case-insensitive title substring.
+  const term = q.trim().toLowerCase();
+  const matches = (label: string) => !term || label.toLowerCase().includes(term);
+  const shownPanels = panels.filter((p) => matches(p.title));
+  const telemetryVisible = panels.length === 0 ? matches('telemetry') : shownPanels.length > 0;
+  const anyVisible = telemetryVisible || ['interfaces', 'neighbors', 'packets flows', 'logs'].some((s) => matches(s));
+
   const loading = telemetry === null && !error;
 
   const deviceOptions = useMemo<Array<SelectableValue<string>>>(
@@ -155,37 +163,67 @@ export function NodeDetailPage() {
             </span>
           </div>
 
-          <InterfaceTable series={telemetry ?? []} />
+          <FilterInput
+            value={q}
+            onChange={setQ}
+            placeholder="Filter stats / sections…"
+            className={styles.search}
+          />
 
-          <h3 className={styles.sectionTitle}>Telemetry</h3>
-          {panels.length === 0 ? (
-            <EmptyState message="No telemetry feed for this device (unmonitored host/core). Pick a monitored device above." />
-          ) : (
-            <div className={styles.panels}>
-              {panels.map((group) => (
-                <TimeSeriesPanel key={group.title} title={group.title} series={group.series} unit={group.unit} />
-              ))}
-            </div>
+          {matches('interfaces') && (
+            <>
+              <h3 className={styles.sectionTitle}>Interfaces</h3>
+              <InterfaceTable series={telemetry ?? []} />
+            </>
           )}
 
-          <h3 className={styles.sectionTitle}>Neighbors</h3>
-          {neighborIds.length === 0 ? (
-            <span className={styles.empty}>No known neighbors.</span>
-          ) : (
-            <div className={styles.neighbors}>
-              {neighborIds.map((neighborId) => (
-                <Link key={neighborId} href={nodeDetailPath(neighborId)} className={styles.neighborLink}>
-                  {neighborId}
-                </Link>
-              ))}
-            </div>
+          {telemetryVisible && (
+            <>
+              <h3 className={styles.sectionTitle}>Telemetry</h3>
+              {panels.length === 0 ? (
+                <EmptyState message="No telemetry feed for this device (unmonitored host/core). Pick a monitored device above." />
+              ) : (
+                <div className={styles.panels}>
+                  {shownPanels.map((group) => (
+                    <TimeSeriesPanel key={group.title} title={group.title} series={group.series} unit={group.unit} />
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
-          <h3 className={styles.sectionTitle}>Packets / Flows</h3>
-          <FlowTable flows={flows} />
+          {matches('neighbors') && (
+            <>
+              <h3 className={styles.sectionTitle}>Neighbors</h3>
+              {neighborIds.length === 0 ? (
+                <span className={styles.empty}>No known neighbors.</span>
+              ) : (
+                <div className={styles.neighbors}>
+                  {neighborIds.map((neighborId) => (
+                    <Link key={neighborId} href={nodeDetailPath(neighborId)} className={styles.neighborLink}>
+                      {neighborId}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
 
-          <h3 className={styles.sectionTitle}>Logs</h3>
-          <LogTerminal events={events} isHost={id.startsWith('h_')} />
+          {matches('packets flows') && (
+            <>
+              <h3 className={styles.sectionTitle}>Packets / Flows</h3>
+              <FlowTable flows={flows} />
+            </>
+          )}
+
+          {matches('logs') && (
+            <>
+              <h3 className={styles.sectionTitle}>Logs</h3>
+              <LogTerminal events={events} isHost={id.startsWith('h_')} />
+            </>
+          )}
+
+          {term && !anyVisible && <EmptyState message={`No stats or sections match "${q}".`} />}
         </>
       )}
     </PluginPage>
@@ -217,6 +255,10 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   down: css`
     color: ${theme.colors.error.text};
+  `,
+  search: css`
+    max-width: 420px;
+    margin-bottom: ${theme.spacing(1)};
   `,
   sectionTitle: css`
     margin-top: ${theme.spacing(3)};
