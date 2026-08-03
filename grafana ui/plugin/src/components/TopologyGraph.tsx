@@ -283,9 +283,12 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
       return;
     }
     if (layoutMode === 'grouped') {
+      // Mirror the fresh-load path EXACTLY: rebuild elements, then applyLayout, whose explicit
+      // el.position() calls are what actually place compound children into tiers (cy.add alone does
+      // not reliably honor element-definition positions for compound nodes in the rendered graph).
       cy.elements().remove();
       cy.add(buildElements(nodesRef.current, linksRef.current, positionsRef.current));
-      cy.fit(undefined, 30);
+      applyLayout(cy, 'grouped', positionsRef.current, parentByIdRef.current);
     } else {
       applyLayout(cy, 'auto', positionsRef.current, parentByIdRef.current);
     }
