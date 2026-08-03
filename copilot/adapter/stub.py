@@ -7,8 +7,7 @@ VictoriaMetrics/Loki running (spec §Testing).
 from collections.abc import Sequence
 
 from copilot.adapter.contract import (
-    Evidence, Filters, MAX_LIMIT, NodeState, Result, bfs_hops, frame, hops_within_links,
-    sanitize,
+    Filters, MAX_LIMIT, NodeState, Result, bfs_hops, hops_within_links, sanitize, serve_rows,
 )
 from copilot.window import WindowContext
 
@@ -71,29 +70,5 @@ class StubAdapter:
         return sanitize(" ".join(f"{k}={v}" for k, v in latest.items() if k not in ("device", "ts")))
 
     def _serve(self, source: str, filters: Filters) -> Result:
-        filters.validate(self._max_limit)
-        # ts-window filter (ADR-0002): /metrics /events /flows are windowed sources, so a row
-        # outside [start,end] -- or with no ts to prove it in-window (as gate.pre_gate does over
-        # WINDOWED_SOURCES) -- is not served. Paging offsets index the IN-WINDOW rows, not raw.
-        rows = [r for r in self._rows[source]
-                if r.get("ts") is not None and filters.start <= r["ts"] <= filters.end]
-        window = rows[filters.offset:filters.offset + filters.limit]
-        evidence = tuple(
-            Evidence(
-                id=f"{source}:{i}",
-                source=source,
-                device=row.get("device"),
-                ts=row.get("ts"),
-                content=frame(_row_text(row)),
-            )
-            for i, row in enumerate(window, start=filters.offset)
-        )
-        end = filters.offset + filters.limit
-        next_page = str(end) if end < len(rows) else None
-        return Result(evidence=evidence, next_page=next_page)
-
-
-def _row_text(row: dict) -> str:
-    """Compact `k=v` rendering; the payload (e.g. a log `msg`) is where any
-    injected instruction would live, so it goes through frame()/sanitize()."""
-    return " ".join(f"{k}={v}" for k, v in row.items())
+        # F2's shared pipeline (validate -> window-filter -> page -> frame); canned rows in.
+        return serve_rows(source, filters, self._rows[source], self._max_limit)

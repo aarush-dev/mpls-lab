@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from copilot.adapter import ToolAdapter
+from copilot.adapter import HttpAdapter, ToolAdapter
 from copilot.agent import Event, Outcome, investigate
 from copilot.config import Config, load
 from copilot.llm import LLMClient
@@ -49,8 +49,11 @@ def get_llm(cfg: Config = Depends(get_config)) -> LLMClient:
 
 
 def get_adapter(cfg: Config = Depends(get_config)) -> ToolAdapter:
-    # ponytail: real adapter needs a live dataapi; tests override this.
-    raise HTTPException(503, "tool adapter not wired yet (needs live dataapi)")
+    # A1 (#40): the real HTTP read over a live dataapi (replaces the F2 StubAdapter). Base URL
+    # from cfg.dataapi_url, env COPILOT_DATAAPI_URL wins (off-localhost stack) -- mirrors the
+    # env-override the other backends use. A transport fault surfaces per-tool as an
+    # AdapterError observation (registry), not a 503 here. Tests override with StubAdapter.
+    return HttpAdapter(os.environ.get("COPILOT_DATAAPI_URL", cfg.dataapi_url))
 
 
 def get_kg(cfg: Config = Depends(get_config)) -> dict[str, str] | None:

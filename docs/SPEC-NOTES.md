@@ -864,6 +864,36 @@ is R3 work, enforced at the adapter — not built yet. The window itself is a ba
 Also note: the flow window filters on `docker logs --since/--until`, i.e. log
 print time, not a per-record `stamp_updated` filter — approximate, not exact.
 
+## Copilot A1: HttpAdapter — the shape layer that made I1–I4 true on real data
+
+F2 shipped `ToolAdapter` + `StubAdapter` (canned rows) and **no ticket replaced the
+stub** — so `/chat` 503'd and no `copilot/` code had ever called dataapi. A1 (#40) is
+that stub replacement: `adapter/http.py`, riding F2's shared `serve_rows` pipeline
+(extracted from the stub so validate→cap→provenance→page→frame is byte-identical on
+live and canned data). Only the fetch is new.
+
+Per ADR-0006 this is the **one** layer that knows endpoint shapes, so every mismatch is
+resolved here, never pushed outward:
+- **ts → epoch int, here.** `/events` emits ISO (`…Z`), `/flows` emits nfacctd
+  `stamp_updated` (`YYYY-MM-DD HH:MM:SS`, naive UTC). The gate compares `start <= ts <=
+  end` numerically, so pass-through would `TypeError` **inside the gate**. Parsed to int
+  at the adapter; unparseable → `None` → dropped as not-provably-in-window (never a raise).
+- **`/metrics` is PromQL, not device/pattern/limit.** A selector is synthesised from
+  `Filters` (`device=…`, `pattern` → `__name__=~".*…"`); a result vector has no rows, so
+  per-series **latest in-window sample** → one `Evidence` (device/ts from labels+sample).
+- **`/events` has no `pattern`/`offset`** → both adapter-side (fetch-then-filter; `serve_rows`
+  pages the filtered set), else `pattern` silently no-ops and `next_page` lies.
+- **`walk_topology`** = `/topology` → shared `bfs_hops` → **one batched PromQL** over the
+  walk's nodes scoped to the window → per-node status. Unknown focus → `()` (never fabricate).
+- **Transport faults** (refusal / 5xx) → `AdapterError`, which `registry.dispatch` converts
+  to a tool observation — not a raise out of `investigate()` that kills the SSE stream, and
+  (critically) for the walk it fires **before** the empty-walk "unknown device" path, so a
+  dataapi outage never makes the copilot assert a false fact.
+
+Base URL: `cfg.dataapi_url` (default `http://127.0.0.1:8000`), env `COPILOT_DATAAPI_URL`
+overrides. The `/flows` approximate-window caveat (log print time) carries over from I1 —
+a relevant flow can print just outside `[start,end]` and read as out-of-window at the gate.
+
 ## Copilot I2a: LanceDB direct, embedder profile like the LLM
 
 `copilot/retrieval/` ships the `Retriever` seam (`add` / `search → [Hit(doc,

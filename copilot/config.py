@@ -63,6 +63,8 @@ class Config:
     tool_call_cap: int = 6            # ADR-0005: max tool invocations per investigation
     error_profile: str = "light"      # ADR-0003: oracle | light | heavy
     predict_interval_s: int = 10      # ADR-0014: predict-loop cadence (seconds)
+    dataapi_url: str = "http://127.0.0.1:8000"  # A1/ADR-0006: base URL the HttpAdapter reads
+                                                # (env COPILOT_DATAAPI_URL overrides, app.py)
 
     # -- secrets (from env / .env only; never committed) ----------------------
     llm_api_key: str = field(default="", repr=False)

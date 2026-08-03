@@ -13,7 +13,9 @@ limit/offset).
 """
 from dataclasses import dataclass
 
-from copilot.adapter import FilterError, Filters, MAX_LIMIT, Result, ToolAdapter, sanitize
+from copilot.adapter import (
+    AdapterError, FilterError, Filters, MAX_LIMIT, Result, ToolAdapter, sanitize,
+)
 from copilot.retrieval import Hit, Retriever
 from copilot.window import WindowContext
 
@@ -119,6 +121,8 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
         result = getattr(adapter, method)(filters)
     except FilterError as e:                             # mandatory-filter reject (ADR-0015)
         return f"error: {e}", ()
+    except AdapterError as e:                            # dataapi transport fault (A1) -> observation
+        return f"error: {e}", ()
     cites = tuple(Cite(ev.id, ev.source, ev.device, ev.ts) for ev in result.evidence)
     return _render(result), cites
 
@@ -154,7 +158,10 @@ def _retrieve(name: str, args: dict, retriever: Retriever | None,
             return "error: hops must be an integer", ()
         # adapter owns the /topology shape (ADR-0006); node-less incidents fall out of the
         # `node IN (...)` prefilter, so proximity is enforced in the DB, not post-hoc.
-        nodes = adapter.hops_within(focus, hops)
+        try:
+            nodes = adapter.hops_within(focus, hops)
+        except AdapterError as e:                        # /topology transport fault (A1) -> observation
+            return f"error: {e}", ()
     try:
         k = int(args["k"]) if "k" in args else 5
     except (TypeError, ValueError):
@@ -181,7 +188,10 @@ def _walk(args: dict, adapter: ToolAdapter, window: WindowContext,
     hops = _hops(args)
     if hops is None:
         return "error: hops must be an integer", ()
-    states = adapter.walk_topology(focus, hops, window)
+    try:
+        states = adapter.walk_topology(focus, hops, window)
+    except AdapterError as e:                            # dataapi fault (A1): observation, NOT a
+        return f"error: {e}", ()                         # false 'unknown device' from an empty walk
     if not states:                                       # unknown focus -> no fabricated subgraph
         return f"error: unknown device {focus!r}: not in the topology", ()
     lines = []

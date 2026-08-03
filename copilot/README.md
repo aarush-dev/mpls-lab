@@ -22,7 +22,7 @@ copilot/
   .env.example     # secret template → copy to .env (gitignored)            (F0)
 
   # Lane-Investigation (Dev 1) — disjoint ownership
-  adapter/    tool adapter over dataapi: filters+caps+injection guard  (F2)
+  adapter/    tool adapter over dataapi: filters+caps+injection guard  (F2); HttpAdapter = real read over live dataapi (A1)
   tools/      registry: query_metrics/search_logs/flows + search_runbooks/search_incidents (I1,I2b)
   retrieval/  Retriever over embedded LanceDB (KB) + search tools     (I2a,I2b)
   agent/      agent loop + two-stage quality gate                      (F3,I4)
@@ -64,9 +64,10 @@ ISO-UTC `ts` — one schema for the live stream and the persisted `events.jsonl`
 uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only
 ```
 
-The LLM client + tool adapter are injected deps: tests (and later R1) override them
-via `app.dependency_overrides`; the defaults `503` until the real backends are wired.
-Self-check (stubbed, over HTTP): `python3 -m copilot.api.test_api`.
+The LLM client + tool adapter are injected deps: tests override them via
+`app.dependency_overrides`. `get_adapter` now returns the real `HttpAdapter`
+(`cfg.dataapi_url`, env `COPILOT_DATAAPI_URL` wins) — A1 replaced the F2 stub; the LLM
+default still `503`s until R1. Self-check (stubbed, over HTTP): `python3 -m copilot.api.test_api`.
 
 ## Tools (I1)
 
@@ -80,6 +81,16 @@ Retrieval tools (I2b): `search_runbooks` / `search_incidents` search the I2a
 `Retriever` scoped by provenance; `search_incidents` also takes a focus `device` →
 topology-hop proximity filter (see below). Bad args (over-broad filter, non-int
 limit/k/hops, missing query) come back as observation text, never an exception.
+A dataapi **transport** fault (`AdapterError`: refusal / 5xx) also comes back as an
+observation, not a raise out of `investigate()` — and, for `walk_topology_graph`, it
+beats the empty-walk "unknown device" path so an outage never asserts a false fact (A1).
+
+`adapter/http.py` (A1) is the ONE place coupled to endpoint shapes (ADR-0006): it
+normalises event ISO / flow `stamp_updated` ts → epoch int (or the gate's numeric
+`start <= ts <= end` would `TypeError`), synthesises PromQL from `Filters` for
+`/metrics` (per-series latest sample → one Evidence), and does `/events` `pattern`+`offset`
+adapter-side (fetch-then-filter). Everything after the fetch is F2's shared `serve_rows`.
+Self-check: `python3 -m copilot.adapter.test_http`.
 
 `copilot/agent/loop.py` dispatches every tool call through the registry
 (previously hardcoded to `query_metrics`); `SYSTEM_PROMPT` lists all five.

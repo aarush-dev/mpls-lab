@@ -97,11 +97,14 @@ with `hops_within`) + per-node `/metrics` live status, the join owned by
 cited `[topo:<node>]`; unknown focus → guidance, not a fabricated node; status `sanitize()`d
 (ADR-0016). All self-checks green: config/llm/adapter/agent/tools/api/retrieval, plus dataapi's
 `python3 test_flows_window.py`.
-**Nothing in `copilot/` has ever called `dataapi` or an LLM.** `POST /chat` returns
-`503 {"detail":"LLM backend not wired yet (R1)"}` (`copilot/api/app.py:47`); behind it
-`get_adapter` raises too (`:52`). F1/F2 shipped `ScriptedLLM` + `StubAdapter` **as their stated
-scope**. The **adapter** stub had **no replacing ticket** in the original 34 (#4–#37) — that gap is
-**#40 (A1)**. The **LLM** stub was **not** in the same boat: `ScriptedLLM` was always owned by
+**The adapter now calls `dataapi` for real (A1/#40 landed).** `get_adapter` returns `HttpAdapter`
+(`copilot/api/app.py`), verified live: `query_metrics`/`search_logs`/`flows`/`walk_topology_graph`
+return real rows with real provenance, ts normalised to epoch int, a 502/refusal → tool observation
+(not a raise, not a false "unknown device"). `POST /chat` still `503`s but now on the **LLM** only
+(`"LLM backend not wired yet (R1)"`), not the adapter. F1/F2 shipped `ScriptedLLM` + `StubAdapter`
+**as their stated scope**. The **adapter** stub had **no replacing ticket** in the original 34
+(#4–#37) — that gap was **#40 (A1)**, now closed (`StubAdapter` stays as the test double). The
+**LLM** stub was **not** in the same boat: `ScriptedLLM` was always owned by
 **R1 (#16)** (`copilot/api/app.py:46` — `R1 ships the real HTTP one`). So the finished-state-`503`
 was caused by the missing **adapter** ticket alone. I1–I5 are real logic that has only ever seen
 canned rows; the one exception is I2a: `LanceRetriever` runs against a genuine embedded LanceDB (its
@@ -119,16 +122,16 @@ touch I/F-lane files anyway. Count: **39 tickets** (#4–#42); the original set 
 answers a real question end to end** (not #16). Full detail + both graphs:
 `docs/copilot-build-plan.md`.
 
-**Known landmines for whoever wires the real adapter (#40):** `Evidence.ts` is `int | None` epoch
-(`copilot/adapter/contract.py:65`) and the gate compares numerically (`copilot/agent/gate.py:66`),
-but `/events` emits ISO strings (`dataapi/sources.py:95`) and `/flows` emits nfacctd
-`stamp_updated` (`:143`) — pass-through raises `TypeError` inside the gate. `/metrics` takes
-**PromQL only** (`dataapi/app.py:53-58`), no device/pattern/limit/offset. `/events` and `/flows`
-have no `pattern` and no `offset`. `StubAdapter._serve` (`stub.py:72`) never filters by ts, so
-every existing windowing test is vacuous at the adapter.
+**Adapter landmines — all resolved in A1 (`copilot/adapter/http.py`):** `Evidence.ts` epoch-int vs
+`/events` ISO / `/flows` `stamp_updated` string → normalised to int at the adapter (`_iso_to_epoch`),
+so the gate's numeric compare never `TypeError`s. `/metrics` PromQL → selector synthesised from
+`Filters`, per-series latest sample → one `Evidence`. `/events` `pattern`/`offset` done adapter-side
+(fetch-then-filter). `/flows` window is `docker logs` print-time = approximate (known ceiling,
+recorded). Transport faults → `AdapterError` → tool observation (`registry.dispatch`). See
+`docs/SPEC-NOTES.md §Copilot A1`. Self-check: `python3 -m copilot.adapter.test_http`.
 
-**Not done:** everything above, plus upsert-on-id + real KB corpus (S1/S2), skills content (S3);
-default `/chat` KB needs a seeded `COPILOT_KB_URI`.
+**Not done:** the real LLM client (R1/#16), the end-to-end `/chat` gate (E1/#42), upsert-on-id +
+real KB corpus (S1/S2), skills content (S3); default `/chat` KB needs a seeded `COPILOT_KB_URI`.
 
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.

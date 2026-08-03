@@ -31,6 +31,14 @@ class FilterError(ValueError):
     guidance the agent can act on (ADR-0015: 'specify a device or pattern')."""
 
 
+class AdapterError(RuntimeError):
+    """A transport/backend fault talking to dataapi (connection refused, 5xx, bad body) --
+    NOT model-fixable guidance like FilterError. The tools layer converts it into a tool
+    observation (registry.dispatch) so a dataapi outage reads as data the model reacts to,
+    not an unhandled raise that kills the SSE stream, and never as a false 'unknown device'
+    from an empty walk (A1)."""
+
+
 @dataclass(frozen=True)
 class Filters:
     """The narrowing every tool call must carry. `device`/`pattern` are the two
@@ -96,6 +104,40 @@ def sanitize(text: str) -> str:
 def frame(text: str) -> str:
     """Wrap content as untrusted evidence (ADR-0016)."""
     return f"{EVIDENCE_OPEN}\n{sanitize(text)}\n{EVIDENCE_CLOSE}"
+
+
+def row_text(row: dict) -> str:
+    """Compact `k=v` rendering; the payload (e.g. a log `line`) is where any injected
+    instruction would live, so the caller runs the result through frame()/sanitize()."""
+    return " ".join(f"{k}={v}" for k, v in row.items())
+
+
+def serve_rows(source: str, filters: Filters, rows, max_limit: int = MAX_LIMIT) -> Result:
+    """F2's shared read pipeline: validate -> ts-window filter -> page -> provenance -> frame.
+    Both adapters ride it so the mandatory-filter/cap/framing guarantees are byte-identical on
+    canned (stub) and live (HTTP) data; the two adapters differ ONLY in how they fetch `rows`.
+
+    `rows` are plain dicts shaped like a dataapi endpoint: a `device`, a `ts` (epoch seconds),
+    and payload fields. A row outside [start,end] -- or with no ts to prove it in-window (as
+    gate.pre_gate does over WINDOWED_SOURCES, ADR-0002) -- is not served; paging offsets index
+    the IN-WINDOW rows, not raw."""
+    filters.validate(max_limit)
+    rows = [r for r in rows
+            if r.get("ts") is not None and filters.start <= r["ts"] <= filters.end]
+    window = rows[filters.offset:filters.offset + filters.limit]
+    evidence = tuple(
+        Evidence(
+            id=f"{source}:{i}",
+            source=source,
+            device=row.get("device"),
+            ts=row.get("ts"),
+            content=frame(row_text(row)),
+        )
+        for i, row in enumerate(window, start=filters.offset)
+    )
+    end = filters.offset + filters.limit
+    next_page = str(end) if end < len(rows) else None
+    return Result(evidence=evidence, next_page=next_page)
 
 
 def bfs_hops(links, focus: str, n: int) -> dict[str, int]:
