@@ -154,6 +154,19 @@ guidance string, never raised (ADR-0015, like `tools/registry.py`). One instance
 (#31)** hands one to the loop as the workspace tool family (its consumer). Self-check:
 `python3 -m copilot.workspace.tools`.
 
+**B2 (#30) landed.** `copilot/workspace/executor.py` — `Executor(ws).run(command, timeout=None)` = the
+constrained subprocess (ADR-0013, **no container**). Three tool-layer constraints on the child:
+**no-net** = run under `unshare -n` (fresh netns, no interfaces up → any `connect()` fails at the
+kernel — verified real, not an env trick); **cwd** = the B0 `scratchpad/`; **timeout** = wall-clock cap
+(default `cfg.exec_timeout_s`=30, clamped to `exec_max_timeout_s`=300), on expiry the whole process
+**group** is SIGKILLed (`start_new_session` + `killpg`, so a forked grandchild can't outlive it).
+**Fails closed**: if the netns can't be built (unshare missing/unprivileged), `run()` refuses
+(`ExecResult.refused`, rc 126) rather than exec with the host network. Output capped at
+`exec_output_cap`=65536 B. Whitelisted libs (pandas/matplotlib) are the available env, not a kernel
+import filter (ADR-0013 rejected an interpreter sandbox). **B3a (#31)** wires the `bash` tool onto
+`run`. Real-sandbox tests (`test_executor.py`) prove no-net + timeout bite; skip where unshare is
+unavailable. Self-check: `python3 -m copilot.workspace.executor`.
+
 **R4a (#20) landed.** PA-emulator core (`copilot/emulator/emulate.py`): the ONLY copilot↔prediction
 seam is the Prediction Record (PA.md §3.3, ADR-0003). `emulate_record(label)` turns a ground-truth
 `/labels` fault into a full-fidelity §3.3 record — every block (risk/forecast/localization/anomaly/

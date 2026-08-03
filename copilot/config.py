@@ -73,6 +73,9 @@ class Config:
     predict_interval_s: int = 10      # ADR-0014: predict-loop cadence (seconds)
     dataapi_url: str = "http://127.0.0.1:8000"  # A1/ADR-0006: base URL the HttpAdapter reads
                                                 # (env COPILOT_DATAAPI_URL overrides, app.py)
+    exec_timeout_s: int = 30          # ADR-0013/B2: default wall-clock cap on an exec run
+    exec_max_timeout_s: int = 300     # ADR-0013/B2: ceiling a per-call timeout is clamped to
+    exec_output_cap: int = 65536      # B2: chars of stdout/stderr kept per run (rest truncated)
 
     # -- secrets (from env / .env only; never committed) ----------------------
     llm_api_key: str = field(default="", repr=False)  # sent as Bearer by llm.OpenAIClient (R1)
@@ -93,6 +96,9 @@ class Config:
         assert self.gate_max_retries >= 0, "gate_max_retries must be >= 0"
         assert self.step_cap >= 1, "step_cap must be >= 1"
         assert self.tool_call_cap >= 1, "tool_call_cap must be >= 1"
+        assert 0 < self.exec_timeout_s <= self.exec_max_timeout_s, \
+            "exec_timeout_s must be in (0, exec_max_timeout_s]"
+        assert self.exec_output_cap > 0, "exec_output_cap must be > 0"
 
 
 _FIELD_NAMES = frozenset(f.name for f in dataclasses.fields(Config))
@@ -150,6 +156,8 @@ def _selfcheck():
     assert d.step_cap == 8 and d.tool_call_cap == 6
     assert d.predict_interval_s == 10
     assert d.drift_distrust_at == "R3"
+    assert d.exec_timeout_s == 30 and d.exec_max_timeout_s == 300
+    assert d.exec_output_cap == 65536
     assert d.llm_api_key == "" and d.embed_api_key == ""
 
     # 2. shipped config.yaml must not drift from the code defaults
@@ -175,7 +183,8 @@ def _selfcheck():
     # 4. validation bites on a bad enum / range
     for bad in (dict(llm_profile="gpt4"), dict(error_profile="perfect"),
                 dict(window_x_min=0), dict(gate_max_retries=-1), dict(step_cap=0),
-                dict(tool_call_cap=0), dict(drift_distrust_at="R9")):
+                dict(tool_call_cap=0), dict(drift_distrust_at="R9"),
+                dict(exec_timeout_s=0), dict(exec_timeout_s=301), dict(exec_output_cap=0)):
         try:
             Config(**bad)
         except AssertionError:

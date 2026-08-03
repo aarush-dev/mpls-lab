@@ -2,9 +2,11 @@
 
 B0 (#28): per-session scratchpad/artifacts dirs + the path policy the workspace tools
 gate writes/exec on. B1 (#29): read/write/edit + little-coder invariants (WorkspaceTools).
-B2/B3 add the exec subprocess + loop wiring.
+B2 (#30): Executor -- constrained subprocess (no-net, timeout, cwd). B3 wires the bash tool.
 """
+from copilot.workspace.executor import ExecResult, Executor
 from copilot.workspace.policy import PathPolicyError, Workspace, for_session
 from copilot.workspace.tools import WorkspaceTools
 
-__all__ = ["PathPolicyError", "Workspace", "for_session", "WorkspaceTools"]
+__all__ = ["PathPolicyError", "Workspace", "for_session", "WorkspaceTools",
+           "Executor", "ExecResult"]

@@ -61,6 +61,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | X0 | 38 | codependency rule + graph repair | — |
 | B0 | 28 | workspace scaffolding (`copilot/workspace/`) + path policy | real (no doubles) |
 | B1 | 29 | workspace file tools `read/write/edit` + little-coder invariants | real (no doubles) |
+| B2 | 30 | subprocess executor (no-net `unshare -n` + timeout + cwd, fail-closed) | **real sandbox** |
 
 ### The spine — makes the above true
 | Code | # | Delivers |
@@ -94,7 +95,7 @@ gate is E1, which needs R1 + A1 + X1 + the seeds together.
 |---|---|---|
 | B0 | 28 | workspace scaffolding + path policy | **done** |
 | B1 | 29 | workspace file tools `read/write/edit` + invariants | **done** |
-| B2 | 30 | subprocess executor (no-net, timeout, cwd) |
+| B2 | 30 | subprocess executor (no-net, timeout, cwd) | **done** |
 | B3a | 31 | wire the `bash` tool to the executor |
 | B3b | 32 | artifacts (snapshot-on-present) + demo render |
 | B4 | 33 | `ledger→KB` loop (flag, default on) |
