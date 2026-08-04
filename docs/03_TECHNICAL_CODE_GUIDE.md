@@ -480,7 +480,7 @@ A model that predicts `is_fault=True` at `ts=10:00:00` (52 seconds early) scores
 | `policy_drift` | Route-map config change causes traffic to take a suboptimal path. Observable as a BGP path selection change. | BGP soft-clear in Loki; subtle metric shift |
 | `node_failure` | The routing daemon (bgpd) is killed hard. Watchdog restarts it within seconds–minutes. | Interface down + BGP process gap in events |
 | `asymmetric_loss` | Loss only on the outbound direction. Latency stays normal. Hard to diagnose manually. | `tunnel_loss_pct` up, `tunnel_latency_ms` near-normal |
-| `brownout` | Hard rate cap on uplink bandwidth (netem `rate`). No probe: the controller's netem readback only parses `delay`/`loss`, and wg0 RTT doesn't traverse `eth1`, so the rate cap has no telemetry-path observable. `impact_method: modelled`, fixed 4s lead. | None — not observable in tunnel telemetry (`faults/orchestrator.py:267-286`) |
+| `brownout` | Hard rate cap on uplink bandwidth (netem `rate`) **plus a small delay+loss** (the queueing a cap induces), so the impairment is real. Still no probe: a `rate` token alone has no telemetry-path observable, so `impact_method: modelled`, fixed 4s lead. | Overlay-driven ramp; the delay/loss is a real netem impairment (its readback is suppressed while the overlay is active, so no double-count) |
 
 ### MPLS-Core / Catastrophic / Correlated Fault Scenarios (Phase 6)
 

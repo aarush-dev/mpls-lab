@@ -470,9 +470,9 @@ Twenty-one fault scenarios are implemented (`faults/orchestrator.py`, one `scen_
 | `gray_failure` | 0.5–2% loss on a backbone link, no link-down event | Slow throughput degradation; BFD stays up; only telemetry rates reveal it |
 | `mpls_underlay_failure` | P-router core interface toward a PE brought down | LDP reconverges via dual-homing (~1s with BFD); impact modelled, no probe |
 | `ldp_session_flap` | LDP session on a PE flapped N times, self-recovers | Loki `ldp_event=Down/Up`; impact modelled, no probe |
-| `hub_spoke_congest` | netem congestion ramp on a hub CE's uplink | All spokes routed through that hub degrade — but the impairment sits on the hub's eth1, which no tunnel-metric probe observes, so this is modelled only |
+| `hub_spoke_congest` | heavy netem congestion ramp on a SPOKE's uplink | A spoke peers every hub, so all of its tunnels degrade at once; injecting on the spoke (not a hub) is what the controller's per-spoke netem readback can observe, so `vm_threshold` + a calibrated overlay (higher peak than plain `congestion`) |
 | `bgp_cascade` | Cascaded BGP flaps on a hub CE | Repeated Loki ADJCHANGE, RIB churn; `sdwan_path_changes_total` is an unlabelled fabric-wide RNG counter, not attributable to this fault, so impact is modelled |
-| `controller_drift` | POSTs a latency-threshold multiplier to the SD-WAN controller for a site | `sdwan_controller_drift_active` rises; failover suppressed for the TTL window |
+| `controller_drift` | POSTs a latency-threshold multiplier to the SD-WAN controller for a spoke site + a calibrated overlay | `sdwan_controller_drift_active` rises; failover suppressed for the TTL window while the overlay ramps the tunnel metric |
 
 **The ground-truth label schema** — what the ML team trains on:
 

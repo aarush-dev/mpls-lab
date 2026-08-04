@@ -158,7 +158,7 @@ In Grafana, click "Explore" → select "Loki" datasource.
 ```bash
 cd /root/LAB/faults
 python3 orchestrator.py --list
-# Output (21 scenarios):
+# 21 scenarios (summarised — `--list` prints each scenario's docstring first line):
 # congestion              Link/interface congestion: netem delay+loss ramp
 # bgp_flap                BGP/OSPF adjacency flap; routing churn
 # tunnel_degrade          SD-WAN tunnel jitter/loss decay
@@ -168,7 +168,7 @@ python3 orchestrator.py --list
 # brownout                Hard rate cap; bandwidth starvation
 # mpls_underlay_failure   Drop all core ifaces on a P router
 # ldp_session_flap        Flap LDP session on a PE
-# hub_spoke_congest       Congestion on hub CE toward MPLS
+# hub_spoke_congest       Heavy congestion on a spoke CE uplink
 # bgp_cascade             Hub CE BGP kill → cascade to spokes
 # controller_drift        SD-WAN controller policy drift
 # p_node_failure          Down ALL core ifaces of one P (full node loss)
@@ -244,8 +244,8 @@ cat /root/LAB/faults/labels/labels.jsonl | tail -1 | jq .
 #   "error": null
 # }
 # impact_method values: vm_threshold (measured via probe), modelled_fallback,
-# probe_unavailable, modelled (scen_hub_spoke_congest, scen_bgp_cascade,
-# scen_brownout — no probe, impact is simulated not measured)
+# probe_unavailable, modelled (scen_bgp_cascade, scen_brownout — no probe,
+# impact is simulated not measured)
 ```
 
 ### Verify the fault in telemetry (Grafana + PromQL)
@@ -278,9 +278,9 @@ python3 orchestrator.py --campaign --duration 600 --mean-gap 120 --seed 42
 ```bash
 PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario mpls_underlay_failure --target p1 --severity medium --duration 30
 PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario ldp_session_flap --target pe1 --severity medium --duration 20
-PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario hub_spoke_congest --target ce_hub1 --severity medium --duration 60
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario hub_spoke_congest --target ce_branch1 --severity medium --duration 60
 PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario bgp_cascade --target ce_hub2 --severity high --duration 45
-PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario controller_drift --target ce_hub1 --duration 120
+PYTHONPATH=/root/LAB python3 faults/orchestrator.py --scenario controller_drift --target ce_branch1 --duration 120
 ```
 
 ### MPLS core fault scenarios (Phase 6 — 9 new)
@@ -336,9 +336,11 @@ cd /root/LAB/faults
 
 # Option 1: revert a specific injector type
 docker exec clab-sdwan_mpls_noc-ce_branch1 tc qdisc show dev eth1
-# If netem is lingering, restore fq_codel baseline:
+# The HTB default class = the uplink's VRF classid (VOICE 1:10 / CORP 1:20 /
+# GUEST 1:30 — read it off `... htb ... default 0x<n>` above). If netem lingers,
+# restore fq_codel under that class (a CORP uplink shown here):
 docker exec clab-sdwan_mpls_noc-ce_branch1 \
-  tc qdisc replace dev eth1 parent 1:30 handle 30: fq_codel
+  tc qdisc replace dev eth1 parent 1:20 handle 20: fq_codel
 
 # Option 2: check BGP flap is settled
 docker exec clab-sdwan_mpls_noc-ce_branch1 vtysh -c "show bgp vrf vrf_CORP summary"

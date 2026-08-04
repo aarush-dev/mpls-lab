@@ -273,18 +273,20 @@ def scen_brownout(target, severity, duration):
     s = SEVERITY[severity]
     iface = _ce_uplink(target)
     rate = int(2000 * (1.1 - s))  # high severity -> tighter cap (kbit)
-    injector = inj.NetemImpair(target, iface, rate_kbit=rate)
-    # NO PROBE: a `rate` cap has no observable in the telemetry path. The
-    # controller's _read_netem parses only the `delay`/`loss` tokens, and the
-    # wg0 RTT does not traverse eth1, so the advertised "queueing latency
-    # climbs" never shows up. Modelled until rate is observable.
+    # A `rate` cap alone is invisible: the controller's _read_netem parses only
+    # the delay/loss tokens, and the wg0 RTT does not traverse eth1, so a pure
+    # rate cap never shows up in tunnel telemetry. Pair it with a small
+    # delay+loss (the queueing the cap induces) so the impairment is REAL and
+    # observable beside the calibrated overlay.
+    injector = inj.NetemImpair(target, iface, delay_ms=15 * s, loss_pct=1.5 * s,
+                               rate_kbit=rate)
     return {
         "type": "brownout",
         "target": {"device": target, "interface": iface, "rate_kbit": rate},
         "injector": injector, "ramp": False, "duration": duration, "overlay": True,
         "probe": None, "threshold": None, "impact_method": "modelled",
         "impact_delay_s": 4,
-        "signature": "bandwidth starvation on the uplink (rate cap; not observable in tunnel telemetry)",
+        "signature": "bandwidth starvation on the uplink (rate cap + queueing delay/loss)",
     }
 
 
@@ -325,25 +327,24 @@ def scen_ldp_session_flap(target, severity, duration):
 
 
 def scen_hub_spoke_congest(target, severity, duration):
-    """Ramp netem congestion on hub uplink; all spokes routed through this hub degrade."""
+    """Heavy spoke-uplink congestion: netem delay+jitter+loss RAMP on a SPOKE's
+    eth1 (a spoke peers every hub, so this degrades all of its tunnels at once — a
+    hub-side cap would be invisible, the controller folds netem per spoke site).
+    Higher calibrated peak than plain `congestion` (signatures.py). Injected on the
+    spoke because that is the only place tunnel telemetry can observe it."""
     sev_kwargs = {
         "low":    {"delay_ms": 20,  "jitter_ms": 4,  "loss_pct": 0.5},
         "medium": {"delay_ms": 80,  "jitter_ms": 15, "loss_pct": 2.0},
         "high":   {"delay_ms": 200, "jitter_ms": 40, "loss_pct": 8.0},
     }.get(str(severity), {"delay_ms": 80, "jitter_ms": 15, "loss_pct": 2.0})
     injector = inj.NetemImpair(target, "eth1", **sev_kwargs)
-    # NO PROBE: the impairment sits on the HUB's eth1, but the controller folds
-    # netem only from the SPOKE's eth1 (controller.py _read_netem keys on
-    # TunnelState.site, which is always the spoke), and the wg0 ping egresses
-    # eth0. Nothing in the tunnel metrics can observe a hub-side uplink cap, so
-    # this scenario is modelled, not measured.
+    probe = f'max(sdwan_tunnel_latency_ms{{device="{target}"}})'
     return {
         "type": "hub_spoke_congest",
         "target": {"device": target, "interface": "eth1"},
-        "injector": injector, "ramp": True, "duration": duration,
-        "probe": None, "threshold": None, "impact_method": "modelled",
-        "impact_delay_s": 4,
-        "signature": "hub uplink congestion (injected on the hub; not observable in tunnel telemetry)",
+        "injector": injector, "ramp": True, "duration": duration, "overlay": True,
+        "probe": probe, "threshold": 8.0, "impact_method": "vm_threshold",
+        "signature": "heavy spoke-uplink congestion; latency+loss climb across all of the spoke's tunnels",
     }
 
 
@@ -419,15 +420,19 @@ class _DriftInjector:
 
 
 def scen_controller_drift(target, severity, duration):
-    """Post drift suppression to the SD-WAN controller; prevents failover for the site."""
+    """Post drift suppression to the SD-WAN controller; prevents failover for the
+    site AND carries a calibrated overlay so the site's tunnel metric moves (the
+    failover-suppression is the fault; the overlay is the visible degradation the
+    suppressed failover fails to fix). Both key on the SPOKE site (controller.py
+    _drift / _sites), so the target is a spoke, not a hub."""
     mult = {"low": 5.0, "medium": 10.0, "high": 99.0}.get(str(severity), 10.0)
     injector = _DriftInjector(target, mult=mult, ttl_s=duration + 30)
     return {
         "type": "controller_drift",
         "target": {"device": target, "latency_threshold_mult": mult},
-        "injector": injector, "ramp": False, "duration": duration,
+        "injector": injector, "ramp": False, "duration": duration, "overlay": True,
         "probe": None, "threshold": None, "impact_method": "modelled",
-        "signature": "controller drift suppresses failover; sdwan_controller_drift_active rises",
+        "signature": "controller drift suppresses failover; overlay ramps the tunnel metric; sdwan_controller_drift_active rises",
     }
 
 
@@ -725,6 +730,8 @@ def run_scenario(name, target, severity="medium", duration=90,
     # (and even on a dry run) so the previewed label matches a real run.
     is_overlay = bool(spec.get("overlay"))
     overlay_active = is_overlay  # cleared below if the controller post fails
+    # Every overlay scenario injects on its target (a spoke CE), which is the site
+    # the tunnel metric folds into — so the overlay is keyed on `target`.
     lead = min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0]))
     overlay = (_OverlayInjector(target, spec["type"], lead, duration, severity)
                if is_overlay and not dry_run else None)
@@ -839,6 +846,7 @@ _CE_BRANCHES = [f"ce_branch{i}" for i in range(1, 25)]   # 24 branches
 _CE_HUBS     = [f"ce_hub{i}"    for i in range(1, 7)]    # 6 hubs
 _CE_DCS      = [f"ce_dc{i}"     for i in range(1, 5)]    # 4 DCs
 _CE_ALL      = _CE_BRANCHES + _CE_HUBS + _CE_DCS          # 34 CEs
+_CE_SPOKES   = _CE_BRANCHES + _CE_DCS                     # 28 spokes (peer the hubs; valid overlay sites)
 _PE_ALL      = [f"pe{i}"        for i in range(1, 13)]   # 12 PEs
 _P_ALL       = [f"p{i}"         for i in range(1, 25)]   # 24 P routers
 # core-fault pools, derived from the topology-meta POP map (single source of truth)
@@ -866,9 +874,11 @@ CAMPAIGN_POOLS = {
     # backbone conduit while the label claimed a P-PE failure.
     "mpls_underlay_failure": _P_INTERNAL,
     "ldp_session_flap":      _PE_ALL,
-    "hub_spoke_congest":     _CE_HUBS,
+    "hub_spoke_congest":     _CE_SPOKES,     # spoke uplink is the observable point
     "bgp_cascade":           _CE_HUBS,
-    "controller_drift":      _CE_HUBS,
+    # drift + overlay both key on a SPOKE site (controller.py _drift/_sites are
+    # spokes, never hubs) — a hub target would suppress/ramp nothing.
+    "controller_drift":      _CE_SPOKES,
     # core / catastrophic / correlated faults — the chaos the campaign now mixes in.
     # ponytail: pop_isolation + core_partition are EXCLUDED from the random campaign
     #   (whole-region/backbone cuts overlap link-sets; run them explicitly as the
@@ -956,6 +966,10 @@ def _lock_selftest():
         "a VRF-scoped drift must be able to run beside an interface impairment"
     assert _lock_key("node_failure", "pe1")[1] is None, \
         "ProcessKill must be device-exclusive"
+    # hub_spoke_congest and congestion are both netem on the spoke's eth1, so on
+    # one spoke they must exclude each other.
+    assert _lock_key("hub_spoke_congest", "ce_branch1") == _lock_key("congestion", "ce_branch1"), \
+        "two netem installs on one spoke uplink must exclude each other"
     # the ramp duration must actually vary and stay inside the fault
     spans = {round(draw_ramp_seconds("congestion", 3000)[0], 3) for _ in range(50)}
     assert len(spans) > 40, f"ramp duration is not varying: {len(spans)} distinct"

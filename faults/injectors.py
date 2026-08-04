@@ -15,13 +15,19 @@ stdlib only. Everything is recoverable; revert() is safe to call twice.
 KEY NETEM DETAIL (discovered against the live lab):
   - P/PE core interfaces have a `noqueue` root qdisc -> `containerlab tools
     netem set` works directly (it installs a root netem qdisc).
-  - CE *uplinks* (eth1) already carry an HTB QoS root (3 classes). A root netem
-    install fails ("Invalid qdisc name: must match existing qdisc"). So on CE
-    uplinks we attach netem as a LEAF qdisc under the HTB default class (1:30),
-    replacing its fq_codel leaf. This (a) preserves QoS, (b) is still visible to
-    the controller, which greps `tc qdisc show dev eth1` for delay/loss tokens
-    and folds them into the emitted tunnel telemetry. revert() restores fq_codel.
+  - CE *uplinks* (eth1) already carry an HTB QoS root. A root netem install fails
+    ("Invalid qdisc name: must match existing qdisc"). So on CE uplinks we attach
+    netem as a LEAF qdisc under the HTB *default* class, replacing its fq_codel
+    leaf. This (a) preserves QoS, (b) is still visible to the controller, which
+    greps `tc qdisc show dev eth1` for delay/loss tokens and folds them into the
+    emitted tunnel telemetry. revert() restores fq_codel.
+  - The default class is READ FROM THE LIVE QDISC (`htb ... default 0x<n>`), NOT
+    assumed: each uplink's default class is its VRF's classid (VOICE 0x10 / CORP
+    0x20 / GUEST 0x30 — generator/generate.py classid_for), which differs per
+    interface. A hardcoded parent silently splices onto a class that doesn't
+    exist, so no netem installs and the fault emits no live signal.
 """
+import re
 import subprocess
 import time
 
@@ -56,10 +62,6 @@ class NetemImpair:
     congestion *buildup* (the precursor the ML models learn from).
     """
 
-    HTB_DEFAULT_PARENT = "1:30"   # HTB default class on CE uplinks (default 0x30)
-    HTB_LEAF_HANDLE = "31:"       # our netem leaf handle
-    HTB_BASELINE_LEAF = "30:"     # fq_codel handle to restore on revert
-
     def __init__(self, device, iface, delay_ms=0.0, jitter_ms=0.0,
                  loss_pct=0.0, rate_kbit=0):
         self.device = device
@@ -68,11 +70,38 @@ class NetemImpair:
         self.jitter_ms = jitter_ms
         self.loss_pct = loss_pct
         self.rate_kbit = rate_kbit
-        self._is_htb = self._root_is_htb()
+        self._htb = self._probe_htb()      # {parent, handle, leaf_kind, leaf_handle} or None
+        self._is_htb = self._htb is not None
 
-    def _root_is_htb(self):
+    @staticmethod
+    def _parse_htb(out):
+        """From `tc qdisc show dev <iface>`, return the splice spec, or None if the
+        root is not HTB. Reads the default class off the live qdisc so we splice
+        onto the class that actually exists on THIS uplink (its VRF's classid)."""
+        # root major (`1:` today) captured, not assumed; `0x` optional (iproute2
+        # <4.16 prints `default 20` bare).
+        m = re.search(r"qdisc htb (\S+): root.* default (?:0x)?([0-9a-fA-F]+)", out)
+        if not m:
+            return None
+        root_major, minor = m.group(1), m.group(2)   # minor is hex, as tc prints classids
+        parent = f"{root_major}:{minor}"
+        # baseline leaf currently sitting on the default class (fq_codel by default).
+        # If a previous run's netem is STILL spliced there (crash before revert),
+        # do NOT capture it as the baseline — revert() would re-install netem and
+        # permanently drop the QoS AQM. Fall back to the fq_codel default.
+        leaf_kind, leaf_handle = "fq_codel", f"{minor}:"
+        lm = re.search(rf"qdisc (\S+) (\S+): parent {re.escape(parent)}\b", out)
+        if lm and lm.group(1) != "netem":
+            leaf_kind, leaf_handle = lm.group(1), lm.group(2) + ":"
+        # our netem handle = minor with a hex digit appended (0x20 -> 0x200): a
+        # major distinct from the root (0x1), every classid (0x10/0x20/0x30) and
+        # the baseline leaf handle (0x{minor}), and well under the 0xffff ceiling.
+        return {"parent": parent, "handle": f"{minor}0:",
+                "leaf_kind": leaf_kind, "leaf_handle": leaf_handle}
+
+    def _probe_htb(self):
         out = dexec(self.device, "tc", "qdisc", "show", "dev", self.iface).stdout
-        return "qdisc htb 1:" in out
+        return self._parse_htb(out)
 
     def _netem_args(self, delay_ms, jitter_ms, loss_pct, rate_kbit):
         a = []
@@ -91,7 +120,7 @@ class NetemImpair:
         if self._is_htb:
             # Splice netem as the HTB default-class leaf (replace fq_codel).
             args = ["tc", "qdisc", "replace", "dev", self.iface,
-                    "parent", self.HTB_DEFAULT_PARENT, "handle", self.HTB_LEAF_HANDLE,
+                    "parent", self._htb["parent"], "handle", self._htb["handle"],
                     "netem"] + self._netem_args(delay_ms, jitter_ms, loss_pct, rate_kbit)
             return dexec(self.device, *args)
         # Native containerlab CLI for noqueue-root interfaces (P/PE core links).
@@ -151,10 +180,10 @@ class NetemImpair:
 
     def revert(self):
         if self._is_htb:
-            # Restore fq_codel leaf under the HTB default class.
+            # Restore the original leaf qdisc under the HTB default class.
             dexec(self.device, "tc", "qdisc", "replace", "dev", self.iface,
-                  "parent", self.HTB_DEFAULT_PARENT, "handle", self.HTB_BASELINE_LEAF,
-                  "fq_codel")
+                  "parent", self._htb["parent"], "handle", self._htb["leaf_handle"],
+                  self._htb["leaf_kind"])
         else:
             _sh(["containerlab", "tools", "netem", "reset",
                  "-n", node(self.device), "-i", self.iface])
@@ -535,6 +564,26 @@ if __name__ == "__main__":
     assert ni._netem_args(0, 0, 0, 512) == ["rate", "512kbit"]
     assert ni._netem_args(30, 0, 0, 0) == ["delay", "30ms"]   # no jitter token
     assert ni._netem_args(0, 0, 0, 0) == []                   # no-op impairment
+
+    # _parse_htb reads the default class off the live qdisc (CORP uplink = 1:20),
+    # not a hardcoded 1:30, and captures the baseline leaf to restore.
+    htb_out = ("qdisc htb 1: root refcnt 2 r2q 10 default 0x20 direct_packets_stat 0\n"
+               "qdisc fq_codel 20: parent 1:20 limit 10240p flows 1024 quantum 1514\n")
+    p = NetemImpair._parse_htb(htb_out)
+    assert p == {"parent": "1:20", "handle": "200:",
+                 "leaf_kind": "fq_codel", "leaf_handle": "20:"}, p
+    # VOICE uplink (default 0x10) and a core noqueue root (not HTB -> None).
+    assert NetemImpair._parse_htb(
+        "qdisc htb 1: root refcnt 2 default 0x10\n")["parent"] == "1:10"
+    assert NetemImpair._parse_htb("qdisc noqueue 0: root refcnt 2\n") is None
+    # bare `default 20` (old iproute2, no 0x) still parses.
+    assert NetemImpair._parse_htb("qdisc htb 1: root default 20\n")["parent"] == "1:20"
+    # netem already spliced on the default class -> revert must target fq_codel,
+    # NOT re-install netem (else the QoS AQM is dropped permanently).
+    poisoned = ("qdisc htb 1: root default 0x20\n"
+                "qdisc netem 200: parent 1:20 limit 1000 delay 80ms\n")
+    p2 = NetemImpair._parse_htb(poisoned)
+    assert p2["leaf_kind"] == "fq_codel" and p2["leaf_handle"] == "20:", p2
 
     bf = BgpFlap("ce_branch1", count=2)
     bf._discover_vrfs = lambda: ["vrf_CORP", "vrf_VOICE"]

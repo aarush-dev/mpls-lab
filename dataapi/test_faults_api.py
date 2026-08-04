@@ -78,8 +78,9 @@ def test_revert_active_removes_it(client):
 # --- R59-T3: buildup->impact->hold->revert state machine (orchestrator, no docker) ---
 
 def test_overlay_flag_only_on_tunnel_ramp_spokes():
-    # spoke-CE tunnel_ramp scenarios post an overlay...
-    for n in ("congestion", "tunnel_degrade", "asymmetric_loss", "brownout"):
+    # the 6 formerly-inert faults all carry the overlay flag now (R59-T5/#64).
+    for n in ("congestion", "tunnel_degrade", "asymmetric_loss", "brownout",
+              "hub_spoke_congest", "controller_drift"):
         assert orchestrator.SCENARIOS[n]("ce_branch1", "medium", 60).get("overlay") is True
     # ...iface_down / control-plane / backbone faults do not.
     for n in ("bgp_flap", "policy_drift", "node_failure"):
@@ -139,12 +140,25 @@ def test_early_revert_during_buildup_skips_fire(fake_lab):
 
 def test_non_overlay_gets_lead_but_no_overlay(fake_lab):
     injectors, posts = fake_lab
-    row = orchestrator.run_scenario("hub_spoke_congest", "ce_hub1", duration=1)
+    # core_congestion is a backbone netem fault: lead + physical injection, no overlay.
+    row = orchestrator.run_scenario("core_congestion", orchestrator._ABRS[0], duration=1)
     assert injectors[0].calls == ["apply", "revert"]
-    assert posts == []                                             # no overlay for non-spoke-ramp
+    assert posts == []                                             # no overlay for a non-overlay fault
     assert row["impact_method"] == "modelled"
     assert 30.0 <= row["lead_time"] <= 60.0                        # lead is universal, buildup still runs
     assert row["t_impact_ramp"] is None                           # ...but no calibrated ramp emitted
+
+
+def test_hub_spoke_congest_overlays_the_spoke(fake_lab):
+    # hub_spoke_congest injects on (and overlays) the spoke it targets — the only
+    # place the controller can observe it (netem/overlay fold per spoke site).
+    injectors, posts = fake_lab
+    row = orchestrator.run_scenario("hub_spoke_congest", "ce_branch2", duration=1)
+    assert injectors[0].calls == ["apply", "revert"]
+    assert posts == [("apply", "ce_branch2", "hub_spoke_congest"),
+                     ("revert", "ce_branch2")]
+    assert row["impact_method"] == "overlay_lead"
+    assert row["device"] == "ce_branch2"          # label joins telemetry on device
 
 
 def test_overlay_post_failure_still_injects(fake_lab, monkeypatch):

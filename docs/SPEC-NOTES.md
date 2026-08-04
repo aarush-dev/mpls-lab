@@ -1429,11 +1429,11 @@ modeled on `_DriftInjector`) for `overlay`-flagged scenarios, waits the lead
 (cancellable), then a guaranteed `finally` reverts the physical action AND clears the
 overlay. Early-revert (`/faults/revert/{id}`) during buildup skips the physical fire
 but still clears the overlay; the label row is always written with
-`t_impact = t_start + lead`. Only spoke-CE `tunnel_ramp` scenarios (`congestion`,
-`tunnel_degrade`, `asymmetric_loss`, `brownout`) carry the `overlay` flag; iface_down /
-control-plane / backbone faults post no tunnel overlay. The visible ramp now lives in
-the controller overlay, not a netem ramp — so `run_scenario` no longer calls
-`injector.ramp()` (the campaign path still does).
+`t_impact = t_start + lead`. Spoke-CE `tunnel_ramp` scenarios carry the `overlay` flag
+(`congestion`, `tunnel_degrade`, `asymmetric_loss`, `brownout` at #62; `hub_spoke_congest`
+and `controller_drift` added at #64); iface_down / control-plane / backbone faults post no
+tunnel overlay. The visible ramp now lives in the controller overlay, not a netem ramp —
+so `run_scenario` no longer calls `injector.ramp()` (the campaign path still does).
 
 **#63 code-complete** (R59-T4). Env sidecar (`telemetry/env-metrics.py`) reads the
 overlay registry once per `main()` (best-effort `GET /fault/overlay`, `{}` on failure)
@@ -1465,6 +1465,32 @@ the overlay fault terms (and the controller's own `signatures` import) load on t
 Un-rebuilt → guard keeps telemetry alive with fault terms inert. Not yet rebuilt/verified
 on a running lab.
 
+**#64 landed** (R59-T5): the 6 formerly live-inert faults now BOTH physically fire AND
+emit their calibrated overlay. **Verification status:** the parser, scenario wiring, lock
+keys and label rows are unit-tested (`faults/injectors.py` `__main__`, `_lock_selftest`,
+`dataapi/test_faults_api.py`); the qos template side is confirmed (`qos.sh.j2` `default
+{{classid}}`). The live-VM demo (netem actually installing under `1:20`, the controller
+folding brownout's delay/loss, drift+overlay coexisting on one spoke, threshold 8.0
+crossing) is NOT re-run yet — no lab in this environment. Run one injection per fault and
+cite it before calling the live demo done.
+- **HTB default-class parent read from the live qdisc.** `NetemImpair` was hardcoded to
+  splice under `1:30`, but each CE uplink's HTB default class is its VRF's classid
+  (`generator/generate.py classid_for`: VOICE `0x10` / CORP `0x20` / GUEST `0x30`), so on
+  a CORP uplink (`1:20`) the splice hit a non-existent class and NO netem installed —
+  `congestion`/`tunnel_degrade`/`asymmetric_loss` emitted nothing. `_parse_htb` now reads
+  `htb ... default 0x<n>` off `tc qdisc show` and captures the baseline leaf to restore.
+- **`brownout`** gains a small delay+loss beside its rate cap (a `rate` token alone is
+  invisible: `_read_netem` parses only delay/loss).
+- **`hub_spoke_congest`** now targets a SPOKE directly (pool `_CE_BRANCHES + _CE_DCS`)
+  and injects heavy netem on its uplink — the only place the controller can observe it
+  (netem/overlay fold per spoke site, `_sites`; a hub-side cap is invisible). A spoke
+  peers every hub, so this degrades all its tunnels; the calibrated peak is higher than
+  plain `congestion`.
+- **`controller_drift`** keeps its `_drift` failover suppression AND carries the overlay;
+  both key on a spoke site, so its campaign pool moved off hubs to spokes.
+- Because hub_spoke_congest now targets the spoke directly, `_lock_key` (which keys on
+  `target`) still excludes a `congestion` on that same spoke uplink — no guard change needed.
+
 
 Decision (spec #59, `ready-for-agent`): live injection will emit the synthetic
 generator's **calibrated** per-fault signature, plus a 30–60s precursor buildup,
@@ -1483,5 +1509,5 @@ must not change — the only generator-side edit is a byte-identical refactor to
 the shared module. Accepted divergence: the live lead is floored to 30–60s for demo
 visibility, out-of-distribution for the naturally-fast faults (bgp/ldp/node ≈1–5s).
 Live→feature builder is unchanged: `dataapi/export.build_dataset()` already maps every
-VM/Loki series to the 59-col `export.COLUMNS` the model trains on. Until #59 lands, see
-`SIMULATION_AND_DATASET_NOTES.md` §4.7 for the 6 live-inert faults.
+VM/Loki series to the 59-col `export.COLUMNS` the model trains on. The 6 formerly
+live-inert faults were fixed in #64 (see the #64 block above).

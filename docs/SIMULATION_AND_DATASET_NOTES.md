@@ -372,13 +372,14 @@ Two mechanics worth knowing:
 have a `noqueue` root, so `containerlab tools netem set` installs a root netem
 directly. CE **uplinks already carry an HTB QoS root** with 3 classes — a root
 netem install fails with `Invalid qdisc name: must match existing qdisc`. So on
-CE uplinks netem is spliced as a **leaf under the HTB default class** named
-`1:30` in `injectors.py`, replacing its fq_codel — the intent being to preserve
-QoS, stay visible to the controller's qdisc readback, and restore fq_codel on
-`revert()`. **BUG (verified live, 2026-08):** the running CE uplinks carry classes
-`1:1` + `1:20` only — there is no `1:30` — so `tc qdisc replace ... parent 1:30`
-fails `Error: Specified class not found` (rc swallowed), and every CE-uplink netem
-scenario silently no-ops. See "Live fault liveness" below and GH #59.
+CE uplinks netem is spliced as a **leaf under the HTB default class**, replacing
+its fq_codel — preserving QoS, staying visible to the controller's qdisc readback,
+restoring fq_codel on `revert()`. The default class is **read from the live qdisc**
+(`_parse_htb` greps `htb ... default 0x<n>` off `tc qdisc show`), not hardcoded:
+each uplink's default class is its VRF's classid (VOICE `0x10` / CORP `0x20` /
+GUEST `0x30`, `generate.py classid_for`), so a CORP uplink is `1:20`. (Fixed #64: a
+prior hardcoded `1:30` hit a non-existent class on every non-GUEST uplink, so no
+netem installed and the CE-uplink faults emitted nothing.)
 
 **Ramping is the point.** `NetemImpair.ramp()` steps impairment from 0 to target
 over N increments with a sleep between, so congestion *builds* — the precursor
@@ -402,12 +403,12 @@ nothing is hardcoded.
 | `policy_drift` (d) | CE | PolicyDrift | modelled | — |
 | `node_failure` | CE+PE | kill bgpd | modelled | — |
 | `asymmetric_loss` | CE | egress-only loss | **vm_threshold** | — |
-| `brownout` | CE | rate cap | modelled | — |
+| `brownout` | CE | rate cap + small delay/loss | modelled | — |
 | `mpls_underlay_failure` | internal P | P-PE link down | modelled | — |
 | `ldp_session_flap` | PE | LDP clear | modelled | — |
-| `hub_spoke_congest` | hub CE | netem on hub uplink | modelled | yes |
+| `hub_spoke_congest` | spoke CE | heavy netem on the spoke uplink | **vm_threshold** | yes |
 | `bgp_cascade` | hub CE | repeated BGP clears | modelled | — |
-| `controller_drift` | hub CE | POST to controller `/fault/drift` | modelled | — |
+| `controller_drift` | spoke CE | POST `/fault/drift` + overlay | modelled | — |
 | `p_node_failure` | any P | all core ifaces down | modelled | — |
 | `pop_isolation` | POP | all inter-POP links of a POP | modelled | — |
 | `core_partition` | POP seam | full bisecting edge cut-set | modelled | — |
@@ -437,13 +438,9 @@ and the distinction is recorded per label, not glossed:
 Crossing is measured against a **baseline read before injection**, so it's a
 delta, not an absolute (`orchestrator.py:647-652`).
 
-**Only 3 of 21 scenarios can produce a measured `t_impact`.** The other 18 are
+**Only 4 of 21 scenarios can produce a measured `t_impact`.** The other 17 are
 modelled, and each says why in its own docstring rather than pretending
-otherwise — e.g. `brownout`: a rate cap has no observable in the telemetry path
-because the controller parses only `delay`/`loss` tokens and the wg0 ping doesn't
-traverse eth1 (`orchestrator.py:275-278`). `hub_spoke_congest`: the impairment is
-on the *hub's* eth1 but the controller folds netem only from the *spoke's*
-(`orchestrator.py:333-337`). `bgp_cascade`: `sdwan_path_changes_total` is a
+otherwise — e.g. `bgp_cascade`: `sdwan_path_changes_total` is a
 single unlabelled fabric-wide counter that moves on its own from the controller's
 micro-burst RNG, so a crossing can't be attributed (`orchestrator.py:352-356`).
 
@@ -527,16 +524,16 @@ the primary episode is one of them. `check.py` asserts 100% null on these.
    (§1.4).
 6. The diurnal curve shape is hand-tuned, not fitted to a real trace
    (`diurnal.py:23-25`).
-7. **Live fault liveness ≠ dataset liveness (verified 2026-08).** The synthetic
-   dataset is written by pure arithmetic in `synthetic/generate.py` — all 21 fault
-   types carry a calibrated signature there regardless of the live lab. The **live**
-   injectors drive real `tc`/FRR, and **6 of 21 scenarios currently produce no live
-   signal**: the CE-uplink netem family (`congestion`, `tunnel_degrade`,
-   `asymmetric_loss`, `brownout`, `hub_spoke_congest`) no-ops on the `1:30` HTB-class
-   bug (§3.1), and `controller_drift` POSTs `/fault/drift` which the controller does
-   not serve (HTTP 501). The other 15 fire but at ad-hoc magnitudes not calibrated to
-   the dataset peaks. So live telemetry is **out-of-distribution** vs the training set.
-   **Not built yet:** GH #59 makes live injection emit the generator's calibrated
-   signature (+ 30–60s precursor buildup) on top of the real action, via a shared
-   `faults/signatures.py` and a controller `/fault/overlay` registry — dataset
-   untouched. Until #59 lands, only ~7 faults reliably move a dashboard panel live.
+7. **Live fault liveness ≠ dataset liveness.** The synthetic dataset is written by
+   pure arithmetic in `synthetic/generate.py` — all 21 fault types carry a calibrated
+   signature there regardless of the live lab. The **live** injectors drive real
+   `tc`/FRR; GH #59 (landed across #60–#64) makes each `overlay`-flagged injection ALSO
+   emit the generator's calibrated signature (+ 30–60s precursor buildup) on top of the
+   real action, via the shared `faults/signatures.py` and the controller
+   `/fault/overlay` registry — dataset untouched. #64 fixed the 6 formerly-inert faults in code (unit-tested, live-VM demo not
+   re-run yet — see SPEC-NOTES #64 verification status):
+   the CE-uplink netem family (`congestion`, `tunnel_degrade`, `asymmetric_loss`,
+   `brownout`, `hub_spoke_congest`) installs real netem under the live-qdisc HTB default
+   class (§3.1), and `controller_drift` posts the overlay beside its `/fault/drift`
+   suppression. Accepted divergence: the live lead is floored to 30–60s for demo
+   visibility, out-of-distribution for the naturally-fast faults (bgp/ldp/node ≈1–5s).
