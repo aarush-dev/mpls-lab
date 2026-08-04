@@ -6,6 +6,21 @@
 # add real query datasources — only once those services exist in the stack.
 apiVersion: 1
 datasources:
+  # host.docker.internal pinned to the bridge gateway via extra_hosts in
+  # docker-compose.yml; VM/Loki publish to host ports 8428/3100.
+  - name: VictoriaMetrics
+    uid: victoriametrics
+    type: prometheus
+    access: proxy
+    url: http://host.docker.internal:8428
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://host.docker.internal:3100
   - name: Alertmanager
     uid: noc-alertmanager
     type: alertmanager
