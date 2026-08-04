@@ -372,9 +372,13 @@ Two mechanics worth knowing:
 have a `noqueue` root, so `containerlab tools netem set` installs a root netem
 directly. CE **uplinks already carry an HTB QoS root** with 3 classes — a root
 netem install fails with `Invalid qdisc name: must match existing qdisc`. So on
-CE uplinks netem is spliced as a **leaf under the HTB default class 1:30**,
-replacing its fq_codel. This preserves QoS, stays visible to the controller's
-qdisc readback, and `revert()` restores fq_codel.
+CE uplinks netem is spliced as a **leaf under the HTB default class** named
+`1:30` in `injectors.py`, replacing its fq_codel — the intent being to preserve
+QoS, stay visible to the controller's qdisc readback, and restore fq_codel on
+`revert()`. **BUG (verified live, 2026-08):** the running CE uplinks carry classes
+`1:1` + `1:20` only — there is no `1:30` — so `tc qdisc replace ... parent 1:30`
+fails `Error: Specified class not found` (rc swallowed), and every CE-uplink netem
+scenario silently no-ops. See "Live fault liveness" below and GH #59.
 
 **Ramping is the point.** `NetemImpair.ramp()` steps impairment from 0 to target
 over N increments with a sleep between, so congestion *builds* — the precursor
@@ -523,3 +527,16 @@ the primary episode is one of them. `check.py` asserts 100% null on these.
    (§1.4).
 6. The diurnal curve shape is hand-tuned, not fitted to a real trace
    (`diurnal.py:23-25`).
+7. **Live fault liveness ≠ dataset liveness (verified 2026-08).** The synthetic
+   dataset is written by pure arithmetic in `synthetic/generate.py` — all 21 fault
+   types carry a calibrated signature there regardless of the live lab. The **live**
+   injectors drive real `tc`/FRR, and **6 of 21 scenarios currently produce no live
+   signal**: the CE-uplink netem family (`congestion`, `tunnel_degrade`,
+   `asymmetric_loss`, `brownout`, `hub_spoke_congest`) no-ops on the `1:30` HTB-class
+   bug (§3.1), and `controller_drift` POSTs `/fault/drift` which the controller does
+   not serve (HTTP 501). The other 15 fire but at ad-hoc magnitudes not calibrated to
+   the dataset peaks. So live telemetry is **out-of-distribution** vs the training set.
+   **Not built yet:** GH #59 makes live injection emit the generator's calibrated
+   signature (+ 30–60s precursor buildup) on top of the real action, via a shared
+   `faults/signatures.py` and a controller `/fault/overlay` registry — dataset
+   untouched. Until #59 lands, only ~7 faults reliably move a dashboard panel live.

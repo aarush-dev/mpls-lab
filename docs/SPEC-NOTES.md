@@ -1406,3 +1406,25 @@ window, then `calibrate.py` to rebuild `profile.json` from a full diurnal cycle,
 then re-run G10. Until then the G10 realism gap (AUC 0.9999) stands — this
 full-scale corpus is calibration-limited and is for pipeline/structure work, not
 real-lab transfer.
+
+### Overlay signature — live faults emit the dataset signature — NOT BUILT (GH #59)
+
+Decision (spec #59, `ready-for-agent`): live injection will emit the synthetic
+generator's **calibrated** per-fault signature, plus a 30–60s precursor buildup,
+**on top of** the real physical action — so live telemetry is in-distribution with
+the training set. Mechanism: a shared pure module `faults/signatures.py` (the
+`calibrate.py` signature table + `prog`/`tunnel_ramp` math) imported by BOTH the
+generator and the live controller; a controller `_overlay` registry + `/fault/overlay`
+endpoint (cloned from the existing `_drift` pattern) that ramps `sdwan_tunnel_*` to
+the calibrated peak (overlay authoritative — netem readback suppressed while active,
+so no double-count); a buildup→impact→hold→revert state machine in
+`run_scenario`; the env sidecar's hardcoded `0.0` fault args flipped on (temp/optical)
+and `flow_bytes`/`flow_packets` modelled from `trafficgen.VRF_FLOW`×diurnal.
+
+Constraint: the frozen dataset (`synthetic/output/*.parquet`, `faults/labels/labels.jsonl`)
+must not change — the only generator-side edit is a byte-identical refactor to import
+the shared module. Accepted divergence: the live lead is floored to 30–60s for demo
+visibility, out-of-distribution for the naturally-fast faults (bgp/ldp/node ≈1–5s).
+Live→feature builder is unchanged: `dataapi/export.build_dataset()` already maps every
+VM/Loki series to the 59-col `export.COLUMNS` the model trains on. Until #59 lands, see
+`SIMULATION_AND_DATASET_NOTES.md` §4.7 for the 6 live-inert faults.
