@@ -18,7 +18,7 @@ def client(monkeypatch):
     # Fake run_scenario: block on cancel so the target reads as busy until
     # revert (or the test process ends). Never touches docker/VM.
     def fake_run_scenario(name, target, severity="medium", duration=90,
-                          ramp_steps=6, dry_run=False, cancel=None):
+                          dry_run=False, cancel=None):
         if cancel is not None:
             cancel.wait(timeout=30)
         return {"scenario_id": f"{name}-{target}-fake"}
@@ -137,13 +137,14 @@ def test_early_revert_during_buildup_skips_fire(fake_lab):
     assert row["error"] == "early_revert_before_impact"              # not a real injection
 
 
-def test_non_overlay_fires_immediately_without_buildup(fake_lab):
+def test_non_overlay_gets_lead_but_no_overlay(fake_lab):
     injectors, posts = fake_lab
     row = orchestrator.run_scenario("hub_spoke_congest", "ce_hub1", duration=1)
     assert injectors[0].calls == ["apply", "revert"]
-    assert posts == []                                              # no overlay for non-spoke-ramp
+    assert posts == []                                             # no overlay for non-spoke-ramp
     assert row["impact_method"] == "modelled"
-    assert row["lead_time"] == 0.0                                  # no dead buildup wait
+    assert 30.0 <= row["lead_time"] <= 60.0                        # lead is universal, buildup still runs
+    assert row["t_impact_ramp"] is None                           # ...but no calibrated ramp emitted
 
 
 def test_overlay_post_failure_still_injects(fake_lab, monkeypatch):
@@ -159,6 +160,6 @@ def test_overlay_post_failure_still_injects(fake_lab, monkeypatch):
     assert injectors[0].calls == ["apply", "revert"]               # real fault still injected
     assert posts == []                                             # dropped overlay, nothing to clear
     assert "overlay_post_failed" in (row["error"] or "")
-    # no precursor ran -> label must not claim a t_start+lead impact
-    assert row["lead_time"] == 0.0 and row["impact_method"] == "modelled"
-    assert row["t_impact_ramp"] is None
+    # buildup is universal, so timing stands; but no ramp was emitted -> modelled
+    assert 30.0 <= row["lead_time"] <= 60.0
+    assert row["impact_method"] == "modelled" and row["t_impact_ramp"] is None

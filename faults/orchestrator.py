@@ -398,7 +398,6 @@ class _OverlayInjector:
 
 class _DriftInjector:
     """Inline injector for controller drift (no new dep — uses urllib.request)."""
-    CTRL_URL = CTRL_URL
 
     def __init__(self, site, mult, ttl_s):
         self.site = site
@@ -409,14 +408,13 @@ class _DriftInjector:
         import json as _json, urllib.request as _req
         body = _json.dumps({"site": self.site, "latency_threshold_mult": self.mult,
                             "ttl_s": self.ttl_s}).encode()
-        _req.urlopen(f"{self.CTRL_URL}/fault/drift", data=body,
-                     timeout=5)
+        _req.urlopen(f"{CTRL_URL}/fault/drift", data=body, timeout=5)
         return {"applied": "controller_drift", "site": self.site, "mult": self.mult}
 
     def revert(self):
         import json as _json, urllib.request as _req
         body = _json.dumps({"site": self.site}).encode()
-        _req.urlopen(f"{self.CTRL_URL}/fault/drift/clear", data=body, timeout=5)
+        _req.urlopen(f"{CTRL_URL}/fault/drift/clear", data=body, timeout=5)
         return {"reverted": "controller_drift", "site": self.site}
 
 
@@ -698,38 +696,36 @@ def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
     }
 
 
-def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
+def run_scenario(name, target, severity="medium", duration=90,
                  dry_run=False, cancel=None):
     """buildup -> impact -> hold -> revert state machine for one live injection.
 
-    Draws a precursor lead (floored to [30,60]s), posts a calibrated tunnel-ramp
-    overlay for overlay-flagged scenarios, waits the lead (cancellable), fires the
-    real injector at IMPACT, holds for `duration` (cancellable), then a guaranteed
-    finally reverts the physical action AND clears the overlay. The visible ramp
-    now lives in the controller overlay, not a netem ramp, so the impairment fires
-    at full magnitude at impact rather than ramping.
+    Every scenario draws a precursor lead from the shared prior, floored to a
+    demo-visible [30,60]s (out-of-distribution for the naturally-fast faults, per
+    docs/SPEC-NOTES.md). Overlay-flagged scenarios also post a calibrated
+    tunnel-ramp overlay so the precursor is VISIBLE during buildup. Then: wait the
+    lead (cancellable) -> fire the real injector at IMPACT -> hold `duration`
+    (cancellable) -> guaranteed finally reverts the physical action AND clears the
+    overlay. The visible ramp lives in the controller overlay, not a netem ramp,
+    so the impairment fires at full magnitude at impact rather than ramping.
 
     cancel: optional threading.Event. Set during buildup OR hold it wakes the wait
     and falls through to the same revert+clear (early-revert). If it fires before
     impact the physical injector never runs; the overlay is still cleared and a
-    label is still written with t_impact = t_start + lead. ramp_steps is accepted
-    for call-compat but unused."""
+    label is still written with t_impact = t_start + lead."""
     if name not in SCENARIOS:
         raise SystemExit(f"unknown scenario '{name}'. choices: {list(SCENARIOS)}")
     spec = SCENARIOS[name](target, severity, duration)
     injector = spec["injector"]
     scenario_id = f"{name}-{target}-{uuid.uuid4().hex[:8]}"
 
-    # Overlay scenarios ramp a precursor for a lead drawn from the shared prior,
-    # floored to a demo-visible [30,60]s. Non-overlay faults have no visible
-    # precursor to show, so they skip the buildup (lead=0) and fire at t_start --
-    # a dead wait would only skew /faults/active lifetimes and injector TTLs. The
-    # lead is drawn even on a dry run so the previewed label matches a real run;
-    # only the controller POST is skipped.
+    # The overlay flag is set only on the tunnel_ramp scenarios whose target is a
+    # valid controller overlay site (a spoke CE); iface_down / control-plane /
+    # backbone / hub-targeted faults post none. The lead is drawn for ALL of them
+    # (and even on a dry run) so the previewed label matches a real run.
     is_overlay = bool(spec.get("overlay"))
     overlay_active = is_overlay  # cleared below if the controller post fails
-    lead = (min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0]))
-            if is_overlay else 0.0)
+    lead = min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0]))
     overlay = (_OverlayInjector(target, spec["type"], lead, duration, severity)
                if is_overlay and not dry_run else None)
     t_start = now_utc()
@@ -750,23 +746,21 @@ def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
     error = None
     try:
         # Overlay post is best-effort: a controller 400/timeout must NOT abort the
-        # real injection, only drop the visible precursor.
+        # real injection, only drop the visible precursor. The buildup wait below
+        # is universal, so timing (t_impact = t_start + lead) holds either way.
         if overlay is not None:
             try:
                 overlay.apply()
             except Exception as e:
-                # No precursor ran, so the fault fires now, not at t_start+lead:
-                # collapse the lead so the label's t_impact matches reality.
-                overlay = None  # nothing to clear later
+                overlay = None            # nothing to clear later
                 overlay_active = False
-                lead, t_impact, impact_method = 0.0, t_start, "modelled"
+                impact_method = "modelled"  # no calibrated ramp was emitted
                 error = f"overlay_post_failed: {type(e).__name__}: {e}"
                 print(json.dumps({"event": "overlay_error", "scenario_id": scenario_id,
                                   "error": error}), flush=True)
-            else:
-                # --- buildup: cancellable precursor wait ---
-                if not _cancelled():
-                    _wait(lead)
+        # --- buildup: cancellable precursor wait ---
+        if not dry_run and not _cancelled():
+            _wait(lead)
         # --- impact: fire the real physical action (skipped on early-revert) ---
         if not dry_run and not _cancelled():
             injector.apply()
@@ -826,8 +820,7 @@ def demo():
     before = vm_instant(probe)
     print(json.dumps({"event": "demo_before", "probe": probe, "value": before}),
           flush=True)
-    row = run_scenario("congestion", target, severity="high", duration=60,
-                       ramp_steps=5)
+    row = run_scenario("congestion", target, severity="high", duration=60)
     after = vm_instant(probe)
     print(json.dumps({"event": "demo_after", "probe": probe, "value": after,
                       "delta": (after - before) if (after and before) else None}),
@@ -1218,8 +1211,7 @@ def main():
     if not args.scenario or not args.target:
         ap.error("--scenario and --target are required (or use --demo / --list / --campaign)")
     run_scenario(args.scenario, args.target, severity=args.severity,
-                 duration=args.duration, ramp_steps=args.ramp_steps,
-                 dry_run=args.dry_run)
+                 duration=args.duration, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
