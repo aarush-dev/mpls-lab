@@ -56,16 +56,27 @@ function AppInner(_props: AppRootProps) {
         timers.delete(node);
       }
     }
-    // Schedule escalation for freshly-injected (pending, not yet scheduled) faults.
+    // Schedule escalation for un-timed faults. Fresh 'pending' runs the full 5s->predicted->down
+    // path; a 'predicted' rehydrated from localStorage after a refresh lost its down-timer, so
+    // re-arm just that leg (else it freezes amber). 'down' is terminal — nothing to schedule.
     for (const f of injectedFaults) {
-      if (f.phase === 'pending' && !timers.has(f.node)) {
-        const node = f.node;
+      if (timers.has(f.node)) {
+        continue;
+      }
+      const node = f.node;
+      if (f.phase === 'pending') {
         const toPredicted = window.setTimeout(() => dispatch({ type: 'ADVANCE_FAULT', payload: { node, phase: 'predicted' } }), 5000);
         const toDown = window.setTimeout(
           () => dispatch({ type: 'ADVANCE_FAULT', payload: { node, phase: 'down' } }),
           5000 + f.leadSec * 1000
         );
         timers.set(node, [toPredicted, toDown]);
+      } else if (f.phase === 'predicted') {
+        const toDown = window.setTimeout(
+          () => dispatch({ type: 'ADVANCE_FAULT', payload: { node, phase: 'down' } }),
+          f.leadSec * 1000
+        );
+        timers.set(node, [toDown]);
       }
     }
   }, [injectedFaults, dispatch]);

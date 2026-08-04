@@ -21,6 +21,17 @@ const FALLBACK_SCENARIOS = [
 ];
 const DURATIONS = [30, 60, 90, 180];
 
+// Persist node -> scenario_id so "Revert now" survives a page refresh.
+const INJECT_IDS_KEY = 'noc.injectIds';
+function loadInjectIds(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(INJECT_IDS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
 interface FaultApi {
   getScenarios?: () => Promise<FaultScenario[]>;
   injectFault?: (r: InjectFaultRequest) => Promise<{ scenario_id: string }>;
@@ -42,7 +53,16 @@ export function FaultInjectionPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // node -> backend scenario_id, so "Revert now" can cancel the real fault early.
-  const [injectIds, setInjectIds] = useState<Record<string, string>>({});
+  // Persisted (localStorage) so early-revert still works after a page refresh.
+  const [injectIds, setInjectIds] = useState<Record<string, string>>(loadInjectIds);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INJECT_IDS_KEY, JSON.stringify(injectIds));
+    } catch {
+      // storage unavailable — ids just won't survive refresh.
+    }
+  }, [injectIds]);
 
   useEffect(() => {
     let cancelled = false;
