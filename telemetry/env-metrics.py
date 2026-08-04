@@ -51,10 +51,10 @@ for _cand in (os.path.join(_HERE, "faults"), os.path.join(os.path.dirname(_HERE)
         sys.path.insert(0, _cand)
 import envmodel  # noqa: E402
 try:
-    # In-container: signatures.py is mounted at /app/signatures.py (on sys.path via
-    # this file's own dir); on the host it resolves through the faults/ insert above.
-    # numpy comes with it -- best-effort so a stale image never darkens the whole env
-    # pillar; the overlay fault term just stays inert until the image carries both.
+    # Resolves via the faults/ path inserted above (container /app/faults, host
+    # ../faults). numpy comes with it -- best-effort so a stale image never darkens
+    # the whole env pillar; the overlay fault term stays inert until the image
+    # carries both signatures.py and numpy.
     import signatures  # noqa: E402
 except Exception:
     signatures = None
@@ -98,8 +98,9 @@ def _diurnal_util():
 
 def read_overlay():
     """Active fault overlays from the controller registry (#61): {site: {fault_type,
-    t_start, t_impact, t_end, expires}}. Best-effort -- {} on any failure (controller
-    down, or a sidecar image with no route to it), so telemetry never blocks on it."""
+    t_start, t_impact, t_end, expires, sevmul}}. Best-effort -- {} on any failure
+    (controller down, or a sidecar image with no route to it), so telemetry never
+    blocks on it."""
     import urllib.request as _req
     try:
         with _req.urlopen(f"{CTRL_URL}/fault/overlay", timeout=3) as r:

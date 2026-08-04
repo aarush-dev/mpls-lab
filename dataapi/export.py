@@ -42,7 +42,7 @@ try:
 except Exception as e:  # trafficgen not mounted (synthetic-only host): no modelled flow
     print(f"WARN: trafficgen/diurnal not importable ({e}) -- modelled flow disabled",
           file=sys.stderr)
-    VRF_FLOW, diurnal, _DIURNAL_PERIOD = None, None, 3600.0
+    VRF_FLOW, diurnal, _DIURNAL_PERIOD = None, None, None  # _modelled_flow short-circuits
 _FLOW_TICK_S = 360.0  # a trafficgen tick ~ 6 min of modelled time (generate._flow_row)
 
 DATASETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasets")
@@ -544,10 +544,16 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
     # the whole frame would replicate one measurement across every interface and
     # tunnel row of that (device, bucket) and inflate any naive sum ~15x.
     flows = _flow_bucketed(start, end, step)
-    if flows.empty and not base.empty:
-        # No live capture (traffic gen off) -> model flows off VRF_FLOW x diurnal so
-        # the two columns are non-null without turning traffic generation on (#63).
-        flows = _modelled_flow(base[base["entity_type"] == "device"], step)
+    if not base.empty:
+        # Gap-fill per (device, bucket): model any device-row the live capture did
+        # NOT cover, so a partial capture (one site up, the rest off) still leaves
+        # flow non-null everywhere -- #63's "non-null without traffic gen" holds
+        # even when nfacctd reports a few rows. Real rows win on key collision.
+        modelled = _modelled_flow(base[base["entity_type"] == "device"], step)
+        if not modelled.empty:
+            flows = (pd.concat([flows, modelled], ignore_index=True)
+                     .drop_duplicates(["ts", "device"], keep="first")
+                     if not flows.empty else modelled)
     if not base.empty and not flows.empty:
         is_dev = base["entity_type"] == "device"
         base = pd.concat([base[~is_dev],
