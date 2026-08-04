@@ -1513,7 +1513,7 @@ signature, not just overlay ones: the iface_down/backbone faults (`node_failure`
 tunnel overlay, so their control-plane events are the precursor. Seam
 `faults/test_events_push.py`: signature == dataset, all events ≤ t_impact, graceful no-op,
 ns-timestamp payload shape. **Verification:** full push path proven against a local mock
-Loki (node_failure → 4 events all before t_impact); live-lab query not re-run (no lab in
+Loki (node_failure → 3 events all before t_impact); live-lab query not re-run (no lab in
 this environment).
 
 

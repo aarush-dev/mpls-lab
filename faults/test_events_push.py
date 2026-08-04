@@ -109,8 +109,9 @@ def test_emit_precursors_happy_path(monkeypatch):
     monkeypatch.setattr(ep, "push_events", lambda lst: len(lst))
     n = ep.emit_precursors("node_failure", "ce_branch2", "eth2", None, None,
                            "sid", "live", 1.0)
-    # node_failure (iface_down) has 3 impact-anchored events (KERN-LINK-DOWN,
-    # OSPF-ADJ-DOWN, SYS-PROC-RESTART); the end-anchored KERN-LINK-UP is dropped.
+    # node_failure (iface_down) _spec has 4 events, but its 1 end-anchored
+    # (KERN-LINK-UP) is dropped -> 3 impact-anchored precursors pushed
+    # (KERN-LINK-DOWN, FRR-OSPF-ADJ-DOWN, SYS-PROC-RESTART).
     assert n == 3
 
 
