@@ -81,9 +81,45 @@ calling them "measured telemetry" is wrong; only the wg0-ping component is a rea
 | `sdwan_tunnel_rekeys_total` | counter | **device**, tunnel, site, site_type, hub | Cumulative WG rekeys |
 | `sdwan_path_active`       | gauge | **device**, site, site_type, vrf, hub | `1` on the active hub for that site/vrf |
 | `sdwan_path_changes_total` | counter | (none) | Cumulative path-selection changes, fabric-wide; unlabelled and RNG-driven (moves from the modelled loss micro-bursts even with no fault injected) — not usable as fault-impact evidence |
+| `sdwan_overlay_active` | gauge | site, fault_type | `1` while a calibrated fault overlay is ramping this site's tunnel series (see below) |
 
 Label values use the generator's node names (`ce_branch1`, `ce_hub1`, …); `vrf` ∈
 {CORP, VOICE, GUEST}; `site_type` ∈ {branch, hub, dc}; `device` = `site` (spoke node name).
+
+## Fault overlay (calibrated live signal — issue #61)
+
+An in-memory `_overlay` registry (cloned from the `_drift` pattern) makes a live-injected
+fault emit the **dataset generator's calibrated signature** instead of the ad-hoc
+netem-readback term. While an overlay is active for a site, the `sdwan_tunnel_*` series
+ramp toward the calibrated peak on `faults/signatures.prog(elapsed wall-time vs the drawn
+lead)` — the *same* shared ramp math the generator uses (`signatures.tunnel_ramp_targets`
++ `loss_peak` bump), so live telemetry is in-distribution with training.
+
+The peak/lead table is loaded from the calibration artifact **`synthetic/profile.json`**
+(`fault_signatures`) — the exact table the generator consumes (`generate.py:391`), incl.
+its real-derived peaks — so live == training by construction. If the profile is absent
+(e.g. `--selftest`, no dataset) it falls back to `signatures.default_signatures()`.
+
+**Authoritative:** while an overlay is active the netem readback for **that whole site** is
+forced to zero, so a simultaneous real `tc` action does **not** double-count (the real netem
+still installs at impact — genuine packet effect — but is not added to the metric). On clear
+the series glide back to baseline through the existing exponential smoothing (no
+discontinuity). Expired overlays (past `t_end = t_impact + duration`) are pruned in the
+per-tick GC, in place so a concurrent POST/clear is never dropped.
+
+Endpoints (mirroring `/fault/drift[/clear]`):
+
+- **`POST /fault/overlay`** `{"site": ..., "fault_type": ..., "lead_s": N, "duration": N, "severity": "low|medium|high"}`
+  — registers the episode (`t_impact = now + lead_s`, peak at `t_impact + 0.3*duration`).
+  `lead_s` omitted → the signature's calibrated lead. HTTP 400 unless `site` is a known
+  spoke, `fault_type` is a `tunnel_ramp` kind, `lead_s ≥ 0`, `duration ≥ 10s`, and
+  `severity ∈ {low,medium,high}`.
+- **`POST /fault/overlay/clear`** `{"site": ...}` — drops the overlay early (revert-now).
+- **`GET /fault/overlay`** → JSON `{site: {fault_type, t_start, t_impact, t_end, expires}}`
+  (the env-metrics sidecar reads this to drive the same ramp into optics/thermal, #59 T3).
+
+Only `tunnel_ramp`-kind faults post an overlay; `iface_down`/backbone faults match via their
+real action + control-plane events instead. Seam test: `controller/test_overlay.py`.
 
 ## Deploy (Phase 2.2)
 

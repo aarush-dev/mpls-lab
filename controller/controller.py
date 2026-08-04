@@ -41,8 +41,39 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "trafficgen"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "faults"))
 import diurnal  # noqa: E402  (shared utilization model)
+import signatures  # noqa: E402  -- ONE ramp table, shared with the dataset generator
 from topo import build_model  # noqa: E402
+
+OVERLAY_STEP = 5.0  # prog() dur-floor; matches the default tick interval
+OVERLAY_SEVMUL = {"low": 0.5, "medium": 0.8, "high": 1.0}
+# Fallback bases for signatures.default_signatures() when the calibration profile
+# is absent (e.g. --selftest, no dataset). The relative-peak tunnel_ramp faults
+# (asymmetric_loss, gray_failure) DO scale off these, so an overlay posted without
+# a profile emits a weaker-but-present signal; the profile path below is exact.
+OVERLAY_BASE_LAT, OVERLAY_BASE_LOSS, OVERLAY_BASE_JIT = 30.0, 0.3, 3.0
+_PROFILE = os.path.join(os.path.dirname(__file__), "..", "synthetic", "profile.json")
+
+
+def _load_fault_signatures():
+    """The fault->signature table the overlay ramps toward.
+
+    PREFERS the calibration artifact (synthetic/profile.json 'fault_signatures'):
+    it carries the REAL-derived peaks + lead_s the dataset generator itself uses
+    (synthetic/generate.py:391), so a live overlay is in-distribution with training
+    by construction -- the whole point of #59. Falls back to the shared defaults so
+    the controller still runs with no dataset present.
+    """
+    try:
+        with open(_PROFILE) as fh:
+            fs = json.load(fh)["fault_signatures"]
+        if fs:
+            return fs
+    except Exception:
+        pass
+    return signatures.default_signatures(
+        OVERLAY_BASE_LAT, OVERLAY_BASE_LOSS, OVERLAY_BASE_JIT)
 
 # --- Policy: per-VRF preferred hub. VOICE/CORP prefer hub1 (primary), GUEST hub2.
 # Path selection may override this on degradation (failover).
@@ -197,13 +228,20 @@ class TunnelState:
                     loss_pct = _parse_pct(toks[i + 1])
         return delay_ms, loss_pct
 
-    def update(self, now, netem=None):
+    def update(self, now, netem=None, overlay=None):
         """Recompute modelled metrics for this tick, coupled to the diurnal curve.
 
         `netem` is the (delay_ms, loss_pct) readback for this tunnel's SITE,
         hoisted by Controller.tick() so it costs one docker exec per site per
         tick instead of one per tunnel (6 tunnels share every spoke's uplink).
         Passing None falls back to reading it here.
+
+        `overlay` is the active fault-overlay record for this tunnel's SITE (or
+        None). When present it is AUTHORITATIVE: the tunnel series ramp toward the
+        calibrated signature peak on `signatures.prog(elapsed vs the drawn lead)`,
+        and the netem readback addend is suppressed so a simultaneous real netem
+        does NOT double-count. On clear the overlay is dropped and the series glide
+        back to baseline through the existing exponential smoothing.
 
         The same curve that drives offered load (diurnal.util) drives congestion
         here, so telemetry and traffic move together. A nonlinear M/M/1-style
@@ -221,6 +259,16 @@ class TunnelState:
         # someone CONFIGURED on the uplink, read back out of the qdisc, because
         # the wg0 ping does not traverse eth1. See render_prometheus() HELP text.
         netem_delay, netem_loss = netem if netem is not None else self._read_netem()
+
+        # Overlay is authoritative: while active, the calibrated ramp is the ONLY
+        # fault term -- zero the netem readback so the real tc action (which still
+        # installs at impact) is not added on top of the signature (no double-count).
+        ov_p = 0.0
+        if overlay is not None:
+            ov_p = float(signatures.prog(
+                now, overlay["t_start"], overlay["t_impact"], overlay["t_end"],
+                overlay["dur"], overlay["sevmul"], OVERLAY_STEP, overlay["p_cross"]))
+            netem_delay = netem_loss = 0.0
 
         # --- Measured propagation (ping over wg0, cached) -------------------------
         # The per-site eth0 netem the generator emits is what the ping actually sees.
@@ -278,6 +326,17 @@ class TunnelState:
         # latency = measured avg + modelled congestion queue + fault (eth1) + noise.
         target_lat = meas_avg + queue_ms + netem_delay + self._rng.gauss(0, 0.4)
 
+        # --- Calibrated overlay ramp (authoritative fault term) -------------------
+        # Move each target toward the signature peak by the ramp fraction, exactly
+        # as the dataset generator does (signatures.tunnel_ramp_targets + loss bump).
+        # Same shared math -> live telemetry is in-distribution with training.
+        if overlay is not None:
+            sig = overlay["sig"]
+            lat_t, jit_t = signatures.tunnel_ramp_targets(sig, target_lat, target_jit)
+            target_lat = target_lat + ov_p * (float(lat_t) - target_lat)
+            target_jit = target_jit + ov_p * (float(jit_t) - target_jit)
+            target_loss = target_loss + ov_p * sig["loss_peak"]
+
         # Exponential smoothing so the series looks like a real time-series. Loss is
         # smoothed lightly so micro-bursts stay visibly spiky rather than averaged out.
         a = 0.3
@@ -334,9 +393,40 @@ class Controller:
         self.active = {}
         self.path_changes = 0
         self._drift = {}  # {site: {"latency_threshold_mult": float, "expires": float|None}}
+        # {site: overlay record}. Set by set_overlay(); folded into each tunnel's
+        # metrics while active; pruned in tick() when past its episode end.
+        self._overlay = {}
+        self._sigs = _load_fault_signatures()  # calibrated fault->signature table
+        self._sites = {t.site for t in self.tunnels}  # valid overlay targets
         for t in self.tunnels:
             for v in t.vrfs:
                 self.active.setdefault((t.site, v), VRF_PREFERRED_HUB.get(v, t.hub))
+
+    def set_overlay(self, site, fault_type, lead_s=None, duration=60.0,
+                    severity="high", t_start=None):
+        """Register a fault overlay for a site (buildup -> peak -> hold episode).
+
+        Mirrors the generator's episode: ramp over the drawn `lead_s` to t_impact,
+        peak at t_impact+0.3*dur, decay to baseline by t_end. Returns the record.
+        `lead_s=None` uses the signature's calibrated lead. Raises KeyError if
+        fault_type is unknown (caller maps to HTTP 400).
+        """
+        sig = self._sigs[fault_type]
+        lead_s = sig["lead_s"] if lead_s is None else float(lead_s)
+        t0 = time.time() if t_start is None else float(t_start)
+        t_impact = t0 + lead_s
+        t_end = t_impact + float(duration)
+        rec = {
+            "fault_type": fault_type, "sig": sig,
+            "t_start": t0, "t_impact": t_impact, "t_end": t_end,
+            "dur": float(duration), "sevmul": OVERLAY_SEVMUL.get(str(severity), 1.0),
+            "p_cross": 1.0, "expires": t_end,
+        }
+        self._overlay[site] = rec
+        return rec
+
+    def clear_overlay(self, site):
+        self._overlay.pop(site, None)
 
     def refresh_measured(self, workers=16):
         """Refresh every tunnel's measured-RTT cache via a stdlib thread pool.
@@ -426,11 +516,17 @@ class Controller:
     def tick(self, now=None):
         """Advance the model one step; return (rekey_events, path_events)."""
         now = now or time.time()
-        # list() the snapshot: _drift is mutated by HTTP handler threads, and
-        # iterating it live raced with a POST ("dict changed size during
-        # iteration" would kill this loop).
-        self._drift = {k: v for k, v in list(self._drift.items())
-                       if v["expires"] is None or v["expires"] > now}
+        # Prune expired entries IN PLACE (pop), never rebind from a snapshot: both
+        # dicts are mutated by HTTP handler threads, and rebinding self._x = {...}
+        # would silently drop a POST/clear that landed between the snapshot and the
+        # assignment. Snapshot only the key list (avoids "dict changed size during
+        # iteration"); each pop is atomic under the GIL.
+        for k, v in list(self._drift.items()):
+            if v["expires"] is not None and v["expires"] <= now:
+                self._drift.pop(k, None)
+        for k, v in list(self._overlay.items()):
+            if v["expires"] is not None and v["expires"] <= now:
+                self._overlay.pop(k, None)
         # One netem readback per SITE per tick (all of a site's tunnels share the
         # uplink), not one per tunnel: 28 docker execs instead of 168.
         netem_by_site = {}
@@ -438,7 +534,8 @@ class Controller:
         for t in self.tunnels:
             if t.site not in netem_by_site:
                 netem_by_site[t.site] = t._read_netem()
-            if t.update(now, netem=netem_by_site[t.site]):
+            if t.update(now, netem=netem_by_site[t.site],
+                        overlay=self._overlay.get(t.site)):
                 rekeys.append({"event": "rekey", "tunnel": t.tunnel,
                                "site": t.site, "hub": t.hub, "count": t.rekeys})
         path_events = self.select_paths()
@@ -500,6 +597,14 @@ class Controller:
         for site in list(self._drift):
             lines.append(f'sdwan_controller_drift_active{{site="{site}"}} 1')
 
+        metric("sdwan_overlay_active",
+               "1 while a calibrated fault overlay is ramping the tunnel series "
+               "for this site (authoritative fault term; suppresses netem readback)",
+               "gauge")
+        for site, ov in sorted(self._overlay.items()):
+            lines.append(f'sdwan_overlay_active{{site="{site}",'
+                         f'fault_type="{ov["fault_type"]}"}} 1')
+
         return "\n".join(lines) + "\n"
 
 
@@ -512,6 +617,14 @@ def _m(name, t, val):
 def _handler_factory(ctrl):
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path.rstrip("/") == "/fault/overlay":
+                # Live overlay registry -- the env-metrics sidecar reads this to
+                # drive the same ramp fraction into optics/thermal (#59 T3).
+                self._send_json({site: {k: ov[k] for k in
+                                        ("fault_type", "t_start", "t_impact",
+                                         "t_end", "expires")}
+                                 for site, ov in ctrl._overlay.items()})
+                return
             if self.path not in ("/metrics", "/"):
                 self.send_response(404)
                 self.end_headers()
@@ -542,6 +655,36 @@ def _handler_factory(ctrl):
             elif path == "/fault/drift/clear":
                 site = data.get("site")
                 ctrl._drift.pop(site, None)
+                self._send_json({"ok": True, "cleared": site})
+            elif path == "/fault/overlay":
+                site = data.get("site")
+                ft = data.get("fault_type")
+                sig = ctrl._sigs.get(ft) if isinstance(ft, str) else None
+                sev = data.get("severity", "high")
+                try:
+                    lead_s = (sig["lead_s"] if data.get("lead_s") is None
+                              else float(data["lead_s"]))
+                    dur = float(data.get("duration", 60.0))
+                except (TypeError, ValueError):
+                    sig = None
+                # Validate at the trust boundary: unknown site/fault, a non-tunnel
+                # fault (only tunnel_ramp posts an overlay), a negative lead, a
+                # duration too short to keep prog's knots monotonic, or an unknown
+                # severity are all 400 -- never a phantom/garbage overlay.
+                if (site not in ctrl._sites or sig is None
+                        or sig.get("kind") != "tunnel_ramp"
+                        or lead_s < 0 or dur < 2 * OVERLAY_STEP
+                        or sev not in OVERLAY_SEVMUL):
+                    self.send_response(400); self.end_headers()
+                    return
+                rec = ctrl.set_overlay(site, ft, lead_s=lead_s, duration=dur,
+                                       severity=sev, t_start=data.get("t_start"))
+                self._send_json({"ok": True, "site": site,
+                                 "fault_type": rec["fault_type"],
+                                 "t_impact": rec["t_impact"], "t_end": rec["t_end"]})
+            elif path == "/fault/overlay/clear":
+                site = data.get("site")
+                ctrl.clear_overlay(site)
                 self._send_json({"ok": True, "cleared": site})
             else:
                 self.send_response(404); self.end_headers()
