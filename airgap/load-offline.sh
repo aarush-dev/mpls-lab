@@ -50,6 +50,7 @@ EXPECTED=(
   "wbitt/network-multitool:alpine-minimal"
   "quay.io/frrouting/frr:10.5.1"
   "apache/kafka:3.9.1"
+  "prom/alertmanager:v0.27.0"
 )
 MISSING=0
 for img in "${EXPECTED[@]}"; do

@@ -45,3 +45,15 @@ matches feeds the extras to `tar` as member names and fails.
 - **Air-gapped target?** provisioning assumes internet (apt + docker/containerlab install scripts).
   For a truly offline target, pre-stage the `.deb`s + python wheels (`pip install --no-index
   --find-links wheels/`) — not covered here.
+
+## Intentionally NOT carried (parity notes)
+- **`noc-dataapi.service`** (present but *disabled* on the source host) is deliberately dropped.
+  It runs uvicorn with `--workers 2`, which splits the in-process fault registry — the live path
+  is `sim-up.sh`'s single-worker nohup under `noc-lab.service`. Carrying it would be a footgun.
+- **docker / containerlab versions** — containerlab is pinned to 0.76.1 for parity; docker comes
+  from get.docker.com (latest stable, source host was 27.5.1). Pin docker too if exact match matters.
+- **`~/.claude` runtime dirs** (`sessions/`, `jobs/`, `tasks/`, `session-env/`, caches, logs) are
+  excluded — per-session ephemera, not portable state. Chats (`projects/`), skills/plugins,
+  settings, and prompt history ARE carried.
+- **MCP servers** in `~/.claude.json` travel, but host-bound ones (claude-in-chrome needs the
+  Chrome extension; oauth-based servers may need re-auth) won't work until re-set-up on the target.

@@ -23,8 +23,9 @@ if ! command -v docker >/dev/null; then
 fi
 systemctl enable --now docker || service docker start || true
 
-echo "== containerlab (get.containerlab.dev) =="
-command -v containerlab >/dev/null || curl -sL https://get.containerlab.dev | bash
+echo "== containerlab 0.76.1 (get.containerlab.dev) =="
+# Pin to the source-host version for parity — the installer takes -v.
+command -v containerlab >/dev/null || curl -sL https://get.containerlab.dev | bash -s -- -v 0.76.1
 
 echo "== claude code CLI (optional — for the migrated context) =="
 # ~/.local/bin/claude; tolerate failure (host may be air-gapped for this bit).

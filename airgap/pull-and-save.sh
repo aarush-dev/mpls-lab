@@ -32,6 +32,7 @@ REGISTRY_IMAGES=(
   "wbitt/network-multitool:alpine-minimal"
   "quay.io/frrouting/frr:10.5.1"
   "apache/kafka:3.9.1"
+  "prom/alertmanager:v0.27.0"
 )
 
 ALL_IMAGES=("${LOCAL_IMAGES[@]}" "${REGISTRY_IMAGES[@]}")
