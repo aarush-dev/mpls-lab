@@ -1469,10 +1469,24 @@ on a running lab.
 emit their calibrated overlay. **Verification status:** the parser, scenario wiring, lock
 keys and label rows are unit-tested (`faults/injectors.py` `__main__`, `_lock_selftest`,
 `dataapi/test_faults_api.py`); the qos template side is confirmed (`qos.sh.j2` `default
-{{classid}}`). The live-VM demo (netem actually installing under `1:20`, the controller
-folding brownout's delay/loss, drift+overlay coexisting on one spoke, threshold 8.0
-crossing) is NOT re-run yet — no lab in this environment. Run one injection per fault and
-cite it before calling the live demo done.
+{{classid}}`). **Live-VM demo DONE (2026-08-04 redeploy):** `congestion` inject on a spoke
+CE ramped `sdwan_tunnel_latency_ms` from the healthy baseline through the calibrated buildup
+(overlay registered on the controller, `sdwan_overlay_active` up) and netem installed under
+`1:20` on the CE uplink — confirmed on the live lab, not just unit tests.
+
+- **Netem revert leak fixed (found in the same live run).** `NetemImpair.revert` for the HTB
+  path did `tc qdisc replace ... parent <p> handle <leaf_handle> <leaf_kind>` to restore the
+  baseline leaf, with `leaf_kind` defaulting to `fq_codel`. These lab nodes have **no
+  sch_fq_codel** and the CE uplinks carry **no explicit leaf** (verified on a never-faulted
+  `ce_branch2`: bare `htb 1:`), so the `replace` errored `Specified qdisc kind is unknown`.
+  Because `_sh` never raises on nonzero rc, run_scenario logged a clean `revert` with
+  `error:null` while the netem stayed spliced — the lab was left degraded (delay 80ms/loss 6%
+  on the uplink) after every HTB netem fault (`congestion`/`tunnel_degrade`/`asymmetric_loss`/
+  `brownout`/`hub_spoke_congest`). Fix: revert now **`tc qdisc del ... parent <p>` FIRST**
+  (guaranteed removal of our spliced leaf → HTB falls back to its implicit default, which IS
+  the baseline here), THEN best-effort re-adds the captured leaf for kernels that have it.
+  Order is load-bearing (a failed restore must not strand netem). Selftest asserts del-then-
+  replace order; proven live (apply→revert leaves 0 netem) end-to-end through dataapi.
 - **HTB default-class parent read from the live qdisc.** `NetemImpair` was hardcoded to
   splice under `1:30`, but each CE uplink's HTB default class is its VRF's classid
   (`generator/generate.py classid_for`: VOICE `0x10` / CORP `0x20` / GUEST `0x30`), so on

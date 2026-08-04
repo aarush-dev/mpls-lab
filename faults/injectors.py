@@ -180,7 +180,20 @@ class NetemImpair:
 
     def revert(self):
         if self._is_htb:
-            # Restore the original leaf qdisc under the HTB default class.
+            # DELETE our spliced netem leaf FIRST (guaranteed removal), THEN
+            # best-effort restore the captured baseline leaf. Order is load-bearing:
+            # `replace ... <leaf_kind>` SILENTLY FAILS when that qdisc kind is not
+            # loadable (these lab nodes have no sch_fq_codel, and the CE uplinks
+            # carry NO explicit leaf, so leaf_kind is the fq_codel fallback) — since
+            # _sh never raises, a failed replace would strand netem and leave the
+            # lab degraded after every netem fault. After the del, HTB falls back to
+            # its implicit default, which IS the baseline here; the restore then
+            # re-adds a real captured leaf on kernels that have it, or harmlessly
+            # no-ops on those that don't.
+            # ponytail: del-our-own-handle then optional restore. Ceiling: a real
+            #   non-default baseline leaf is only reinstated where its kind loads.
+            dexec(self.device, "tc", "qdisc", "del", "dev", self.iface,
+                  "parent", self._htb["parent"])
             dexec(self.device, "tc", "qdisc", "replace", "dev", self.iface,
                   "parent", self._htb["parent"], "handle", self._htb["leaf_handle"],
                   self._htb["leaf_kind"])
@@ -584,6 +597,28 @@ if __name__ == "__main__":
                 "qdisc netem 200: parent 1:20 limit 1000 delay 80ms\n")
     p2 = NetemImpair._parse_htb(poisoned)
     assert p2["leaf_kind"] == "fq_codel" and p2["leaf_handle"] == "20:", p2
+
+    # revert() must DELETE the spliced netem leaf BEFORE the best-effort restore:
+    # `replace <leaf_kind>` silently fails when that kind is not loadable (no
+    # sch_fq_codel on these nodes), so a restore-only revert strands netem and
+    # degrades the lab after every netem fault. Capture the dexec command order.
+    _calls = []
+    class _CP:               # minimal CompletedProcess stand-in for dexec()
+        stdout = ""; returncode = 0
+    _g = globals(); _orig = _g["dexec"]
+    _g["dexec"] = lambda dev, *cmd, **k: (_calls.append(list(cmd)), _CP())[1]
+    try:
+        rv = NetemImpair("ce_branch1", "eth1")   # probe returns "" -> not htb
+        rv._htb = {"parent": "1:20", "handle": "200:",
+                   "leaf_kind": "fq_codel", "leaf_handle": "20:"}
+        rv._is_htb = True
+        _calls.clear()
+        rv.revert()
+    finally:
+        _g["dexec"] = _orig
+    ops = [c[2] for c in _calls]                  # c = ["tc","qdisc",<op>,...]
+    assert ops == ["del", "replace"], f"revert must del then restore, got {ops}"
+    assert _calls[0] == ["tc", "qdisc", "del", "dev", "eth1", "parent", "1:20"], _calls[0]
 
     bf = BgpFlap("ce_branch1", count=2)
     bf._discover_vrfs = lambda: ["vrf_CORP", "vrf_VOICE"]
