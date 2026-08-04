@@ -7,10 +7,13 @@
 FROM docker:cli AS docker-cli
 FROM python:3.11-slim
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-RUN pip install --no-cache-dir pyyaml
+# numpy: signatures.py (the shared ramp math) is pure-numpy; both controller.py and
+# the env-metrics sidecar (same image) import it.
+RUN pip install --no-cache-dir pyyaml numpy
 WORKDIR /app
 COPY controller/topo.py controller/controller.py /app/controller/
 COPY trafficgen/diurnal.py /app/trafficgen/
+COPY faults/signatures.py /app/faults/
 COPY topology-spec.yaml /app/topology-spec.yaml
 ENV TOPO_SPEC=/app/topology-spec.yaml
 EXPOSE 9362

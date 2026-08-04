@@ -41,11 +41,28 @@ import subprocess
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)  # envmodel.py (mounted beside this file)
+# faults/signatures.py -- the ONE ramp-fraction fn. Container bakes it at
+# /app/faults (Dockerfile), the host repo keeps it at ../faults; insert whichever
+# exists so the import resolves in both.
+for _cand in (os.path.join(_HERE, "faults"), os.path.join(os.path.dirname(_HERE), "faults")):
+    if os.path.isdir(_cand):
+        sys.path.insert(0, _cand)
 import envmodel  # noqa: E402
+try:
+    # In-container: signatures.py is mounted at /app/signatures.py (on sys.path via
+    # this file's own dir); on the host it resolves through the faults/ insert above.
+    # numpy comes with it -- best-effort so a stale image never darkens the whole env
+    # pillar; the overlay fault term just stays inert until the image carries both.
+    import signatures  # noqa: E402
+except Exception:
+    signatures = None
 
 CLAB_PREFIX = "clab-sdwan_mpls_noc"
 STATE_PATH = os.environ.get("ENV_STATE", "/tmp/env-metrics-state.json")
+CTRL_URL = os.environ.get("CTRL_URL", "http://172.20.20.56:9362")  # controller HTTP
+OVERLAY_STEP = 5.0  # matches controller.OVERLAY_STEP (prog's dur-floor)
 
 P_NODES = [f"p{i}" for i in range(1, 25)]
 PE_NODES = [f"pe{i}" for i in range(1, 13)]
@@ -77,6 +94,35 @@ def _diurnal_util():
         return diurnal.util(diurnal.hour_of_cycle(time.time(), period))
     except Exception:
         return 0.5
+
+
+def read_overlay():
+    """Active fault overlays from the controller registry (#61): {site: {fault_type,
+    t_start, t_impact, t_end, expires}}. Best-effort -- {} on any failure (controller
+    down, or a sidecar image with no route to it), so telemetry never blocks on it."""
+    import urllib.request as _req
+    try:
+        with _req.urlopen(f"{CTRL_URL}/fault/overlay", timeout=3) as r:
+            return json.loads(r.read()) or {}
+    except Exception:
+        return {}
+
+
+def overlay_prog(ov, now):
+    """signatures.prog fraction (0->1->0) for one overlay at `now`; 0 outside its
+    window (or when signatures is unavailable). Same ramp the controller runs:
+    `dur` is reconstructed as t_end - t_impact (the controller's episode duration),
+    `sevmul` is read from the registry so a low/medium fault ramps optics/thermal at
+    the SAME severity as its tunnels (not a spurious full-severity 1.0), and p_cross
+    is 1.0 (the controller hardcodes it for overlays)."""
+    if signatures is None:
+        return 0.0
+    try:
+        t0, ti, te = float(ov["t_start"]), float(ov["t_impact"]), float(ov["t_end"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    sevmul = float(ov.get("sevmul", 1.0))  # older registries omit it -> full severity
+    return float(signatures.prog(now, t0, ti, te, te - ti, sevmul, OVERLAY_STEP))
 
 
 def _sh(args, timeout=10):
@@ -266,6 +312,8 @@ def main():
 
     pops = pop_index_map()
     stats = docker_stats()
+    overlay = read_overlay()  # {site: overlay record}; site == device name
+    now = time.time()
     out = []
 
     def emit(name, help_, typ, rows):
@@ -337,8 +385,17 @@ def main():
         pop = pops.get(d) or _fallback_pop(d)
         ambient = envmodel.pop_ambient_c(pop)
 
+        # Fault overlay for THIS device (registry is keyed by site == device name):
+        # ramp fraction drives both the chassis heat and the optical degrade, so a
+        # fault moves temp/power/optics on exactly the sites the controller ramps.
+        ov = overlay.get(d)
+        ftype = ov.get("fault_type") if ov else None
+        prog = overlay_prog(ov, now) if ov else 0.0
+        fault_heat = envmodel.fault_heat_c(ftype) * prog
+        degrade = envmodel.optic_degrade(ftype) * prog
+
         prev = float(temps.get(d, ambient))
-        t = envmodel.temp_c(prev, ambient, util, 0.0, rng.gauss(0, 1))
+        t = envmodel.temp_c(prev, ambient, util, fault_heat, rng.gauss(0, 1))
         temps[d] = t
 
         t_rows.append(f'device_temp_c{{device="{d}",role="{role}",pop="pop{pop}"}} {t:.3f}')
@@ -349,7 +406,7 @@ def main():
                       f'{envmodel.psu_voltage_v(util, rng.gauss(0, 1)):.4f}')
 
         # One transceiver per core-facing uplink (eth1 stands in for the optic).
-        xt, xr, xb = envmodel.optical(t, age, 0.0, rng.gauss(0, 1))
+        xt, xr, xb = envmodel.optical(t, age, degrade, rng.gauss(0, 1))
         xt_rows.append(f'xcvr_temp_c{{device="{d}",interface="eth1"}} {xt:.3f}')
         xr_rows.append(f'xcvr_rx_power_dbm{{device="{d}",interface="eth1"}} {xr:.3f}')
         xb_rows.append(f'xcvr_tx_bias_ma{{device="{d}",interface="eth1"}} {xb:.3f}')

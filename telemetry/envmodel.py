@@ -142,6 +142,22 @@ def fault_heat_c(fault_type):
     return FAULT_HEAT_C.get(fault_type, 0.0)
 
 
+# Active physical-layer optical degradation per fault_type, in [0,1] -> fed to
+# optical(degrade=...). Only the faults that decay the fibre/optic itself: a
+# gray_failure IS optical decay (full), a brownout browns the optics partway.
+# Every other fault leaves the optic clean (0.0), so rx/bias move only under
+# these. The synthetic generator hand-rolls the same signature for gray_failure
+# (generate.py: rx-7dBm/bias+5mA); the live sidecar drives it through this table.
+OPTIC_DEGRADE = {
+    "gray_failure": 1.0,
+    "brownout":     0.5,
+}
+
+
+def optic_degrade(fault_type):
+    return OPTIC_DEGRADE.get(fault_type, 0.0)
+
+
 # --- Fan / PSU (ENTITY-SENSOR-MIB companions) -------------------------------
 FAN_BASE_RPM = 3000.0
 FAN_RPM_PER_C = 120.0       # ramps once above FAN_KNEE_C
@@ -250,6 +266,10 @@ if __name__ == "__main__":
     # Fault heat: congestion heats, a killed daemon cools.
     assert fault_heat_c("core_congestion") > 0 > fault_heat_c("node_failure")
     assert fault_heat_c("no_such_fault") == 0.0
+
+    # Optical degrade: gray_failure is full decay, congestion leaves optics clean.
+    assert optic_degrade("gray_failure") == 1.0 and optic_degrade("brownout") > 0
+    assert optic_degrade("congestion") == 0.0
 
     # Fan is flat below the knee, then ramps with temperature.
     assert fan_rpm(20.0) == fan_rpm(FAN_KNEE_C) == FAN_BASE_RPM

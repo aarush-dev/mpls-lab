@@ -1407,7 +1407,7 @@ then re-run G10. Until then the G10 realism gap (AUC 0.9999) stands — this
 full-scale corpus is calibration-limited and is for pipeline/structure work, not
 real-lab transfer.
 
-### Overlay signature — live faults emit the dataset signature — PARTIAL (GH #59)
+### Overlay signature — live faults emit the dataset signature — DONE (GH #59)
 
 **#60 landed** (R59-T1): the shared `faults/signatures.py` module exists and owns
 `default_signatures` / `prog` / `tunnel_ramp_targets`; `calibrate.py` + `generate.py`
@@ -1433,8 +1433,36 @@ but still clears the overlay; the label row is always written with
 `tunnel_degrade`, `asymmetric_loss`, `brownout`) carry the `overlay` flag; iface_down /
 control-plane / backbone faults post no tunnel overlay. The visible ramp now lives in
 the controller overlay, not a netem ramp — so `run_scenario` no longer calls
-`injector.ramp()` (the campaign path still does). Env-sidecar fault args and
-`flow_bytes/packets` modelling are the remaining #59 work.
+`injector.ramp()` (the campaign path still does).
+
+**#63 landed** (R59-T4): the env sidecar (`telemetry/env-metrics.py`) now reads the
+overlay registry once per loop (best-effort `GET /fault/overlay`, `{}` on failure) and
+drives the same `signatures.prog` fraction into the modelled sensors:
+`envmodel.fault_heat_c(ft) * prog` → `temp_c` (chassis temp/power/fan move under fault)
+and a new `envmodel.optic_degrade(ft) * prog` → `optical` (`gray_failure` full,
+`brownout` half — xcvr rx-power sags, laser bias climbs). The GET projection now also
+exposes `sevmul` (added to `/fault/overlay`), so a low/medium fault ramps optics/thermal
+at the SAME severity as its tunnels; `dur` is reconstructed as `t_end - t_impact` and
+`p_cross` is 1.0 (the controller hardcodes it for overlays). Registry is site-keyed and
+site == device name, so a fault moves optics/thermal on exactly the sites the controller
+ramps. The `signatures` import is best-effort (`None` → inert) so a stale image never
+darkens the whole env pillar. `flow_bytes/flow_packets` are modelled in
+`export.build_dataset` when nfacctd has no capture (traffic gen off): `_modelled_flow`
+sums `trafficgen.VRF_FLOW` × the per-VRF `diurnal.util(hour,vrf) * week_scale` curve the
+live generator offers (`trafficgen.build_plan`), per ~6-min tick, device rows only,
+VRF-less P routers null; deterministic (no burst noise); `_DIURNAL_PERIOD` is taken from
+`trafficgen.PERIOD_SECONDS` so it can't phase-shift off the wire. Coverage seam
+`dataapi/test_coverage_seam.py` proves `build_dataset` over a fixture window returns the
+full 59-col schema with every env/optical/flow feature non-null except the by-design
+structural zeros (`if_*_errors`/`if_*_discards`). Also fixed an all-null `vrf` column
+crashing `_fill_vrf` on pandas 3 (float64 → object cast).
+
+**Image prereq:** `signatures.py` is pure-numpy and is now imported by BOTH `controller.py`
+and the env sidecar (same `noc-controller:0.1` image). `controller/Dockerfile` gains
+`numpy` + `COPY faults/signatures.py /app/faults/`; the image must be rebuilt and
+re-air-gapped for the overlay fault terms (and the controller's own `signatures` import)
+to load. #59 done: live telemetry now emits the full dataset signature across tunnels,
+optics, thermal, and flow.
 
 
 Decision (spec #59, `ready-for-agent`): live injection will emit the synthetic

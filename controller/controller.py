@@ -620,9 +620,11 @@ def _handler_factory(ctrl):
             if self.path.rstrip("/") == "/fault/overlay":
                 # Live overlay registry -- the env-metrics sidecar reads this to
                 # drive the same ramp fraction into optics/thermal (#59 T3).
+                # sevmul is exposed so the sidecar ramps optics/thermal at the SAME
+                # severity as the tunnels (a low fault is 0.5, not a full 1.0).
                 self._send_json({site: {k: ov[k] for k in
                                         ("fault_type", "t_start", "t_impact",
-                                         "t_end", "expires")}
+                                         "t_end", "expires", "sevmul")}
                                  for site, ov in ctrl._overlay.items()})
                 return
             if self.path not in ("/metrics", "/"):

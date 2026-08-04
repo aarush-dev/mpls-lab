@@ -29,6 +29,22 @@ import pandas as pd
 
 import sources
 
+# Shared flow source: the SAME per-VRF shapes + diurnal curve the live traffic
+# generator and controller run on, so the modelled fallback below can't diverge
+# from the wire model. trafficgen lives one dir up.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "trafficgen"))
+try:
+    # PERIOD_SECONDS from trafficgen itself -- the ONE place DIURNAL_PERIOD is read,
+    # so the modelled curve can't phase-shift away from the wire's.
+    from trafficgen import VRF_FLOW, PERIOD_SECONDS as _DIURNAL_PERIOD
+    import diurnal
+except Exception as e:  # trafficgen not mounted (synthetic-only host): no modelled flow
+    print(f"WARN: trafficgen/diurnal not importable ({e}) -- modelled flow disabled",
+          file=sys.stderr)
+    VRF_FLOW, diurnal, _DIURNAL_PERIOD = None, None, 3600.0
+_FLOW_TICK_S = 360.0  # a trafficgen tick ~ 6 min of modelled time (generate._flow_row)
+
 DATASETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasets")
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
@@ -218,11 +234,46 @@ def _flow_bucketed(start, end, step):
         recs.append({"ts": _iso(bucket), "device": dev,
                      "flow_bytes": r.get("bytes"), "flow_packets": r.get("packets")})
     if not recs:
-        print(f"WARN: no flow records in [{_iso(start)}, {_iso(end)}] -- "
-              "flow_bytes/flow_packets will be null", file=sys.stderr)
+        print(f"WARN: no nfacctd flow records in [{_iso(start)}, {_iso(end)}] -- "
+              "build_dataset falls back to the modelled flow (VRF_FLOW x diurnal)",
+              file=sys.stderr)
         return pd.DataFrame(columns=["ts", "device", "flow_bytes", "flow_packets"])
     df = pd.DataFrame(recs)
     return df.groupby(["ts", "device"], dropna=False).sum(min_count=1).reset_index()
+
+
+def _modelled_flow(dev_rows, step):
+    """Fallback flow model for windows with no nfacctd capture (traffic gen off).
+
+    flow_bytes/flow_packets per (device, bucket) = sum over the site's VRFs of
+    flows_max * util(hour, vrf) * week_scale * bytes_per_flow, per ~6-min trafficgen
+    tick -- the SAME per-VRF diurnal curve the live traffic generator offers
+    (trafficgen.build_plan), so the fallback tracks the wire model rather than a
+    second curve. Attaches to device rows only; VRF-less sites (P routers) stay
+    null, as the real capture shows. ponytail: deterministic (no burst noise) -- a
+    stable live fallback, not a replay; the burst variance is the synthetic path's job.
+    """
+    empty = pd.DataFrame(columns=["ts", "device", "flow_bytes", "flow_packets"])
+    if VRF_FLOW is None or dev_rows.empty:
+        return empty
+    sv = _site_vrfs()
+    if not sv:
+        return empty
+    ticks = step / _FLOW_TICK_S
+    recs = []
+    for ts, dev in dev_rows[["ts", "device"]].drop_duplicates().itertuples(index=False):
+        vrfs = sv.get(dev)
+        if not vrfs:
+            continue
+        ep = _parse_iso(ts)
+        hod = diurnal.hour_of_cycle(ep, _DIURNAL_PERIOD)
+        wk = diurnal.week_scale(ep, _DIURNAL_PERIOD)
+        fb = sum(VRF_FLOW[v]["flows_max"] * diurnal.util(hod, v) * wk
+                 * VRF_FLOW[v]["bytes_per_flow"]
+                 for v in vrfs if v in VRF_FLOW) * ticks
+        recs.append({"ts": ts, "device": dev,
+                     "flow_bytes": round(fb, 1), "flow_packets": round(fb / 1400.0, 1)})
+    return pd.DataFrame(recs, columns=["ts", "device", "flow_bytes", "flow_packets"])
 
 
 _SEV_RANK = {"low": 1, "medium": 2, "high": 3}
@@ -465,6 +516,9 @@ def _fill_vrf(df):
     it is not (physical interfaces, device rows)."""
     if df.empty:
         return df
+    # An all-null window makes `vrf` float64 (pandas 3), which rejects the object
+    # (VRF name / list) assignments below -- force object first.
+    df["vrf"] = df["vrf"].astype(object)
     sv = _site_vrfs()
     have = df["vrf"].notna() if "vrf" in df.columns else pd.Series(False, index=df.index)
     iface = (df["entity_type"] == "interface") & ~have
@@ -490,6 +544,10 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
     # the whole frame would replicate one measurement across every interface and
     # tunnel row of that (device, bucket) and inflate any naive sum ~15x.
     flows = _flow_bucketed(start, end, step)
+    if flows.empty and not base.empty:
+        # No live capture (traffic gen off) -> model flows off VRF_FLOW x diurnal so
+        # the two columns are non-null without turning traffic generation on (#63).
+        flows = _modelled_flow(base[base["entity_type"] == "device"], step)
     if not base.empty and not flows.empty:
         is_dev = base["entity_type"] == "device"
         base = pd.concat([base[~is_dev],
