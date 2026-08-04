@@ -1413,8 +1413,28 @@ real-lab transfer.
 `default_signatures` / `prog` / `tunnel_ramp_targets`; `calibrate.py` + `generate.py`
 now import it instead of inline closures. Refactor is byte-identical — regenerating the
 seed-42 sample reproduces the baseline parquet + `profile.json` sha256, golden test
-`faults/test_signatures.py` pins the funcs to the pre-refactor closures. The live
-controller import + overlay endpoint + state machine (rest of #59) is still NOT BUILT.
+`faults/test_signatures.py` pins the funcs to the pre-refactor closures.
+
+**#61 landed** (R59-T2): controller `_overlay` registry + `/fault/overlay`(`/clear`)
+endpoint, cloned from `_drift`; overlay is authoritative (netem readback suppressed
+while active) and ramps `sdwan_tunnel_*` toward the calibrated peak. Trust-boundary
+validation: unknown site/fault, non-`tunnel_ramp` kind, negative lead, sub-`2*STEP`
+duration, or unknown severity → 400.
+
+**#62 landed** (R59-T3): `run_scenario` is now a **buildup→impact→hold→revert** state
+machine. It draws the precursor lead via `leadpriors.draw_lead_s` (floored to
+[30,60]s), posts the overlay via a new `_OverlayInjector` (HTTP to the controller,
+modeled on `_DriftInjector`) for `overlay`-flagged scenarios, waits the lead
+(cancellable), fires the real injector `apply()` at impact, holds `duration`
+(cancellable), then a guaranteed `finally` reverts the physical action AND clears the
+overlay. Early-revert (`/faults/revert/{id}`) during buildup skips the physical fire
+but still clears the overlay; the label row is always written with
+`t_impact = t_start + lead`. Only spoke-CE `tunnel_ramp` scenarios (`congestion`,
+`tunnel_degrade`, `asymmetric_loss`, `brownout`) carry the `overlay` flag; iface_down /
+control-plane / backbone faults post no tunnel overlay. The visible ramp now lives in
+the controller overlay, not a netem ramp — so `run_scenario` no longer calls
+`injector.ramp()` (the campaign path still does). Env-sidecar fault args and
+`flow_bytes/packets` modelling are the remaining #59 work.
 
 
 Decision (spec #59, `ready-for-agent`): live injection will emit the synthetic

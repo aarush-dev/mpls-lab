@@ -3,11 +3,14 @@
 The mocked run_scenario blocks on the cancel Event so a fault stays "active"
 until reverted -- exactly how the real one holds for `duration`. No lab needed.
 """
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
 import app
 import faults_api
+import orchestrator  # on sys.path via faults_api's insert
 
 
 @pytest.fixture
@@ -70,3 +73,92 @@ def test_revert_active_removes_it(client):
     r = client.post(f"/faults/revert/{sid}")
     assert r.status_code == 200
     assert client.get("/faults/active").json() == []
+
+
+# --- R59-T3: buildup->impact->hold->revert state machine (orchestrator, no docker) ---
+
+def test_overlay_flag_only_on_tunnel_ramp_spokes():
+    # spoke-CE tunnel_ramp scenarios post an overlay...
+    for n in ("congestion", "tunnel_degrade", "asymmetric_loss", "brownout"):
+        assert orchestrator.SCENARIOS[n]("ce_branch1", "medium", 60).get("overlay") is True
+    # ...iface_down / control-plane / backbone faults do not.
+    for n in ("bgp_flap", "policy_drift", "node_failure"):
+        assert not orchestrator.SCENARIOS[n]("ce_branch1", "medium", 60).get("overlay")
+
+
+@pytest.fixture
+def fake_lab(monkeypatch):
+    """Replace docker/HTTP with recorders so run_scenario runs off-lab and fast."""
+    injectors = []
+
+    class FakeNetem:
+        def __init__(self, *a, **k):
+            self.calls = []
+            injectors.append(self)
+
+        def apply(self): self.calls.append("apply")
+        def revert(self): self.calls.append("revert")
+        def ramp(self, *a, **k): self.calls.append("ramp")
+
+    posts = []
+
+    class FakeOverlay:
+        def __init__(self, site, ft, lead, dur, sev):
+            self.site, self.ft, self.lead_s = site, ft, lead
+
+        def apply(self): posts.append(("apply", self.site, self.ft))
+        def revert(self): posts.append(("revert", self.site))
+
+    monkeypatch.setattr(orchestrator.inj, "NetemImpair", FakeNetem)
+    monkeypatch.setattr(orchestrator, "_OverlayInjector", FakeOverlay)
+    monkeypatch.setattr(orchestrator.time, "sleep", lambda s: None)  # skip 30-60s buildup+hold
+    monkeypatch.setattr(orchestrator, "write_label", lambda row: None)
+    return injectors, posts
+
+
+def test_state_machine_happy_path(fake_lab):
+    injectors, posts = fake_lab
+    row = orchestrator.run_scenario("congestion", "ce_branch1", duration=1)
+    assert injectors[0].calls == ["apply", "revert"]                 # fired at impact, reverted
+    assert posts == [("apply", "ce_branch1", "congestion"),          # overlay posted then cleared
+                     ("revert", "ce_branch1")]
+    assert row["impact_method"] == "overlay_lead"
+    assert 30.0 <= row["lead_time"] <= 60.0                          # lead floored to [30,60]
+
+
+def test_early_revert_during_buildup_skips_fire(fake_lab):
+    injectors, posts = fake_lab
+    cancel = threading.Event()
+    cancel.set()  # already reverting before buildup completes
+    row = orchestrator.run_scenario("congestion", "ce_branch1", duration=1, cancel=cancel)
+    assert injectors[0].calls == []                                  # physical action never fired
+    assert posts == [("apply", "ce_branch1", "congestion"),          # overlay still cleared
+                     ("revert", "ce_branch1")]
+    assert row["error"] == "early_revert_before_impact"              # not a real injection
+
+
+def test_non_overlay_fires_immediately_without_buildup(fake_lab):
+    injectors, posts = fake_lab
+    row = orchestrator.run_scenario("hub_spoke_congest", "ce_hub1", duration=1)
+    assert injectors[0].calls == ["apply", "revert"]
+    assert posts == []                                              # no overlay for non-spoke-ramp
+    assert row["impact_method"] == "modelled"
+    assert row["lead_time"] == 0.0                                  # no dead buildup wait
+
+
+def test_overlay_post_failure_still_injects(fake_lab, monkeypatch):
+    injectors, posts = fake_lab
+
+    class BoomOverlay:
+        def __init__(self, site, ft, lead, dur, sev): self.lead_s = lead
+        def apply(self): raise RuntimeError("controller 400")
+        def revert(self): posts.append(("revert",))  # must NOT be reached
+
+    monkeypatch.setattr(orchestrator, "_OverlayInjector", BoomOverlay)
+    row = orchestrator.run_scenario("congestion", "ce_branch1", duration=1)
+    assert injectors[0].calls == ["apply", "revert"]               # real fault still injected
+    assert posts == []                                             # dropped overlay, nothing to clear
+    assert "overlay_post_failed" in (row["error"] or "")
+    # no precursor ran -> label must not claim a t_start+lead impact
+    assert row["lead_time"] == 0.0 and row["impact_method"] == "modelled"
+    assert row["t_impact_ramp"] is None

@@ -177,7 +177,7 @@ def scen_congestion(target, severity, duration):
     return {
         "type": "congestion",
         "target": {"device": target, "interface": iface},
-        "injector": injector, "ramp": True, "duration": duration,
+        "injector": injector, "ramp": True, "duration": duration, "overlay": True,
         "probe": probe, "threshold": 8.0, "impact_method": "vm_threshold",
         "signature": "latency+jitter creep then loss on the affected site's tunnels",
     }
@@ -212,6 +212,7 @@ def scen_tunnel_degrade(target, severity, duration):
         "type": "tunnel_degrade",
         "target": {"device": target, "interface": iface, "tunnel": f"{target}-*"},
         "injector": injector, "extra": rekey, "ramp": True, "duration": duration,
+        "overlay": True,
         "probe": probe, "threshold": 2.0, "impact_method": "vm_threshold",
         "signature": "tunnel jitter+loss climb; WireGuard rekey clustering (handshake retries)",
     }
@@ -259,7 +260,7 @@ def scen_asymmetric_loss(target, severity, duration):
     return {
         "type": "asymmetric_loss",
         "target": {"device": target, "interface": iface},
-        "injector": injector, "ramp": False, "duration": duration,
+        "injector": injector, "ramp": False, "duration": duration, "overlay": True,
         "probe": probe, "threshold": 2.0, "impact_method": "vm_threshold",
         "signature": "one-directional loss; loss% up with latency near-normal (asymmetric)",
     }
@@ -280,7 +281,7 @@ def scen_brownout(target, severity, duration):
     return {
         "type": "brownout",
         "target": {"device": target, "interface": iface, "rate_kbit": rate},
-        "injector": injector, "ramp": False, "duration": duration,
+        "injector": injector, "ramp": False, "duration": duration, "overlay": True,
         "probe": None, "threshold": None, "impact_method": "modelled",
         "impact_delay_s": 4,
         "signature": "bandwidth starvation on the uplink (rate cap; not observable in tunnel telemetry)",
@@ -365,9 +366,39 @@ def scen_bgp_cascade(target, severity, duration):
     }
 
 
+CTRL_URL = "http://172.20.20.56:9362"  # controller HTTP (shared by both injectors)
+
+
+class _OverlayInjector:
+    """Post/clear a calibrated tunnel-ramp overlay on the controller (the visible
+    buildup precursor). Modeled on _DriftInjector; idempotent both ways -- a
+    re-post just resets the record, a clear on a missing site is a no-op."""
+
+    def __init__(self, site, fault_type, lead_s, duration, severity):
+        self.site = site
+        self.fault_type = fault_type
+        self.lead_s = lead_s
+        self.duration = duration
+        self.severity = severity
+
+    def apply(self):
+        import json as _json, urllib.request as _req
+        body = _json.dumps({"site": self.site, "fault_type": self.fault_type,
+                            "lead_s": self.lead_s, "duration": self.duration,
+                            "severity": self.severity}).encode()
+        _req.urlopen(f"{CTRL_URL}/fault/overlay", data=body, timeout=5)
+        return {"applied": "overlay", "site": self.site, "fault_type": self.fault_type}
+
+    def revert(self):
+        import json as _json, urllib.request as _req
+        body = _json.dumps({"site": self.site}).encode()
+        _req.urlopen(f"{CTRL_URL}/fault/overlay/clear", data=body, timeout=5)
+        return {"reverted": "overlay", "site": self.site}
+
+
 class _DriftInjector:
     """Inline injector for controller drift (no new dep — uses urllib.request)."""
-    CTRL_URL = "http://172.20.20.56:9362"
+    CTRL_URL = CTRL_URL
 
     def __init__(self, site, mult, ttl_s):
         self.site = site
@@ -669,82 +700,118 @@ def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
 
 def run_scenario(name, target, severity="medium", duration=90, ramp_steps=6,
                  dry_run=False, cancel=None):
-    """Execute one scenario end-to-end and write a label row. Returns the row.
+    """buildup -> impact -> hold -> revert state machine for one live injection.
 
-    cancel: optional threading.Event. If set during the hold window the scenario
-    stops waiting and proceeds straight to the try/finally revert -- the
-    guaranteed-revert path is unchanged, we just wake early. Used by the data-API
-    /faults/revert route to cut a fault short."""
+    Draws a precursor lead (floored to [30,60]s), posts a calibrated tunnel-ramp
+    overlay for overlay-flagged scenarios, waits the lead (cancellable), fires the
+    real injector at IMPACT, holds for `duration` (cancellable), then a guaranteed
+    finally reverts the physical action AND clears the overlay. The visible ramp
+    now lives in the controller overlay, not a netem ramp, so the impairment fires
+    at full magnitude at impact rather than ramping.
+
+    cancel: optional threading.Event. Set during buildup OR hold it wakes the wait
+    and falls through to the same revert+clear (early-revert). If it fires before
+    impact the physical injector never runs; the overlay is still cleared and a
+    label is still written with t_impact = t_start + lead. ramp_steps is accepted
+    for call-compat but unused."""
     if name not in SCENARIOS:
         raise SystemExit(f"unknown scenario '{name}'. choices: {list(SCENARIOS)}")
     spec = SCENARIOS[name](target, severity, duration)
     injector = spec["injector"]
     scenario_id = f"{name}-{target}-{uuid.uuid4().hex[:8]}"
 
-    # Baseline read for vm_threshold scenarios (so we measure the *delta*).
-    baseline = None
-    if spec.get("probe"):
-        baseline = vm_instant(spec["probe"])
-        print(json.dumps({"event": "baseline", "scenario_id": scenario_id,
-                          "probe": spec["probe"], "baseline": baseline}), flush=True)
-
+    # Overlay scenarios ramp a precursor for a lead drawn from the shared prior,
+    # floored to a demo-visible [30,60]s. Non-overlay faults have no visible
+    # precursor to show, so they skip the buildup (lead=0) and fire at t_start --
+    # a dead wait would only skew /faults/active lifetimes and injector TTLs. The
+    # lead is drawn even on a dry run so the previewed label matches a real run;
+    # only the controller POST is skipped.
+    is_overlay = bool(spec.get("overlay"))
+    overlay_active = is_overlay  # cleared below if the controller post fails
+    lead = (min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0]))
+            if is_overlay else 0.0)
+    overlay = (_OverlayInjector(target, spec["type"], lead, duration, severity)
+               if is_overlay and not dry_run else None)
     t_start = now_utc()
+    t_impact = datetime.fromtimestamp(t_start.timestamp() + lead, tz=timezone.utc)
+    impact_method = "overlay_lead" if is_overlay else "modelled"
     print(json.dumps({"event": "inject", "scenario_id": scenario_id,
                       "type": spec["type"], "t_start": iso(t_start),
+                      "lead_s": round(lead, 1), "overlay": overlay is not None,
                       "dry_run": dry_run}), flush=True)
 
-    # Everything from the first mutation on is guarded: an injector/dexec
-    # failure must still revert the lab and still write a label (flagged with
-    # the error) rather than leave core links down and lose the row.
-    t_impact, observed, impact_method = t_start, None, "modelled"
-    t_impact_ramp = None
+    def _wait(sec):
+        cancel.wait(sec) if cancel is not None else time.sleep(sec)
+
+    def _cancelled():
+        return cancel is not None and cancel.is_set()
+
+    fired = False
     error = None
-    # DEFECT 1b: the ramp lasts the lead drawn from the shared prior, so the
-    # slope of the impairment carries the lead the label reports.
-    ramp_s = draw_ramp_seconds(name, duration)[0] if spec.get("ramp") else None
     try:
-        if not dry_run:
-            if spec.get("ramp"):
-                injector.ramp(steps=ramp_steps, total_seconds=ramp_s)
+        # Overlay post is best-effort: a controller 400/timeout must NOT abort the
+        # real injection, only drop the visible precursor.
+        if overlay is not None:
+            try:
+                overlay.apply()
+            except Exception as e:
+                # No precursor ran, so the fault fires now, not at t_start+lead:
+                # collapse the lead so the label's t_impact matches reality.
+                overlay = None  # nothing to clear later
+                overlay_active = False
+                lead, t_impact, impact_method = 0.0, t_start, "modelled"
+                error = f"overlay_post_failed: {type(e).__name__}: {e}"
+                print(json.dumps({"event": "overlay_error", "scenario_id": scenario_id,
+                                  "error": error}), flush=True)
             else:
-                injector.apply()
+                # --- buildup: cancellable precursor wait ---
+                if not _cancelled():
+                    _wait(lead)
+        # --- impact: fire the real physical action (skipped on early-revert) ---
+        if not dry_run and not _cancelled():
+            injector.apply()
             if spec.get("extra"):
                 spec["extra"].apply()
-
-        t_impact, observed, impact_method, t_impact_ramp = _resolve_impact(
-            spec, t_start, baseline, duration, dry_run, ramp_s)
-        print(json.dumps({"event": "impact", "scenario_id": scenario_id,
-                          "t_impact": iso(t_impact), "method": impact_method,
-                          "observed": observed}), flush=True)
-
-        # --- hold for the rest of the duration ---
-        elapsed = time.time() - t_start.timestamp()
-        remaining = duration - elapsed
-        if remaining > 0 and not dry_run:
-            # cancellable hold: cancel.wait wakes early on early-revert, else it
-            # is just a sleep. finally below still reverts either way.
-            cancel.wait(remaining) if cancel is not None else time.sleep(remaining)
+            fired = True
+            print(json.dumps({"event": "impact", "scenario_id": scenario_id,
+                              "t_impact": iso(t_impact), "method": impact_method}),
+                  flush=True)
+            # --- hold: cancellable ---
+            _wait(duration)
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
         print(json.dumps({"event": "scenario_error", "scenario_id": scenario_id,
                           "error": error}), flush=True)
     finally:
-        try:
-            if not dry_run:
+        # Revert the physical action and clear the overlay INDEPENDENTLY: a failed
+        # physical revert must never leave the overlay live on the controller.
+        if fired:
+            try:
                 if spec.get("extra"):
                     spec["extra"].revert()
                 injector.revert()
-        except Exception as e:
-            error = (error or "") + f" revert_failed: {type(e).__name__}: {e}"
-            print(json.dumps({"event": "revert_error", "scenario_id": scenario_id,
-                              "error": str(e)}), flush=True)
+            except Exception as e:
+                error = (error or "") + f" revert_failed: {type(e).__name__}: {e}"
+                print(json.dumps({"event": "revert_error", "scenario_id": scenario_id,
+                                  "error": str(e)}), flush=True)
+        if overlay is not None:
+            try:
+                overlay.revert()
+            except Exception as e:
+                error = (error or "") + f" overlay_clear_failed: {type(e).__name__}: {e}"
+                print(json.dumps({"event": "overlay_clear_error", "scenario_id": scenario_id,
+                                  "error": str(e)}), flush=True)
+        # A fault reverted before it fired never impacted -- flag the label so the
+        # row is not mistaken for a real injection at t_start+lead.
+        if not fired and not dry_run and error is None:
+            error = "early_revert_before_impact"
         t_end = now_utc()
         print(json.dumps({"event": "revert", "scenario_id": scenario_id,
                           "t_end": iso(t_end)}), flush=True)
 
         row = _label_row(spec, scenario_id, name, target, severity, t_start,
-                         t_impact, t_end, impact_method, baseline, observed,
-                         dry_run, error, t_impact_ramp)
+                         t_impact, t_end, impact_method, None, None,
+                         dry_run, error, t_impact if overlay_active else None)
         write_label(row)
         print(json.dumps({"event": "label_written", "row": row}), flush=True)
     return row
