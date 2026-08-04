@@ -1491,6 +1491,31 @@ cite it before calling the live demo done.
 - Because hub_spoke_congest now targets the spoke directly, `_lock_key` (which keys on
   `target`) still excludes a `congestion` on that same spoke uplink — no guard change needed.
 
+**#65 landed** (R59-T6): during buildup `run_scenario` pushes the fault's discrete FRR
+control-plane events into Loki so the log-side precursors match the training event stream.
+New thin wrapper `faults/events_push.py` reuses `synthetic/events.py` `_spec`/`_params`/
+`_event_id` UNCHANGED (imported lazily — they carry pandas/pyarrow at module load, which
+the stdlib injector path must not require); `kind` comes from the shared
+`signatures.default_signatures` table (same source the generator feeds `_spec`), so the
+live event set is the dataset event set by construction. Only the `impact`-anchored
+templates (the down/withdraw/flood burst) are pushed, stamped at `t_start` — the
+`end`-anchored recovery events (session/link UP) are DROPPED: a precursor stream must not
+say "up" before the fault even fires. So the whole burst lands BEFORE the physical impact.
+Loki stream labels mirror the syslog→promtail path (`device`/`app=frr`/`severity`) plus the
+signature as first-class labels (`event_type`/`template_id`, `job=fault-events`); the line
+is the dataset event ROW verbatim (events.py schema — `params` a JSON string, plus
+`device`/`entity`/`severity`), so both paths deserialize to one shape. Best-effort:
+unreachable Loki, absent pandas, or a
+no-discrete-signature fault (e.g. `policy_drift`) all no-op to 0, never raising into the
+injector — the physical fault + overlay still fire. Fires for ALL scenarios with a
+signature, not just overlay ones: the iface_down/backbone faults (`node_failure`,
+`mpls_underlay_failure`, `p_node_failure`, …) carry the richest event bursts and post no
+tunnel overlay, so their control-plane events are the precursor. Seam
+`faults/test_events_push.py`: signature == dataset, all events ≤ t_impact, graceful no-op,
+ns-timestamp payload shape. **Verification:** full push path proven against a local mock
+Loki (node_failure → 4 events all before t_impact); live-lab query not re-run (no lab in
+this environment).
+
 
 Decision (spec #59, `ready-for-agent`): live injection will emit the synthetic
 generator's **calibrated** per-fault signature, plus a 30–60s precursor buildup,

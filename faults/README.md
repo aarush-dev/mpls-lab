@@ -14,6 +14,8 @@ Caveman+ponytail: reuse native tools (`containerlab tools netem`, `tc`,
 faults/
   injectors.py      # injection primitives (apply / revert), one class each
   orchestrator.py   # schedules scenarios, derives t_impact, writes labels
+  signatures.py     # shared fault->signature table + ramp math (generator + live)
+  events_push.py    # buildup: push the fault's FRR control-plane events into Loki (#65)
   labels/labels.jsonl   # the label timeline (one JSON object per line)
   README.md         # this file — the label-schema contract
 ```

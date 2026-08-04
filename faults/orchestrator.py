@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import injectors as inj  # noqa: E402
 import leadpriors  # noqa: E402  -- lead priors shared with synthetic/generate.py
+import events_push  # noqa: E402  -- thin Loki push for FRR control-plane precursors (#65)
 
 VM_URL = os.environ.get("VM_URL", "http://172.20.20.50:8428")
 LABELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labels")
@@ -765,6 +766,28 @@ def run_scenario(name, target, severity="medium", duration=90,
                 error = f"overlay_post_failed: {type(e).__name__}: {e}"
                 print(json.dumps({"event": "overlay_error", "scenario_id": scenario_id,
                                   "error": error}), flush=True)
+        # --- control-plane precursors: push the fault's discrete FRR events into
+        # Loki at buildup start so the log-side precursors land BEFORE t_impact
+        # (#65). Best-effort: emit_precursors never raises and no-ops if Loki (or
+        # pandas, or a discrete signature) is unavailable. Stamped at t_start (the
+        # start of buildup), so the whole burst precedes the physical impact.
+        # ponytail: an early-revert-before-impact leaves these precursors in Loki
+        #   with no impact behind them -- accepted; the label row carries the same
+        #   scenario_id with error="early_revert_before_impact", so a consumer
+        #   joining on scenario_id sees the cancel. Precursors MUST be emitted
+        #   during buildup (that is the point), before cancel is knowable.
+        if not dry_run and not _cancelled():
+            tgt = spec.get("target", {})
+            n_ev = events_push.emit_precursors(
+                spec["type"], spec.get("device", target),
+                tgt.get("interface") or tgt.get("neighbor") or tgt.get("tunnel"),
+                tgt.get("vrf"),
+                None if spec.get("severity_inert") else severity,
+                scenario_id, "live", t_start.timestamp())
+            if n_ev:
+                print(json.dumps({"event": "precursors_emitted",
+                                  "scenario_id": scenario_id, "count": n_ev}),
+                      flush=True)
         # --- buildup: cancellable precursor wait ---
         if not dry_run and not _cancelled():
             _wait(lead)
