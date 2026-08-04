@@ -1407,7 +1407,15 @@ then re-run G10. Until then the G10 realism gap (AUC 0.9999) stands — this
 full-scale corpus is calibration-limited and is for pipeline/structure work, not
 real-lab transfer.
 
-### Overlay signature — live faults emit the dataset signature — NOT BUILT (GH #59)
+### Overlay signature — live faults emit the dataset signature — PARTIAL (GH #59)
+
+**#60 landed** (R59-T1): the shared `faults/signatures.py` module exists and owns
+`default_signatures` / `prog` / `tunnel_ramp_targets`; `calibrate.py` + `generate.py`
+now import it instead of inline closures. Refactor is byte-identical — regenerating the
+seed-42 sample reproduces the baseline parquet + `profile.json` sha256, golden test
+`faults/test_signatures.py` pins the funcs to the pre-refactor closures. The live
+controller import + overlay endpoint + state machine (rest of #59) is still NOT BUILT.
+
 
 Decision (spec #59, `ready-for-agent`): live injection will emit the synthetic
 generator's **calibrated** per-fault signature, plus a 30–60s precursor buildup,

@@ -23,6 +23,8 @@ import sys
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "faults"))
+import signatures  # shared fault->signature table (live controller joins in #59)
 DATASETS = os.path.join(HERE, "..", "dataapi", "datasets")
 STEP = 30  # canonical export step (s); the real capture is 30s-bucketed
 
@@ -143,39 +145,9 @@ def _fault_signatures(f, tun_nf, df=None):
     base_lat = tun_nf["tunnel_latency_ms"].median()
     base_loss = tun_nf["tunnel_loss_pct"].median()
     base_jit = tun_nf["tunnel_jitter_ms"].median()
-    # ponytail: defaults capture the qualitative signature for fault types the
-    # thin real sample doesn't contain (tunnel_degrade, node_failure, etc.).
-    defaults = {
-        "congestion":     {"lat_peak": 60.0, "loss_peak": 3.0, "jit_peak": 8.0, "lead_s": 50.0, "kind": "tunnel_ramp"},
-        "bgp_flap":       {"lat_peak": base_lat, "loss_peak": 0.3, "jit_peak": base_jit, "lead_s": 2.0, "kind": "iface_churn"},
-        "tunnel_degrade": {"lat_peak": 35.0, "loss_peak": 5.0, "jit_peak": 12.0, "lead_s": 40.0, "kind": "tunnel_ramp"},
-        "policy_drift":   {"lat_peak": 28.0, "loss_peak": 0.35, "jit_peak": 3.0, "lead_s": 3.0, "kind": "iface_churn"},
-        "node_failure":   {"lat_peak": base_lat, "loss_peak": 1.0, "jit_peak": base_jit, "lead_s": 1.0, "kind": "iface_down"},
-        "asymmetric_loss": {"lat_peak": base_lat * 1.1, "loss_peak": 4.0, "jit_peak": base_jit * 1.5, "lead_s": 30.0, "kind": "tunnel_ramp"},
-        "brownout":       {"lat_peak": 45.0, "loss_peak": 1.5, "jit_peak": 6.0, "lead_s": 55.0, "kind": "tunnel_ramp"},
-        # --- core / catastrophic / correlated (faults/orchestrator.py SCENARIOS) ---
-        # ponytail: these were missing, so the synthetic set only ever contained
-        #   7 of the 21 implemented scenario types and no core faults at all.
-        #   lead_s values track the per-scenario table in docs/03.
-        "p_node_failure":  {"lat_peak": base_lat * 1.3, "loss_peak": 2.0, "jit_peak": base_jit * 2.0, "lead_s": 5.0, "kind": "iface_down"},
-        "pop_isolation":   {"lat_peak": base_lat * 1.6, "loss_peak": 6.0, "jit_peak": base_jit * 2.5, "lead_s": 3.0, "kind": "iface_down"},
-        "core_partition":  {"lat_peak": base_lat * 1.8, "loss_peak": 8.0, "jit_peak": base_jit * 3.0, "lead_s": 3.0, "kind": "iface_down"},
-        "srlg_cut":        {"lat_peak": base_lat * 1.4, "loss_peak": 4.0, "jit_peak": base_jit * 2.2, "lead_s": 2.0, "kind": "iface_down"},
-        "core_congestion": {"lat_peak": 55.0, "loss_peak": 2.5, "jit_peak": 10.0, "lead_s": 45.0, "kind": "tunnel_ramp"},
-        "ospf_area_flap":  {"lat_peak": base_lat * 1.2, "loss_peak": 1.0, "jit_peak": base_jit * 2.0, "lead_s": 4.0, "kind": "iface_churn"},
-        "path_asymmetry":  {"lat_peak": 30.0, "loss_peak": 0.4, "jit_peak": 4.0, "lead_s": 20.0, "kind": "tunnel_ramp"},
-        "rr_failure":      {"lat_peak": base_lat, "loss_peak": 1.2, "jit_peak": base_jit, "lead_s": 3.0, "kind": "iface_churn"},
-        # gray_failure is the long-precursor, weak-signal case: barely visible in
-        # tunnel metrics, but it degrades the optics (rx power sags, laser bias
-        # climbs) with NO link-down event. That optical divergence is the only
-        # early signal, which is exactly why the DOM columns were added.
-        "gray_failure":    {"lat_peak": base_lat * 1.15, "loss_peak": 1.8, "jit_peak": base_jit * 1.3, "lead_s": 90.0, "kind": "tunnel_ramp"},
-        "mpls_underlay_failure": {"lat_peak": base_lat * 1.3, "loss_peak": 2.0, "jit_peak": base_jit * 1.8, "lead_s": 4.0, "kind": "iface_down"},
-        "ldp_session_flap":      {"lat_peak": base_lat * 1.1, "loss_peak": 0.8, "jit_peak": base_jit * 1.6, "lead_s": 3.0, "kind": "iface_churn"},
-        "hub_spoke_congest":     {"lat_peak": 70.0, "loss_peak": 5.0, "jit_peak": 14.0, "lead_s": 40.0, "kind": "tunnel_ramp"},
-        "bgp_cascade":           {"lat_peak": base_lat * 1.2, "loss_peak": 1.5, "jit_peak": base_jit * 2.0, "lead_s": 3.0, "kind": "iface_churn"},
-        "controller_drift":      {"lat_peak": 38.0, "loss_peak": 3.0, "jit_peak": 5.0, "lead_s": 25.0, "kind": "tunnel_ramp"},
-    }
+    # Table lives in faults/signatures.py; the live controller imports the same
+    # module in #59 so live telemetry and this dataset can't drift apart.
+    defaults = signatures.default_signatures(base_lat, base_loss, base_jit)
     out = {}
     for ft, dft in defaults.items():
         g = f[f["fault_type"] == ft]

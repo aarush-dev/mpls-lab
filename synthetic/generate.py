@@ -46,6 +46,7 @@ from export import (COLUMNS, SEVERITY_INERT_FAULTS, SEVERITY_ORDINAL,
                     tunnel_vrf_set, vrf_of_entity)
 import envmodel  # chassis/optical models, shared with the live sidecar
 import leadpriors  # lead-time priors + per-VRF SLA, shared with the live orchestrator
+import signatures  # shared ramp math (prog / tunnel_ramp_targets); live joins in #59
 from trafficgen import VRF_FLOW  # per-VRF flow shapes, for flow_bytes/flow_packets
 
 OUTDIR = os.path.join(HERE, "output")
@@ -464,10 +465,8 @@ def _inject_faults(rng, df, inv, prof, times, step, scale,
         p_cross == 1 means the signature never reaches the SLA -- then this is
         the original ramp-then-decay shape and t_impact is modelled.
         """
-        ep = epoch[mask].astype(float)
-        knots_t = [t_start, t_impact, t_impact + 0.3 * max(dur, step), t_end]
-        knots_p = [0.0, p_cross, 1.0, 0.0]
-        return np.clip(np.interp(ep, knots_t, knots_p), 0.0, 1.0) * sevmul
+        return signatures.prog(epoch[mask].astype(float), t_start, t_impact,
+                               t_end, dur, sevmul, step, p_cross)
 
     def _counter_adjust(arr, mask, adj):
         """Add adj * per-bucket-increment to a CUMULATIVE counter, integrated.
@@ -526,8 +525,7 @@ def _inject_faults(rng, df, inv, prof, times, step, scale,
         labelled degradation ramp DOWNWARD -- a fault that looks healthier than
         healthy. A peak must be a peak.
         """
-        lat_t = np.maximum(sig["lat_peak"], lat_arr[tmask] * 1.15)
-        jit_t = np.maximum(sig["jit_peak"], jit_arr[tmask] * 1.15)
+        lat_t, jit_t = signatures.tunnel_ramp_targets(sig, lat_arr[tmask], jit_arr[tmask])
         lat_arr[tmask]  = np.round(lat_arr[tmask]  + p_t * (lat_t - lat_arr[tmask]), 4)
         jit_arr[tmask]  = np.round(jit_arr[tmask]  + p_t * (jit_t - jit_arr[tmask]), 4)
         loss_arr[tmask] = np.round(loss_arr[tmask] + p_t * sig["loss_peak"], 4)
