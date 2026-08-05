@@ -107,8 +107,8 @@ def inject(body: InjectBody):
         if any(e["target"] == body.target for e in _ACTIVE.values()):
             raise HTTPException(409, f"'{body.target}' is already being injected")
         # status: shared mutable dict the worker fills with the live phase
-        # (buildup/impact/reverting) via GIL-atomic key writes -- read below in
-        # /active without the lock. run_scenario owns lead + t_impact.
+        # (buildup/impact/reverting) via GIL-atomic key writes -- its keys are
+        # read lock-free in /active. run_scenario owns lead + t_impact.
         status = {"phase": "buildup"}
         _ACTIVE[scenario_id] = {
             "scenario": body.scenario, "target": body.target,
@@ -125,7 +125,8 @@ def inject(body: InjectBody):
 def active():
     with _LOCK:
         entries = list(_ACTIVE.items())
-    # status keys are read outside the lock: the worker writes them GIL-atomically.
+    # status keys are read lock-free (worker writes them GIL-atomically); only the
+    # _ACTIVE snapshot above takes the lock.
     # ponytail: lead/t_impact are null in the sub-ms window between inject and the
     #   worker's first status write (phase seeded "buildup" at inject so it never is).
     return [{"scenario_id": sid, "scenario": e["scenario"], "target": e["target"],

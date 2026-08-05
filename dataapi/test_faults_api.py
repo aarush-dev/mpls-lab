@@ -5,6 +5,7 @@ until reverted -- exactly how the real one holds for `duration`. No lab needed.
 """
 import threading
 import time
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,19 +50,47 @@ def test_inject_registers_active(client):
     assert active[0]["target"] == "ce_branch1"
 
 
-def test_active_reports_lifecycle_phase(client):
-    # #85: /faults/active projects the real phase + lead + future t_impact.
-    r = client.post("/faults/inject", json={"scenario": "congestion", "target": "ce_branch1"})
-    sid = r.json()["scenario_id"]
-    # worker fills lead/t_impact just after thread start -- poll instead of racing it.
-    for _ in range(100):
-        row = client.get("/faults/active").json()[0]
-        if row["lead"] is not None:
-            break
+def _poll(client, pred, timeout=5.0):
+    """Poll /active until pred(row0) or timeout; return the last row seen."""
+    row = None
+    for _ in range(int(timeout / 0.01)):
+        rows = client.get("/faults/active").json()
+        row = rows[0] if rows else None
+        if row is not None and pred(row):
+            return row
         time.sleep(0.01)
-    assert row["phase"] in ("buildup", "impact")
+    raise AssertionError(f"condition never met; last row={row}")
+
+
+def test_active_reports_lifecycle_phase(client, monkeypatch):
+    # #85: /faults/active projects the real phase + lead + future t_impact,
+    # observed through HTTP across the buildup->impact transition.
+    gate = threading.Event()  # held in buildup until the test releases it
+
+    def staged(name, target, severity="medium", duration=90,
+               dry_run=False, cancel=None, status=None):
+        status.update(phase="buildup", lead=45.0, t_impact="2099-01-01T00:00:45Z")
+        gate.wait(timeout=5)
+        status.update(phase="impact")
+        if cancel is not None:
+            cancel.wait(timeout=30)
+        return {"scenario_id": f"{name}-{target}-fake"}
+
+    monkeypatch.setattr(faults_api.orchestrator, "run_scenario", staged)
+
+    sid = client.post("/faults/inject",
+                      json={"scenario": "congestion", "target": "ce_branch1"}).json()["scenario_id"]
+
+    # buildup: phase + lead + a future t_impact all visible over HTTP.
+    row = _poll(client, lambda r: r["lead"] is not None)
+    assert row["phase"] == "buildup"
     assert row["lead"] == 45.0
-    assert row["t_impact"] > row["started_at"]          # impact is in the future
+    assert datetime.fromisoformat(row["t_impact"]) > datetime.fromisoformat(row["started_at"])
+
+    # impact: worker advances the phase; endpoint reflects it lock-free.
+    gate.set()
+    assert _poll(client, lambda r: r["phase"] == "impact")["phase"] == "impact"
+
     client.post(f"/faults/revert/{sid}")
     assert client.get("/faults/active").json() == []    # reverting drops the row
 
