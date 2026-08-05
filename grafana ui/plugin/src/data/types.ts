@@ -165,12 +165,36 @@ export interface MetricDescriptor {
   entityLabel?: string;
 }
 
-/** A fault scenario the backend can inject (GET /faults/scenarios). */
+/** A fault scenario the backend can inject (GET /faults/scenarios). Real backend shape:
+ * `dataapi/faults_api.py:scenarios`. */
 export interface FaultScenario {
+  name: string;
+  description: string;
+  valid_roles: string[];
+  default_duration: number;
+}
+
+/** One live injection in flight (GET /faults/active, `dataapi/faults_api.py:active`). `phase`
+ * seeds "buildup" at inject; `lead` (seconds) and `t_impact` (ISO) are null until the worker's
+ * first status write. */
+export interface ActiveFault {
+  scenario_id: string;
+  scenario: string;
+  target: string;
+  started_at: string;
+  duration?: number;
+  phase: 'buildup' | 'impact' | 'reverting' | null;
+  lead?: number | null;
+  t_impact?: string | null;
+}
+
+/** One open forensic case digest (copilot GET /cases, `copilot/forensic/case.py:case_summary`). */
+export interface ForensicCase {
   id: string;
-  label?: string;
-  description?: string;
-  [k: string]: unknown;
+  ts: string | null;
+  device: string | null;
+  fault_type: string | null;
+  severity: 'low' | 'medium' | 'high' | 'unknown';
 }
 
 /** Request body for POST /faults/inject. */

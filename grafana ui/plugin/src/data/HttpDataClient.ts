@@ -27,6 +27,8 @@ import type {
   ChatEvent,
   CopilotTurn,
   FaultScenario,
+  ActiveFault,
+  ForensicCase,
   InjectFaultRequest,
 } from './types';
 import { normalizeError } from './errors';
@@ -145,11 +147,11 @@ export class HttpDataClient implements DataClient {
 
   // --- transport ------------------------------------------------------------------------------
 
-  private async fetchJson<T>(path: string): Promise<T> {
+  private async fetchJson<T>(path: string, base = this.baseUrl): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, { signal: controller.signal });
+      const res = await fetch(`${base}${path}`, { signal: controller.signal });
       const body = await res.json().catch(() => undefined);
       if (!res.ok) {
         // FastAPI errors come back as { detail }; hand the raw body to normalizeError.
@@ -631,8 +633,12 @@ export class HttpDataClient implements DataClient {
   injectFault(req: InjectFaultRequest): Promise<{ scenario_id: string }> {
     return this.postJson<{ scenario_id: string }>('/faults/inject', req);
   }
-  getActiveFaults(): Promise<unknown> {
-    return this.fetchJson('/faults/active');
+  getActiveFaults(): Promise<ActiveFault[]> {
+    return this.fetchJson<ActiveFault[]>('/faults/active');
+  }
+  /** Open forensic cases from the copilot service (:8100), not the dataapi. */
+  getCases(): Promise<ForensicCase[]> {
+    return this.fetchJson<ForensicCase[]>('/cases', this.copilotBaseUrl);
   }
   revertFault(scenarioId: string): Promise<unknown> {
     return this.postJson(`/faults/revert/${encodeURIComponent(scenarioId)}`, {});

@@ -131,6 +131,44 @@ describe('HttpDataClient', () => {
   });
 });
 
+describe('HttpDataClient faults + cases', () => {
+  afterEach(() => {
+    // @ts-expect-error test cleanup
+    delete global.fetch;
+  });
+
+  it('getActiveFaults returns the live shape incl. phase / lead / t_impact', async () => {
+    const ACTIVE = [
+      { scenario_id: 'congestion-r1-ab12', scenario: 'congestion', target: 'r1', started_at: '2026-08-05T10:00:00Z', duration: 90, phase: 'impact', lead: 45.0, t_impact: '2026-08-05T10:00:45Z' },
+    ];
+    global.fetch = jest.fn(async (url: string) => ({ ok: true, json: async () => (url.endsWith('/faults/active') ? ACTIVE : undefined) })) as unknown as typeof fetch;
+    const faults = await new HttpDataClient('http://x', 1000).getActiveFaults();
+    expect(faults).toHaveLength(1);
+    expect(faults[0].phase).toBe('impact');
+    expect(faults[0].lead).toBe(45.0);
+    expect(faults[0].t_impact).toBe('2026-08-05T10:00:45Z');
+  });
+
+  it('getCases maps the copilot /cases list off the copilot base url', async () => {
+    const CASES = [{ id: 'case-1', ts: '2026-08-05T09:00:00Z', device: 'r1', fault_type: 'congestion', severity: 'high' }];
+    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => CASES }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const client = new HttpDataClient('http://x', 1000, 'http://copilot', 5000);
+    const cases = await client.getCases();
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('http://copilot/cases');
+    expect(cases).toEqual(CASES);
+  });
+
+  it('injectFault sends severity in the POST body', async () => {
+    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ scenario_id: 's1' }) }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await new HttpDataClient('http://x', 1000).injectFault({ scenario: 'congestion', target: 'r1', severity: 'high', duration: 90 });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://x/faults/inject');
+    expect(JSON.parse(init.body as string)).toMatchObject({ scenario: 'congestion', target: 'r1', severity: 'high', duration: 90 });
+  });
+});
+
 // jsdom lacks TextEncoder/TextDecoder, which the SSE reader needs.
 (global as any).TextEncoder = (global as any).TextEncoder ?? require('util').TextEncoder;
 (global as any).TextDecoder = (global as any).TextDecoder ?? require('util').TextDecoder;
