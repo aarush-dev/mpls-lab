@@ -41,6 +41,18 @@ telemetry, scoped workspace. So: its discipline, our cage.
 - Two tool families now: **investigation** (5, read-only, ADR-0006/0007) + **workspace** (4).
 - Executor details in ADR-0013.
 
+## Amendment (T6/#71 — workspace opt-in flag)
+
+Tool *availability* is decoupled from session memory. Originally the bash/present tools rode any
+`session_id` (a session = a workspace). Now they need a `session_id` **and** `workspace=true` on the
+`/chat` request (`ChatRequest.workspace`, default `false`). A plain session is read-only:
+multi-turn memory + history resume without exposing a shell. Rationale: memory and code-execution
+are different trust levels — a user resuming a conversation should not implicitly get a sandbox.
+History resume reads `events.jsonl`, never the workspace, so it works regardless of the flag. The
+forensic `case_id` path is unaffected (it never took the session workspace). The UI surfaces this as
+a default-off "Workspace" toggle; artifacts render raster inline (client-typed image blob) and
+svg/html as a download chip only — the stored-XSS guard of `GET …/artifacts/{name}` (#54).
+
 ## Consequences
 
 - The copilot is a NOC-investigator *and* a scoped coding-agent on one loop. Bigger than the original

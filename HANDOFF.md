@@ -282,7 +282,14 @@ History mode sending `start`/`end` (epoch s) and Live omitting both. `CopilotPag
 render — user/assistant bubbles, "investigating…" spinner, error + Retry. First in-browser proof the
 mock is gone. Self-check: `yarn typecheck && yarn test:ci` (108 tests).
 
-**Not done:** copilot UI rest (T3–T6/#69–#72: trace+citations,
+T3 (#69, `components/CopilotTrace.tsx`) — Claude-style collapsed trace + citation chips. Each
+streamed event renders inline as a collapsed, expandable card (think / tool_call+its tool_result /
+gate); the answer renders with `[source:offset]` citation chips. A chip's native hover previews the
+cited evidence row; clicking it expands + scrolls to + highlights that row inside its tool_result
+card (via the turn's `citeMap` from T1). Honest to the sync backend loop — cards burst in after
+"investigating…", not typed live. Self-check: `yarn typecheck && yarn test:ci` (112 tests).
+
+**Not done:** copilot UI rest (T4–T6/#70–#72:
 multi-turn+localStorage, side panel, backend `workspace` flag); the emulator emitting n distinct
 per-fault records (#49); C1; Milestone B. Seeder does not set `node` on incidents, so
 `search_incidents`-by-device narrows to empty (S1 follow-up, noted in #46). Default `/chat` KB still

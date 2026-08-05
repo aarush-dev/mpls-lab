@@ -532,9 +532,17 @@ export class HttpDataClient implements DataClient {
    * ReadableStream reader — EventSource is GET-only), call `onEvent` per event in order, and
    * resolve the folded `CopilotTurn`. `copilotTimeoutMs` backstops a hung backend; an unreachable
    * service rejects (normalizeError) so the UI can show an honest error, never a fake reply. */
-  async chat(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<CopilotTurn> {
+  async chat(request: ChatRequest, onEvent: (event: ChatEvent) => void, signal?: AbortSignal): Promise<CopilotTurn> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.copilotTimeoutMs);
+    // Caller's Stop (#70) folds into our own timeout controller — either source aborts the fetch.
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort();
+      } else {
+        signal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
+    }
     // History mode sends start/end; Live omits both (backend rolls its own window). session_id is
     // always sent (multi-turn memory); workspace gates the shell/artifact tools (default off).
     const body: Record<string, unknown> = {

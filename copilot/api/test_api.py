@@ -343,8 +343,8 @@ def test_bash_tool_runs_code_over_http_with_a_session():
         final("the run finished, anything else?"),        # ask-back: bash gives no cited evidence
     ])
     app.dependency_overrides[get_llm] = lambda: llm
-    resp = TestClient(app).post("/chat", json={"question": "run echo",
-                                               "start": 100, "end": 200, "session_id": "b3a"})
+    resp = TestClient(app).post("/chat", json={"question": "run echo", "start": 100, "end": 200,
+                                               "session_id": "b3a", "workspace": True})
     assert resp.status_code == 200
     tr = [e for e in _events(resp) if e["type"] == "tool_result"][0]
     assert tr["name"] == "bash" and "exit=0" in tr["content"] and "B3A-OK" in tr["content"]
@@ -372,8 +372,8 @@ def test_present_streams_an_artifact_event_over_http():
     llm = ScriptedLLM([tool_call("present", {"path": "cpu.png", "title": "r1 cpu"}, id="c1"),
                        final("shown the chart, anything else?")])   # ask-back -> gate bypassed
     app.dependency_overrides[get_llm] = lambda: llm
-    resp = TestClient(app).post("/chat", json={"question": "chart r1 cpu",
-                                               "start": 100, "end": 200, "session_id": "art"})
+    resp = TestClient(app).post("/chat", json={"question": "chart r1 cpu", "start": 100, "end": 200,
+                                               "session_id": "art", "workspace": True})
     assert resp.status_code == 200
     art = [e for e in _events(resp) if e["type"] == "artifact"][0]
     assert art["kind"] == "chart" and art["mime"] == "image/png" and art["title"] == "r1 cpu"
@@ -405,6 +405,39 @@ def test_bash_tool_absent_without_a_session():
     resp = TestClient(app).post("/chat", json={"question": "hi", "start": 100, "end": 200})
     assert resp.status_code == 200
     assert not any(t["name"] == "bash" for t in llm.calls[0][1]), "no bash without a session"
+
+
+def test_workspace_flag_gates_bash_and_present():
+    # T6 acceptance (ADR-0011): the shell/artifact tools are decoupled from memory. A session_id
+    # alone (workspace omitted/false) is read-only -> no bash/present; workspace:true + session_id
+    # advertises both. History still persists regardless of the flag (it reads events.jsonl, not ws).
+    from copilot.api.app import get_sessions
+    from copilot.memory import SessionStore
+    import os
+
+    def advertised(**extra):
+        d = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, d, ignore_errors=True)
+        app.dependency_overrides.clear()
+        app.dependency_overrides[get_adapter] = lambda: StubAdapter(metrics_rows=ROWS)
+        app.dependency_overrides[get_sessions] = lambda: SessionStore(d)
+        llm = ScriptedLLM([final("which device?")])
+        app.dependency_overrides[get_llm] = lambda: llm
+        body = {"question": "hi", "start": 100, "end": 200, "session_id": "w1", **extra}
+        resp = TestClient(app).post("/chat", json=body)
+        assert resp.status_code == 200
+        names = {t["name"] for t in llm.calls[0][1]}
+        return names, SessionStore(d)
+
+    on, store_on = advertised(workspace=True)
+    assert {"bash", "present"} <= on, "workspace:true + session_id advertises bash/present"
+    off, store_off = advertised(workspace=False)
+    assert not ({"bash", "present"} & off), "workspace:false does not advertise the tools"
+    omitted, store_omit = advertised()
+    assert not ({"bash", "present"} & omitted), "workspace omitted defaults off"
+    # resume works regardless of the flag: every run persisted its turn to events.jsonl.
+    for st in (store_on, store_off, store_omit):
+        assert st.read("w1"), "the session persisted regardless of the workspace flag"
 
 
 def test_no_session_id_persists_nothing():
@@ -607,6 +640,7 @@ def _run():
     test_no_session_id_persists_nothing()
     test_bash_tool_runs_code_over_http_with_a_session()
     test_bash_tool_absent_without_a_session()
+    test_workspace_flag_gates_bash_and_present()
     test_present_streams_an_artifact_event_over_http()
     test_present_tool_absent_without_a_session()
     test_gate_outcomes_land_in_the_ledger_pass_and_fail()

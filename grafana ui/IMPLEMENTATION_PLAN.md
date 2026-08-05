@@ -303,10 +303,18 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   Live omitting both. `CopilotPage.tsx` rebuilt as a thin render — user/assistant bubbles,
   "investigating…" spinner, error + Retry. First in-browser proof the mock is gone. Hook unit test
   covers streaming growth, sending toggle, reject→retry, and the History/Live seam.
+- **T3/#69 Claude-style collapsed trace + citation chips — DONE.** `components/CopilotTrace.tsx`
+  renders each streamed event inline as a collapsed, expandable card (think / tool_call+its
+  tool_result / gate), then the answer with `[source:offset]` citation chips. Chip hover previews the
+  cited evidence row (`citedRow`); chip click expands + scrolls to + highlights that row inside its
+  tool_result card, via the turn's `citeMap` (T1). Cards burst in after "investigating…" — honest to
+  the synchronous backend loop, not typed live. Component test covers collapse-by-default, expand,
+  chip preview, and jump.
 
 **Still not built:** the ML prediction model — separate, unbuilt component. Predictions/incidents
-remain derived from ground-truth `/labels`, not a real predictor. Copilot chat is real (T1/#67) and
-the tab answers for real (T2/#68); trace cards + citation chips land in later #66 tickets.
+remain derived from ground-truth `/labels`, not a real predictor. Copilot chat is real (T1/#67), the
+tab answers for real (T2/#68) with a Claude-style trace + citation chips (T3/#69); multi-turn UI,
+side panel, and `workspace` flag land in later #66 tickets.
 
 ---
 

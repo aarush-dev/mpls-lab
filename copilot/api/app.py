@@ -56,6 +56,7 @@ class ChatRequest(BaseModel):
     skills: list[str] | None = None   # I5: skill names to manually invoke (bodies preloaded)
     session_id: str | None = None     # R2a: resume this session; None = a one-off, unpersisted chat
     case_id: str | None = None        # R6a: follow-up on a forensic case; session_id names the chat
+    workspace: bool = False           # T6 (ADR-0011): opt in to the bash/present tools (needs session_id)
 
 
 def get_config() -> Config:
@@ -219,10 +220,12 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
     sid = req.session_id
     history = sessions.history(sid) if sid else None
     # B3a/B3b (ADR-0011/0013): the coding-agent tools need a per-session workspace, which lives
-    # under the session dir (same root as SessionStore). No session_id -> no persistent workspace
-    # -> no bash tool (a one-off chat can't run code) and no present tool. The Executor confines
-    # bash (no-net, timeout, cwd); the Workspace owns the scratchpad + append-only artifacts (B3b).
-    ws = for_session(sessions.root, sid) if sid else None
+    # under the session dir (same root as SessionStore). T6 (ADR-0011) decouples the shell/artifact
+    # tools from memory: they need a session_id AND req.workspace=True (default off -> read-only). No
+    # workspace -> no bash (can't run code) and no present -- but history still resumes regardless
+    # (that reads events.jsonl, not ws). The Executor confines bash (no-net, timeout, cwd); the
+    # Workspace owns the scratchpad + append-only artifacts (B3b).
+    ws = for_session(sessions.root, sid) if (sid and req.workspace) else None
     executor = (Executor(ws, timeout_s=cfg.exec_timeout_s, max_timeout_s=cfg.exec_max_timeout_s,
                          output_cap=cfg.exec_output_cap) if ws else None)
     outcome = investigate(req.question, _window(req, cfg),

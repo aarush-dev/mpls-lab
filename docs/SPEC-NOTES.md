@@ -1550,3 +1550,15 @@ visibility, out-of-distribution for the naturally-fast faults (bgp/ldp/node ≈1
 Live→feature builder is unchanged: `dataapi/export.build_dataset()` already maps every
 VM/Loki series to the 59-col `export.COLUMNS` the model trains on. The 6 formerly
 live-inert faults were fixed in #64 (see the #64 block above).
+
+
+Decision (T6/#71): the copilot workspace tools (bash/present) are gated on
+`ChatRequest.workspace=true` AND a `session_id`, default false -> read-only. Decouples
+memory (session) from code-execution (workspace): resuming a chat no longer implies a
+shell. History resume reads events.jsonl, unaffected by the flag; the forensic case_id
+path never took the session workspace, also unaffected. UI: default-off "Workspace"
+toggle (CopilotPage), snapshotted per-turn so Retry re-runs with the same flag. Artifact
+render (CopilotTrace): raster (png/jpg/gif/webp/bmp) inline via a CLIENT-typed image
+Blob (the UI, never the server mime string, picks the type), svg/html a download chip
+only (never inlined) -- the endpoint hardening (#54: octet-stream+nosniff+attachment)
+guards agent-authored stored XSS. See ADR-0011 Amendment.
