@@ -561,6 +561,85 @@ def test_case_id_routes_to_a_frozen_follow_up_over_http():
         "a past-freeze follow-up is rejected at the adapter, surfaced with guidance"
 
 
+def _seed_case(root):
+    # a real case on disk (create_case) whose record is a genuine §3.3 emulate_record, so the
+    # list summary derives real fault_type/severity (not a hand-stub). calib p=0.807 -> "high".
+    from copilot.config import Config
+    from copilot.emulator import emulate_record
+    from copilot.forensic.case import create_case
+    from copilot.window import WindowContext
+
+    label = {"scenario_id": "congestion-pe6", "type": "congestion", "device": "pe6",
+             "severity": "high", "target": {"device": "pe6"},
+             "t_start": "2026-06-21T14:00:00Z", "t_impact": "2026-06-21T14:01:00Z",
+             "t_end": "2026-06-21T14:02:00Z", "lead_time": 60.0, "probe": "latency_ms",
+             "baseline_value": 10.0, "impact_value": 40.0, "signature": "sig-pe6"}
+    rec = emulate_record(label, error_profile="oracle", now="2026-06-21T14:01:00Z")
+    win = WindowContext(1000, 1600, frozen=True)
+    script = [tool_call("query_metrics", {"device": "pe6"}, id="c1"),
+              final("pe6 congestion [metrics:0] [metrics:1]"), final('{"pass": true}')]
+    return create_case(rec, win, live_adapter=StubAdapter(metrics_rows=[
+        {"device": "pe6", "ts": 1200, "latency_ms": 40},
+        {"device": "pe6", "ts": 1300, "queue_drops": 5}]),
+        llm=ScriptedLLM(list(script)), cfg=Config(), cases_root=root), rec
+
+
+def test_get_cases_lists_case_summaries():
+    # #57 acceptance: GET /cases lists open cases with id, ts, device, fault_type, severity, over
+    # the copilot CORS boundary (the same :3000 origin /chat answers) so the dashboard can triage.
+    import os
+
+    from copilot.api.app import get_cases_root
+
+    root = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    case_dir, rec = _seed_case(root)
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_cases_root] = lambda: root
+    origin = "http://localhost:3000"
+    resp = TestClient(app).get("/cases", headers={"Origin": origin})
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == origin, "GET /cases on the UI CORS boundary"
+    cases = resp.json()
+    assert len(cases) == 1
+    c = cases[0]
+    assert c["id"] == os.path.basename(case_dir), "id is the case dir the detail route takes"
+    assert c["device"] == "pe6"
+    assert c["fault_type"] == "congestion"
+    assert c["severity"] == "high", "calibrated p=0.807 buckets high"
+    assert c["ts"] == rec["window_end_ts"], "ts is the incident window_end_ts"
+
+
+def test_get_case_returns_report_prediction_and_chats():
+    # #57 acceptance: GET /cases/{id} returns case.md + prediction.json + the chat list; the
+    # creation run is seeded as the INITIAL_CHAT so the list is non-empty. Unknown id -> 404.
+    import os
+
+    from copilot.api.app import get_cases_root
+    from copilot.forensic.chat import INITIAL_CHAT
+
+    root = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    case_dir, rec = _seed_case(root)
+    cid = os.path.basename(case_dir)
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_cases_root] = lambda: root
+    client = TestClient(app)
+
+    resp = client.get(f"/cases/{cid}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == cid
+    assert body["case_md"].startswith(f"# Forensic case {cid}"), "the human report"
+    assert body["prediction"]["device"] == "pe6", "the frozen record"
+    assert INITIAL_CHAT in body["chats"], "the creation run's chat is listed"
+
+    bad = client.get("/cases/..%2f..%2fetc")
+    assert bad.status_code == 404, "unknown/traversal id is a 404, not a read"
+
+
 def test_cors_allows_the_ui_origin():
     # ADR-0010 (Amended): the separate-team UI at :3000 reaches POST /chat cross-origin;
     # copilot's documented CORS boundary must answer it (the surviving piece of #50).
@@ -633,6 +712,8 @@ def test_get_unknown_artifact_is_404():
 def _run():
     test_get_over_cap_artifact_serves_its_bytes()
     test_get_unknown_artifact_is_404()
+    test_get_cases_lists_case_summaries()
+    test_get_case_returns_report_prediction_and_chats()
     test_cors_allows_the_ui_origin()
     test_chat_streams_tool_call_and_cited_answer()
     test_case_id_routes_to_a_frozen_follow_up_over_http()

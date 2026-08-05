@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from copilot.adapter import FilterError, HttpAdapter, ToolAdapter
 from copilot.agent import Outcome, event_wire, investigate
-from copilot.forensic.chat import INITIAL_CHAT, follow_up, resolve_case_dir
+from copilot.forensic.chat import INITIAL_CHAT, follow_up, list_cases, read_case, resolve_case_dir
 from copilot.config import Config, load
 from copilot.llm import LLMClient, make_client
 from copilot.memory import Ledger, SessionStore
@@ -185,6 +185,26 @@ def get_artifact(sid: str, name: str, sessions: SessionStore = Depends(get_sessi
     return FileResponse(path, media_type="application/octet-stream",
                         headers={"X-Content-Type-Options": "nosniff",
                                  "Content-Disposition": "attachment"})
+
+
+@app.get("/cases")
+def get_cases(cases_root: str = Depends(get_cases_root)) -> list[dict]:
+    # #57: read-only case list for the dashboard -- id, ts, device, fault_type, severity per open
+    # forensic case. Localhost-bound + the same :3000 CORS allowance as /chat (app-wide middleware).
+    # The forensic layer owns the record-shape + case-dir knowledge (mirrors /chat's case routing).
+    return list_cases(cases_root)
+
+
+@app.get("/cases/{cid}")
+def get_case(cid: str, cases_root: str = Depends(get_cases_root)) -> dict:
+    # #57: one case's case.md + prediction.json + chat list. resolve_case_dir sanitises+confines the
+    # UNTRUSTED id (realpath-contained in cases_root, same guard R6a's follow-up uses) -> an unknown
+    # or traversal id is a 404, never a read outside the case root.
+    try:
+        case_dir = resolve_case_dir(cases_root, cid)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="unknown case")
+    return read_case(case_dir)
 
 
 @app.post("/chat")

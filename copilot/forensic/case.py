@@ -201,6 +201,26 @@ def _case_question(record: dict) -> str:
             f"likely root cause and blast radius, and cite the supporting evidence.")
 
 
+def case_severity(record: dict) -> str:
+    """A triage severity for the case list (#57). ponytail: the record carries no native severity
+    (the ground-truth label's is dropped at emulate) -- bucket the calibrated fault probability
+    (decision, §3.3): high >=0.8, medium >= the alert threshold, else low; "unknown" if the
+    decision has no probability. Upgrade to a real field if the predictor ever emits one."""
+    dec = record.get("decision") or {}
+    p = dec.get("calibrated_probability")
+    if p is None:
+        return "unknown"
+    return "high" if p >= 0.8 else "medium" if p >= (dec.get("threshold") or 0.5) else "low"
+
+
+def case_summary(record: dict, cid: str) -> dict:
+    """The one-line case digest the dashboard lists (#57): id (the case dir), incident ts, device,
+    predicted fault_type, derived severity. cid is the dir name (what GET /cases/{id} takes), not
+    a re-derived case_id -- the two can differ if the alert_id was filesystem-sanitised."""
+    return {"id": cid, "ts": record.get("window_end_ts"), "device": record.get("device"),
+            "fault_type": fault_type(record), "severity": case_severity(record)}
+
+
 def render_case_md(record: dict, window: WindowContext, outcome, cid: str) -> str:
     """The initial report: a structured verdict header + the agent's cited prose + a trace footer
     (ADR-0010 §Open resolved -- header structured, body prose)."""

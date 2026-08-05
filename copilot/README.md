@@ -90,6 +90,15 @@ turn's **gate outcomes** (pass and fail) are also written to the R2b Event Ledge
 uvicorn copilot.api.app:app --host 127.0.0.1 --port 8100   # local-only
 ```
 
+**Read-only case surface (#57).** Two GET endpoints let the dashboard see the forensic
+cases the trigger opens (same localhost + `:3000` CORS boundary as `/chat`):
+`GET /cases` lists open cases (`id, ts, device, fault_type, severity`; severity ∈
+`{high, medium, low, unknown}`, bucketed from the calibrated fault probability — the record
+carries no native one; `unknown` when a record has no probability), and
+`GET /cases/{id}` returns that case's `case.md` + `prediction.json` + chat ids (404 for an
+unknown/traversal id, `resolve_case_dir`-confined). The forensic layer owns the record-shape
+and case-dir reads (`chat.list_cases`/`read_case`, `case.case_summary`).
+
 The LLM client + tool adapter are injected deps: tests override them via
 `app.dependency_overrides`. `get_adapter` returns the real `HttpAdapter`
 (`cfg.dataapi_url`, env `COPILOT_DATAAPI_URL` wins) — A1 replaced the F2 stub; `get_llm`

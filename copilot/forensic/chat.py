@@ -20,7 +20,7 @@ import re
 
 from copilot.adapter import Filters
 from copilot.agent import Outcome
-from copilot.forensic.case import ReplayAdapter, investigate_record
+from copilot.forensic.case import ReplayAdapter, case_summary, investigate_record
 from copilot.memory import SessionStore
 from copilot.window import WindowContext
 
@@ -31,6 +31,37 @@ def case_chats(case_dir: str) -> SessionStore:
     """The per-case chat store: cases/<id>/chats/<chat_id>/events.jsonl. Each chat_id is an
     independent conversation (own history) -> n chats coexist addressably under one case."""
     return SessionStore(os.path.join(case_dir, "chats"))
+
+
+def list_cases(cases_root: str) -> list[dict]:
+    """Every forensic case under `cases_root` as a triage summary (#57), sorted by id. A case dir
+    is one holding a prediction.json (skips half-written/foreign dirs). Read-only -- the dashboard's
+    list view. Missing root -> [] (no case has fired yet)."""
+    if not os.path.isdir(cases_root):
+        return []
+    out = []
+    for cid in sorted(os.listdir(cases_root)):
+        pj = os.path.join(cases_root, cid, "prediction.json")
+        if not os.path.isfile(pj):
+            continue
+        with open(pj) as fh:
+            out.append(case_summary(json.load(fh), cid))
+    return out
+
+
+def read_case(case_dir: str) -> dict:
+    """One case's readable payload (#57): the case.md report, the frozen prediction record, and the
+    chat ids under it. `case_dir` is a path the caller already resolved+confined (resolve_case_dir),
+    so no untrusted id reaches here. Read-only."""
+    cid = os.path.basename(case_dir.rstrip(os.sep))
+    with open(os.path.join(case_dir, "case.md")) as fh:
+        case_md = fh.read()
+    with open(os.path.join(case_dir, "prediction.json")) as fh:
+        prediction = json.load(fh)
+    chats_dir = os.path.join(case_dir, "chats")
+    chats = sorted(c for c in os.listdir(chats_dir)
+                   if os.path.isdir(os.path.join(chats_dir, c))) if os.path.isdir(chats_dir) else []
+    return {"id": cid, "case_md": case_md, "prediction": prediction, "chats": chats}
 
 
 def frozen_window(case_dir: str) -> WindowContext:
