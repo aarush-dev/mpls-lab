@@ -2,43 +2,28 @@ import React, { PropsWithChildren } from 'react';
 // Grafana 11.1 ships react-router-dom v5 (Switch/Route/useRouteMatch), NOT v6.
 import { NavLink, useRouteMatch } from 'react-router-dom';
 import { css } from '@emotion/css';
-import { GrafanaTheme2, IconName } from '@grafana/data';
-import { useStyles2, Button, Icon } from '@grafana/ui';
+import { GrafanaTheme2 } from '@grafana/data';
+import { useStyles2, Button } from '@grafana/ui';
 
 import { TimeControl } from './TimeControl';
 import { LabStatusBadge } from './LabStatusBadge';
 import { FilterBar } from './FilterBar';
-import { useAppState } from '../state/AppContext';
 
-interface NavLinkDef {
-  to: string;
-  label: string;
-  icon: IconName;
-  exact?: boolean;
-}
-
-const NAV_LINKS: NavLinkDef[] = [
-  { to: '', label: 'Overview', icon: 'apps', exact: true },
-  { to: 'topology', label: 'Topology', icon: 'sitemap' },
-  // Node Detail is injected dynamically from the last-viewed node (see below) — not a hardcoded device.
-  { to: 'telemetry', label: 'Telemetry', icon: 'graph-bar' },
-  { to: 'incidents', label: 'Incidents', icon: 'bell' },
-  { to: 'copilot', label: 'Copilot', icon: 'comment-alt' },
-  { to: 'inject', label: 'Fault Injection', icon: 'bolt' },
-  { to: 'status', label: 'Status', icon: 'heart' },
+const NAV_LINKS = [
+  { to: '', label: 'Overview', exact: true },
+  { to: 'topology', label: 'Topology' },
+  { to: 'node/pe1', label: 'Node Detail' },
+  { to: 'telemetry', label: 'Telemetry' },
+  { to: 'incidents', label: 'Incidents' },
+  { to: 'copilot', label: 'Copilot' },
+  { to: 'inject', label: 'Fault Injection' },
+  { to: 'status', label: 'Status' },
 ];
 
 /** Top-level layout: title + lab status + time control, nav, and the routed page content. */
 export function AppShell({ children, onToggleCopilot }: PropsWithChildren<{ onToggleCopilot?: () => void }>) {
   const styles = useStyles2(getStyles);
   const { url } = useRouteMatch();
-  const { lastNode } = useAppState();
-
-  // "Node Detail" reflects the last-viewed node instead of a frozen device; hidden until one is opened
-  // (Node Detail stays reachable by drill-through from Topology/Incidents in the meantime).
-  const links: NavLinkDef[] = lastNode
-    ? [...NAV_LINKS.slice(0, 2), { to: `node/${encodeURIComponent(lastNode)}`, label: 'Node Detail', icon: 'monitor' }, ...NAV_LINKS.slice(2)]
-    : NAV_LINKS;
 
   return (
     <div className={styles.root}>
@@ -55,7 +40,7 @@ export function AppShell({ children, onToggleCopilot }: PropsWithChildren<{ onTo
         </div>
       </div>
       <nav className={styles.nav}>
-        {links.map((link) => (
+        {NAV_LINKS.map((link) => (
           <NavLink
             key={link.to}
             exact={link.exact}
@@ -63,7 +48,6 @@ export function AppShell({ children, onToggleCopilot }: PropsWithChildren<{ onTo
             className={styles.navLink}
             activeClassName={styles.navLinkActive}
           >
-            <Icon name={link.icon} />
             {link.label}
           </NavLink>
         ))}
@@ -111,18 +95,13 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin-left: auto;
   `,
   navLink: css`
-    display: inline-flex;
-    align-items: center;
-    gap: ${theme.spacing(0.5)};
     color: ${theme.colors.text.secondary};
     text-decoration: none;
     padding: ${theme.spacing(0.5)} ${theme.spacing(1)};
-    border-bottom: 2px solid transparent;
   `,
   navLinkActive: css`
     color: ${theme.colors.text.primary};
     font-weight: ${theme.typography.fontWeightMedium};
-    border-bottom-color: ${theme.colors.primary.border};
   `,
   content: css`
     flex: 1;

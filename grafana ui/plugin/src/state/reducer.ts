@@ -46,9 +46,6 @@ export interface AppState {
   filters: Filters;
   // Manually injected faults (Fault Injection page). Overlaid on real node state.
   injectedFaults: InjectedFault[];
-  // Last node whose detail page was viewed. Drives the nav "Node Detail" link so it stops being
-  // frozen to a hardcoded device; undefined until a node is opened (nav item hides).
-  lastNode?: string;
 }
 
 export const DEFAULT_LIVE_WINDOW_SEC = 900; // 15 min
@@ -72,7 +69,6 @@ export type AppAction =
   | { type: 'SET_LIVE_WINDOW'; payload: { sec: number; nowMs: number } }
   | { type: 'SET_FILTER'; payload: { key: StringFilterKey; value: string | undefined } }
   | { type: 'CLEAR_FILTERS' }
-  | { type: 'SET_LAST_NODE'; payload: { node: string } }
   | { type: 'INJECT_FAULT'; payload: { node: string; faultType: string } }
   | { type: 'ADVANCE_FAULT'; payload: { node: string; phase: FaultPhase } }
   | { type: 'CLEAR_FAULT'; payload: { node: string } }
@@ -145,8 +141,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'CLEAR_FILTERS':
       return { ...state, filters: {} };
-    case 'SET_LAST_NODE':
-      return state.lastNode === action.payload.node ? state : { ...state, lastNode: action.payload.node };
     case 'INJECT_FAULT': {
       // Re-injecting the same node replaces its fault (idempotent by node). Starts in 'pending';
       // App.tsx schedules escalation to 'predicted' then 'down' for instant visual feedback.

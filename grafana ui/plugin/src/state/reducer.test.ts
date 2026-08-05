@@ -18,14 +18,6 @@ describe('appReducer', () => {
     });
   });
 
-  describe('SET_LAST_NODE', () => {
-    it('records the node and returns the same ref when unchanged', () => {
-      const s = appReducer(initialAppState, { type: 'SET_LAST_NODE', payload: { node: 'pe3' } });
-      expect(s.lastNode).toBe('pe3');
-      expect(appReducer(s, { type: 'SET_LAST_NODE', payload: { node: 'pe3' } })).toBe(s);
-    });
-  });
-
   describe('SET_MODE', () => {
     it('to live re-slides range from nowMs', () => {
       const hist: AppState = { ...initialAppState, mode: 'history', range: { fromMs: 1, toMs: 2 } };
