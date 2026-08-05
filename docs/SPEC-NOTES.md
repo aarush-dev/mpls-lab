@@ -1068,6 +1068,19 @@ no new module: `self_judge` + the retry live in `copilot/agent/loop.py` beside `
   retry:<n>}`; `retry` counts retries used.
 - **Runaway is doubly bounded** — `gate_max_retries` caps gate re-entries, `tool_call_cap` +
   `step_cap` (ADR-0005) still cap tool calls + loop turns *across* retries (ADR-0008 nuance).
+- **#58: `tool_call_cap` charges only calls that GATHERED** — an empty read (no rows → no cites)
+  or any errored/guidance call is FREE; only a productive evidence read (cites) or a successful
+  skill/bash/present action spends the budget. A failed search wasting the budget the model needs
+  to reach citable evidence was the bug (`stopped: tool_call_cap reached` before a cited answer).
+  The gate is untouched — a failed call still lands in `tool_errors` and still blocks, so the
+  correct rejection of fabricated/uncited claims is unchanged. Runaway backstop: since empties no
+  longer count and `step_cap` bounds only *turns* (not calls-per-turn), a second counter over ALL
+  dispatched calls trips `_capped` at `step_cap * tool_call_cap` — so one native turn packing a
+  flood of empty calls terminates instead of firing every one (real adapter I/O). Both trips
+  terminate (a mid-turn `break` would leave the assistant turn's `tool_calls` unmatched — R1).
+  Guards: `test_empty_or_failed_tool_call_does_not_burn_the_cap` (two empty reads + one productive
+  read answer under `tool_call_cap=1`) and `test_dispatch_backstop_bounds_a_flood_of_empty_calls_
+  in_one_turn`. gpt-oss-20b-specific — re-verify at the final local model.
 - **Ordering vs ADR.** ADR sequences pre-gate → self-judge → (on pass) citation check.
   `run_gate` already bundles the citation check into stage 1 (shipped I4a); combining it with the
   judge and retrying on any failure is behaviourally identical (block until everything passes or

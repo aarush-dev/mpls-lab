@@ -291,7 +291,9 @@ def investigate(question: str, window: WindowContext, *,
         hist = compact_history(hist, max_chars=cfg.history_max_chars)
     messages += hist
     messages.append({"role": "user", "content": question})
-    tool_calls = 0
+    tool_calls = 0                                        # PRODUCTIVE calls -> the tool_call_cap budget (#58)
+    dispatched = 0                                        # ALL calls -> runaway backstop (ADR-0005)
+    dispatch_cap = cfg.step_cap * cfg.tool_call_cap       # hard ceiling so empties can't loop unbounded
     retries = 0                                           # agentic gate retries used (ADR-0008)
     evidence: list[Cite] = []                            # structured cites gathered, for the gate
     tool_errors: list[str] = []                          # guidance errors from failed calls (gate)
@@ -360,9 +362,14 @@ def investigate(question: str, window: WindowContext, *,
         messages.append(_assistant_turn(reply.content if native else None, calls))
 
         for tc in calls:
-            if tool_calls >= cfg.tool_call_cap:
+            # #58: the PRODUCTIVE budget stops a model that keeps gathering real evidence; the
+            # dispatch backstop stops one that packs many empty/failed calls into a single turn
+            # (step_cap only bounds turns, not calls-per-turn). Either trip terminates the loop --
+            # a mid-turn `break` would leave the assistant turn's tool_calls without their matching
+            # tool messages and a real backend (R1) would reject the next call.
+            if tool_calls >= cfg.tool_call_cap or dispatched >= dispatch_cap:
                 return _capped(events, "tool_call_cap")
-            tool_calls += 1
+            dispatched += 1
             emit("tool_call", name=tc.name, arguments=tc.arguments, id=tc.id)
             artifact = None                              # B3b: set by present -> an artifact event
             if tc.name == "load_skill":                  # I5: a skill body is method, not
@@ -377,6 +384,15 @@ def investigate(question: str, window: WindowContext, *,
                 evidence.extend(cites)
                 if observation.startswith("error:"):    # guidance error -> a failed call (gate)
                     tool_errors.append(observation)
+            # #58: only a call that GATHERED something spends the tool-call budget. An empty read
+            # (no rows -> no cites) or any errored call (guidance) gathered nothing, so it's free
+            # -- else wasted searches starve the model of budget to reach citable evidence and the
+            # loop stops at tool_call_cap before a cited answer. Non-evidence actions (skill/bash/
+            # present) spend one unless they errored. Runaway stays bounded by step_cap.
+            gathered = (not observation.startswith("error:")
+                        if tc.name in ("load_skill", "bash", "present") else bool(cites))
+            if gathered:
+                tool_calls += 1
             emit("tool_result", id=tc.id, name=tc.name, content=observation, n=len(cites))
             if artifact is not None:                     # B3b: the snapshotted output rides its own
                 emit("artifact", **artifact)             # canonical event after the tool_result

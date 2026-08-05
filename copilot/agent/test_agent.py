@@ -99,6 +99,37 @@ def test_step_cap_stops_runaway():
     assert len(llm.calls) == 3, "loop turns bounded by step_cap"
 
 
+def test_empty_or_failed_tool_call_does_not_burn_the_cap():
+    # #58: a search that returns no rows (or errors) gathered nothing, so it must NOT spend
+    # the tool-call budget -- otherwise wasted searches starve the model of budget to reach
+    # citable evidence and it stops at tool_call_cap before a cited answer. Only the productive
+    # read here (query_metrics -> rows) spends the single-call budget.
+    llm = ScriptedLLM([
+        tool_call("search_logs", {"device": "r1"}, id="c1"),     # no events_rows -> "no rows"
+        tool_call("flows", {"device": "r1"}, id="c2"),           # no flows_rows -> "no rows"
+        tool_call("query_metrics", {"device": "r1"}, id="c3"),   # rows -> the one productive call
+        final("r1 cpu pegged [metrics:0]"),
+        final('{"pass": true}'),                                  # stage-2 self-judge verdict
+    ])
+    out = investigate("what happened on r1?", WINDOW, llm=llm,
+                      adapter=StubAdapter(metrics_rows=ROWS), cfg=_cfg(tool_call_cap=1))
+    assert out.stopped is None, "empty reads are free -> the productive read still fits the cap"
+    assert out.answer == "r1 cpu pegged [metrics:0]"
+    assert len(out.of_type("tool_call")) == 3, "all three dispatched; only one spent the budget"
+
+
+def test_dispatch_backstop_bounds_a_flood_of_empty_calls_in_one_turn():
+    # #58 (review): empty calls are free, but a single native turn packing many of them must
+    # still be bounded -- step_cap only limits turns, not calls-per-turn. The dispatch backstop
+    # (step_cap * tool_call_cap) terminates instead of firing every call (real adapter I/O each).
+    flood = Reply(tool_calls=tuple(
+        ToolCall("flows", {"device": "r1"}, id=f"c{i}") for i in range(20)))   # all -> "no rows"
+    out = investigate("what happened on r1?", WINDOW, llm=ScriptedLLM([flood]),
+                      adapter=StubAdapter(), cfg=_cfg(step_cap=2, tool_call_cap=2))  # cap = 4
+    assert out.stopped == "tool_call_cap"
+    assert len(out.of_type("tool_call")) == 4, "backstop caps total dispatch at step_cap*tool_call_cap"
+
+
 def test_filter_error_is_fed_back_as_observation():
     # over-broad tool args -> adapter rejects; the guidance returns as a tool_result
     # (ADR-0015) so the model can correct, then it answers.
@@ -656,6 +687,8 @@ def _run():
     test_ask_back_when_underspecified()
     test_tool_call_cap_stops_runaway()
     test_step_cap_stops_runaway()
+    test_empty_or_failed_tool_call_does_not_burn_the_cap()
+    test_dispatch_backstop_bounds_a_flood_of_empty_calls_in_one_turn()
     test_filter_error_is_fed_back_as_observation()
     test_think_event_emitted_with_reasoning()
     test_owned_parser_handles_non_native_toolcall()
