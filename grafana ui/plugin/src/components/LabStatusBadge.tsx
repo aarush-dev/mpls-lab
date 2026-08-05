@@ -16,19 +16,31 @@ export function LabStatusBadge() {
 
   useEffect(() => {
     let cancelled = false;
+    // Hysteresis: one slow/dropped 10s poll (fetch abort on timeout) must not flap the badge to
+    // OFF and back. Any success -> ON immediately; OFF only after MISS_LIMIT consecutive misses
+    // (~20s of real outage), so a transient blip reads as ON, a genuine down still reads OFF.
+    const MISS_LIMIT = 2;
+    let misses = 0;
+    const onMiss = () => {
+      if (cancelled) return;
+      misses += 1;
+      if (misses >= MISS_LIMIT) {
+        setStatus('off');
+      }
+    };
     const probe = () => {
       dataClient
         .getCapabilities()
         .then((caps) => {
-          if (!cancelled) {
-            setStatus(caps.sources.measured ? 'on' : 'off');
+          if (cancelled) return;
+          if (caps.sources.measured) {
+            misses = 0;
+            setStatus('on');
+          } else {
+            onMiss();
           }
         })
-        .catch(() => {
-          if (!cancelled) {
-            setStatus('off');
-          }
-        });
+        .catch(onMiss);
     };
     probe();
     const id = setInterval(probe, POLL_MS);
