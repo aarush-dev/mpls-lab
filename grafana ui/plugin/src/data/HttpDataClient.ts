@@ -208,9 +208,23 @@ export class HttpDataClient implements DataClient {
     }
   }
 
+  // /labels is 174KB and every node load fetches it 3x (topology + incidents + predictions).
+  // Collapse concurrent/burst calls onto one in-flight request with a 2s TTL so a single load —
+  // and its 5s refresh siblings — pay for it once. ponytail: process-wide, fine for one browser tab.
+  private labelsCache?: { at: number; p: Promise<RawLabelRow[]> };
   private async fetchLabels(): Promise<RawLabelRow[]> {
-    const resp = await this.fetchJson<{ rows: RawLabelRow[] }>('/labels');
-    return resp.rows ?? [];
+    const now = Date.now();
+    if (this.labelsCache && now - this.labelsCache.at < 2000) {
+      return this.labelsCache.p;
+    }
+    const p = this.fetchJson<{ rows: RawLabelRow[] }>('/labels').then((resp) => resp.rows ?? []);
+    this.labelsCache = { at: now, p };
+    p.catch(() => {
+      if (this.labelsCache?.p === p) {
+        this.labelsCache = undefined; // don't cache a rejection
+      }
+    });
+    return p;
   }
 
   private static deviceOf(l: RawLabelRow): string | undefined {

@@ -19,6 +19,7 @@ import time
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 
 import sources
@@ -26,6 +27,10 @@ import export
 import faults_api
 
 app = FastAPI(title="NOC Copilot Clean Data API", version="1.0")
+
+# Node detail loads ~510KB uncompressed (labels/events/flows) — brutal over an ssh -L
+# tunnel. gzip cuts JSON ~10x. min_size skips the tiny /metrics range replies.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # CORS: only the Grafana browser plugin origin (localhost:3000). GET+POST is all
 # the plugin needs; this allow-list IS the security boundary for /faults/* (which
