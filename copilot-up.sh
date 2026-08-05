@@ -59,37 +59,58 @@ check "api /openapi.json (:8100)"  http://127.0.0.1:8100/openapi.json
 alive "predictor loop"             'copilot.emulator.predictor'
 alive "forensic trigger loop"      'copilot.forensic.trigger'
 
-# predictor LIVENESS heartbeat: prove the LOOP runs, not just that the PID exists — a fresh
-# Prediction Record must land within one poll interval. A fetch-once/stale loop (the bug this
-# ticket closes) would write nothing for a fault that is currently active.
-say "predictor heartbeat (waiting one interval + slack: $((INTERVAL + 3))s)"
+# predictor LIVENESS heartbeat: prove the LOOP runs, not just that the PID exists (a stuck/stale
+# loop keeps its PID). Inject a SYNTHETIC low-severity probe fault into the /labels glob, then
+# require a fresh Prediction Record within one poll interval — only a loop that actually re-fetched
+# /labels and ticked can produce it. Low severity => decision.alert is false (ADR-0003), so the
+# forensic trigger opens NO case for the probe; the probe label + its ledger rows are removed on
+# every exit path (trap). ponytail: the probe writes to the ground-truth labels dir for ~one
+# interval; it sorts last (zzz-) so a real active fault still wins primary. Ceiling: a dedicated
+# dry-run predict endpoint if writing the labels dir at bring-up ever bites.
+PROBE_LABEL="faults/labels/zzz-copilot-heartbeat-probe.jsonl"
+_clean_probe() {
+  rm -f "$PROBE_LABEL"
+  python3 - <<'PY' 2>/dev/null || true
+import os, sqlite3
+p = os.environ["COPILOT_LEDGER_PATH"]
+if os.path.exists(p):
+    with sqlite3.connect(p) as db:
+        db.execute("DELETE FROM ledger WHERE device='hb_probe'")
+PY
+}
+trap _clean_probe EXIT
+_clean_probe                                    # clear any leak from a prior crashed run
 before=$(python3 - <<'PY'
 import os, sqlite3
 p = os.environ["COPILOT_LEDGER_PATH"]
 print(sqlite3.connect(p).execute("SELECT COUNT(*) FROM ledger WHERE type='prediction'").fetchone()[0] if os.path.exists(p) else 0)
 PY
 )
-sleep "$((INTERVAL + 3))"
-python3 - "$before" "$DATAAPI_URL" <<'PY'
-import os, sqlite3, sys, json, urllib.request
-from datetime import datetime, timezone
-before = int(sys.argv[1]); dataapi = sys.argv[2]; p = os.environ["COPILOT_LEDGER_PATH"]
-after = sqlite3.connect(p).execute("SELECT COUNT(*) FROM ledger WHERE type='prediction'").fetchone()[0] if os.path.exists(p) else 0
-if after > before:
-    print(f"predictor heartbeat                OK ({before}->{after} prediction records)"); sys.exit(0)
-# no new record: honest only if there is genuinely nothing to predict right now. If a fault IS
-# active and the loop still wrote nothing, the loop is stuck/stale -> fail loudly.
-now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-rows = json.load(urllib.request.urlopen(dataapi.rstrip("/") + "/labels", timeout=10)).get("rows", [])
-active = [r for r in rows if r.get("t_start") and r.get("t_end") and r["t_start"] <= now <= r["t_end"]]
-if active:
-    print(f"predictor heartbeat                FAIL: {len(active)} fault(s) active but no fresh record"); sys.exit(1)
-# ponytail: with no active fault the loop correctly writes nothing, so a record can't prove the
-# loop ran — the PID check above stands. Ceiling: inject a synthetic probe fault for a hard
-# liveness proof even in a quiet lab.
-print("predictor heartbeat                idle (no active fault; PID alive proves the proc, loop unverified)")
+python3 - <<'PY'                                # drop a now-spanning low-sev probe into the glob
+import json
+from datetime import datetime, timezone, timedelta
+now = datetime.now(timezone.utc); z = lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+open("faults/labels/zzz-copilot-heartbeat-probe.jsonl", "w").write(json.dumps({
+    "scenario_id": "copilot-heartbeat-probe", "type": "congestion", "device": "hb_probe",
+    "target": {"device": "hb_probe"}, "severity": "low", "t_start": z(now - timedelta(seconds=60)),
+    "t_impact": z(now), "t_end": z(now + timedelta(seconds=600)), "lead_time": 60.0,
+    "probe": "latency_ms", "baseline_value": 10.0, "impact_value": 40.0, "signature": "hb"}) + "\n")
 PY
-[ "${PIPESTATUS[0]:-0}" = "0" ] || fail=1
+say "predictor heartbeat (synthetic probe; waiting $((INTERVAL + 3))s)"
+sleep "$((INTERVAL + 3))"
+after=$(python3 - <<'PY'
+import os, sqlite3
+p = os.environ["COPILOT_LEDGER_PATH"]
+print(sqlite3.connect(p).execute("SELECT COUNT(*) FROM ledger WHERE type='prediction'").fetchone()[0] if os.path.exists(p) else 0)
+PY
+)
+if [ "${after:-0}" -gt "${before:-0}" ]; then
+  printf '%-34s %s\n' "predictor heartbeat" "OK (fresh record within one interval)"
+else
+  printf '%-34s %s\n' "predictor heartbeat" "FAIL"
+  echo "  FAIL: no fresh Prediction Record within one interval — predictor loop stuck/stale"
+  fail=1
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then
