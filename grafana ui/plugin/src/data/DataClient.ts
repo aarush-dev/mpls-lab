@@ -9,11 +9,9 @@ import type {
   FlowRecord,
   Incident,
   Prediction,
-  Conversation,
-  CreateConversationRequest,
-  SendMessageRequest,
-  SendMessageResponse,
-  CopilotFeedbackRequest,
+  ChatRequest,
+  ChatEvent,
+  CopilotTurn,
 } from './types';
 
 export interface DataClient {
@@ -25,8 +23,7 @@ export interface DataClient {
   getFlows(filters: Filters): Promise<FlowRecord[]>;
   getIncidents(filters: Filters): Promise<Incident[]>;
   getPredictions(filters: Filters): Promise<Prediction[]>;
-  getConversation(id: string): Promise<Conversation>;
-  createConversation(request: CreateConversationRequest): Promise<Conversation>;
-  sendMessage(request: SendMessageRequest): Promise<SendMessageResponse>;
-  submitFeedback(request: CopilotFeedbackRequest): Promise<void>;
+  /** Stream the real copilot `/chat` SSE trace, calling `onEvent` per event, resolving the folded
+   * turn. Rejects when the copilot service is unreachable (never a fake reply). */
+  chat(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<CopilotTurn>;
 }

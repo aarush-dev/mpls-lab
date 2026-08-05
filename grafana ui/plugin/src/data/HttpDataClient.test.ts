@@ -1,5 +1,5 @@
 import { HttpDataClient } from './HttpDataClient';
-import type { TopologyNodeLive } from './MockDataClient';
+import type { ChatEvent, TopologyNodeLive } from './types';
 
 // Canned backend payloads. Faults use a live "now" so state derivation lands deterministically:
 // r1 is inside its impact window (red), r2 is inside its pre-impact window (amber).
@@ -47,11 +47,11 @@ function stubFetch(): jest.Mock {
       ok: true,
       json: async () => body,
     });
-    if (path.startsWith('/topology')) return pick(TOPOLOGY);
-    if (path.startsWith('/metrics')) return pick(METRICS_RANGE);
-    if (path.startsWith('/events')) return pick(EVENTS);
-    if (path.startsWith('/flows')) return pick(FLOWS);
-    if (path.startsWith('/labels')) return pick(LABELS);
+    if (path.startsWith('/topology')) {return pick(TOPOLOGY);}
+    if (path.startsWith('/metrics')) {return pick(METRICS_RANGE);}
+    if (path.startsWith('/events')) {return pick(EVENTS);}
+    if (path.startsWith('/flows')) {return pick(FLOWS);}
+    if (path.startsWith('/labels')) {return pick(LABELS);}
     return { ok: false, status: 404, json: async () => ({ detail: 'not found' }) };
   }) as unknown as jest.Mock;
 }
@@ -128,5 +128,85 @@ describe('HttpDataClient', () => {
     expect(caps.sources.measured).toBe(false);
     expect(caps.sources.ground_truth).toBe(true);
     expect(caps.datasetWindow.fromMs).toBeLessThan(caps.datasetWindow.toMs);
+  });
+});
+
+// jsdom lacks TextEncoder/TextDecoder, which the SSE reader needs.
+(global as any).TextEncoder = (global as any).TextEncoder ?? require('util').TextEncoder;
+(global as any).TextDecoder = (global as any).TextDecoder ?? require('util').TextDecoder;
+
+// A fake fetch ReadableStream body: yields each string as one encoded chunk, then done.
+function streamBody(chunks: string[]) {
+  const enc = new (global as any).TextEncoder();
+  let i = 0;
+  return {
+    getReader: () => ({
+      read: async () => (i < chunks.length ? { done: false, value: enc.encode(chunks[i++]) } : { done: true }),
+    }),
+  };
+}
+
+describe('HttpDataClient.chat', () => {
+  afterEach(() => {
+    // @ts-expect-error test cleanup
+    delete global.fetch;
+  });
+
+  const wire = (o: object) => `data: ${JSON.stringify(o)}\n\n`;
+
+  it('POSTs the request and streams events in order, resolving the folded turn', async () => {
+    // one frame split across two chunks proves the reader buffers partials
+    const think = wire({ type: 'think', ts: 't', content: 'looking' });
+    const chunks = [
+      think.slice(0, 10),
+      think.slice(10),
+      wire({ type: 'tool_result', ts: 't', id: 'x', name: 'query_metrics', content: 'cpu 99 [metrics:0]', n: 1 }),
+      wire({ type: 'gate', ts: 't', ok: true, missing: [], retry: 0 }),
+      wire({ type: 'assistant_msg', ts: 't', content: 'r1 cpu pegged [metrics:0]' }),
+    ];
+    const fetchMock = jest.fn(async () => ({ ok: true, body: streamBody(chunks) }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = new HttpDataClient('http://x', 1000, 'http://copilot', 5000);
+    const seen: string[] = [];
+    const turn = await client.chat(
+      { question: 'what now?', sessionId: 's1', workspace: false, start: 100, end: 200 },
+      (e: ChatEvent) => seen.push(e.type)
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://copilot/chat');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      question: 'what now?',
+      session_id: 's1',
+      workspace: false,
+      start: 100,
+      end: 200,
+    });
+    expect(seen).toEqual(['think', 'tool_result', 'gate', 'assistant_msg']);
+    expect(turn.answer).toBe('r1 cpu pegged [metrics:0]');
+    expect(turn.citations).toEqual([{ id: 'metrics:0', source: 'metrics', offset: 0 }]);
+    expect(turn.gate).toMatchObject({ ok: true });
+  });
+
+  it('Live mode omits start/end from the body', async () => {
+    const fetchMock = jest.fn(async () => ({ ok: true, body: streamBody([]) }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const client = new HttpDataClient('http://x', 1000, 'http://copilot', 5000);
+    await client.chat({ question: 'q', sessionId: 's1', workspace: true }, () => undefined);
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      question: 'q',
+      session_id: 's1',
+      workspace: true,
+    });
+  });
+
+  it('rejects when the copilot service is unreachable', async () => {
+    global.fetch = jest.fn(async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+    const client = new HttpDataClient('http://x', 1000, 'http://copilot', 5000);
+    await expect(client.chat({ question: 'q', sessionId: 's1', workspace: false }, () => undefined)).rejects.toBeDefined();
   });
 });

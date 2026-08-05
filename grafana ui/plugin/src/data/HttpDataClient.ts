@@ -3,9 +3,10 @@
 // /labels (ground-truth fault timeline) and /faults/* (injection control). Metric queries are
 // driven entirely by metricCatalog.ts — the single source of truth for name/promql/group/source.
 //
-// The Copilot conversation methods have no backend yet, so they forward to a private MockDataClient.
-// `setCursor`/`getActiveAlerts` are deliberately NOT implemented: a live backend has its own "now"
-// (Date.now()), and callers feature-detect those mock-only hooks.
+// Copilot `/chat` streams from a SEPARATE service (copilotBaseUrl, default :8100) via fetch POST +
+// a ReadableStream reader; the dataapi reads above use baseUrl (:8000). `setCursor`/`getActiveAlerts`
+// are deliberately NOT implemented: a live backend has its own "now" (Date.now()), and callers
+// feature-detect those mock-only hooks.
 
 import type { DataClient } from './DataClient';
 import type {
@@ -13,6 +14,7 @@ import type {
   Overview,
   TopologyGraph,
   TopologyLink,
+  TopologyNodeLive,
   TelemetryRequest,
   MetricSeries,
   MetricPoint,
@@ -21,17 +23,15 @@ import type {
   FlowRecord,
   Incident,
   Prediction,
-  Conversation,
-  CreateConversationRequest,
-  SendMessageRequest,
-  SendMessageResponse,
-  CopilotFeedbackRequest,
+  ChatRequest,
+  ChatEvent,
+  CopilotTurn,
   FaultScenario,
   InjectFaultRequest,
 } from './types';
 import { normalizeError } from './errors';
 import { METRIC_CATALOG } from './metricCatalog';
-import { MockDataClient, TopologyNodeLive } from './MockDataClient';
+import { parseSseFrames, mapEventsToTurn } from './copilotChat';
 
 // --- Raw backend DTOs -------------------------------------------------------------------------
 
@@ -136,9 +136,12 @@ function popOf(id: string): string | undefined {
 }
 
 export class HttpDataClient implements DataClient {
-  private mock = new MockDataClient();
-
-  constructor(private baseUrl: string, private timeoutMs: number) {}
+  constructor(
+    private baseUrl: string,
+    private timeoutMs: number,
+    private copilotBaseUrl = 'http://127.0.0.1:8100',
+    private copilotTimeoutMs = 180000
+  ) {}
 
   // --- transport ------------------------------------------------------------------------------
 
@@ -523,19 +526,77 @@ export class HttpDataClient implements DataClient {
     };
   }
 
-  // --- copilot (no live backend yet — forward to the mock) ------------------------------------
+  // --- copilot (real streaming /chat on copilotBaseUrl, default :8100) -------------------------
 
-  getConversation(id: string): Promise<Conversation> {
-    return this.mock.getConversation(id);
-  }
-  createConversation(request: CreateConversationRequest): Promise<Conversation> {
-    return this.mock.createConversation(request);
-  }
-  sendMessage(request: SendMessageRequest): Promise<SendMessageResponse> {
-    return this.mock.sendMessage(request);
-  }
-  submitFeedback(request: CopilotFeedbackRequest): Promise<void> {
-    return this.mock.submitFeedback(request);
+  /** POST the request to the copilot `/chat`, stream its SSE `event_wire` trace (fetch + a
+   * ReadableStream reader — EventSource is GET-only), call `onEvent` per event in order, and
+   * resolve the folded `CopilotTurn`. `copilotTimeoutMs` backstops a hung backend; an unreachable
+   * service rejects (normalizeError) so the UI can show an honest error, never a fake reply. */
+  async chat(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<CopilotTurn> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.copilotTimeoutMs);
+    // History mode sends start/end; Live omits both (backend rolls its own window). session_id is
+    // always sent (multi-turn memory); workspace gates the shell/artifact tools (default off).
+    const body: Record<string, unknown> = {
+      question: request.question,
+      session_id: request.sessionId,
+      workspace: request.workspace,
+    };
+    if (request.start != null) {
+      body.start = request.start;
+    }
+    if (request.end != null) {
+      body.end = request.end;
+    }
+    if (request.skills) {
+      body.skills = request.skills;
+    }
+    try {
+      const res = await fetch(`${this.copilotBaseUrl}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        throw { status: res.status };
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const events: ChatEvent[] = [];
+      let buf = '';
+      const drain = (frames: string[]) => {
+        for (const f of frames) {
+          // a truncated trailing frame (stream cut mid-event) must not sink an otherwise-complete turn
+          let e: ChatEvent;
+          try {
+            e = JSON.parse(f) as ChatEvent;
+          } catch {
+            continue;
+          }
+          events.push(e);
+          onEvent(e);
+        }
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buf += decoder.decode(value, { stream: true });
+        const { frames, rest } = parseSseFrames(buf);
+        buf = rest;
+        drain(frames);
+      }
+      buf += decoder.decode(); // flush any multi-byte char straddling the final chunk boundary
+      // flush any final frame the stream ended on without a trailing blank line (empty buf is a no-op)
+      drain(parseSseFrames(buf + '\n\n').frames);
+      return mapEventsToTurn(events);
+    } catch (e) {
+      throw normalizeError(e);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // --- fault injection (extra, beyond the DataClient interface) --------------------------------

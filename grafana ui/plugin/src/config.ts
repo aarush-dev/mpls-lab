@@ -1,13 +1,14 @@
 export interface AppConfig {
-  mode: 'mock' | 'api';
   apiBaseUrl: string;
   requestTimeoutMs: number;
-  showDemoBadge: boolean;
+  copilotBaseUrl: string;
+  copilotTimeoutMs: number;
 }
 
 export const appConfig: AppConfig = {
-  mode: 'api',
   apiBaseUrl: 'http://127.0.0.1:8000',
   requestTimeoutMs: 8000,
-  showDemoBadge: false,
+  // Copilot /chat is a separate service with a much longer budget (an investigation can take ~3 min).
+  copilotBaseUrl: 'http://127.0.0.1:8100',
+  copilotTimeoutMs: 180000,
 };

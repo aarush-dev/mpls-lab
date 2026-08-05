@@ -4,8 +4,7 @@ import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
 
-import { TopologyLink } from '../data/types';
-import { TopologyNodeLive } from '../data/MockDataClient';
+import { TopologyLink, TopologyNodeLive } from '../data/types';
 import { styleForRole, colorForState } from '../data/topologyStyles';
 import { computePositions, Point } from '../utils/topologyLayout';
 

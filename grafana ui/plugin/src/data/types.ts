@@ -55,6 +55,11 @@ export interface TopologyNode {
   vrfs?: string[];
 }
 
+/** TopologyNode + a live-at-cursor health state, without changing the shared base type. */
+export interface TopologyNodeLive extends TopologyNode {
+  state?: 'red' | 'amber' | 'green';
+}
+
 export interface TopologyLink {
   source: string;
   target: string;
@@ -99,11 +104,6 @@ export interface RecommendedAction {
   detail: string;
 }
 
-export interface Citation {
-  title: string;
-  href: string;
-}
-
 export interface Incident {
   id: string;
   status: 'open' | 'active' | 'resolved' | 'unknown';
@@ -131,37 +131,6 @@ export interface Prediction {
   timeToImpactSeconds: number;
   source: 'mock';
   issuedAtMs: number;
-}
-
-export interface CopilotMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  createdAt: string;
-  state?: 'draft' | 'sending' | 'complete' | 'error';
-}
-
-export interface CopilotResponse {
-  summary: string;
-  predictedIssue?: string;
-  confidence?: number;
-  timeToImpactSeconds?: number;
-  affectedScope: string[];
-  evidence: Evidence[];
-  rootCauseHypotheses: string[];
-  recommendedActions: RecommendedAction[];
-  citations: Citation[];
-  disclaimer?: string;
-}
-
-export interface Conversation {
-  id: string;
-  messages: CopilotMessage[];
-  context?: {
-    deviceIds?: string[];
-    incidentId?: string;
-    timeRange?: TimeRange;
-  };
 }
 
 export interface ApiError {
@@ -212,25 +181,86 @@ export interface InjectFaultRequest {
   duration?: number;
 }
 
-export interface CreateConversationRequest {
-  context?: Conversation['context'];
-  firstMessage?: string;
+// --- Copilot chat trace model (mirrors backend `event_wire`, ADR-0009) ------------------------
+// The real /chat streams a 7-type event trace, not the mock's structured response. Each event is
+// one `event_wire` dict: {type, ts, ...payload}. `CopilotTurn` is the folded result of one turn.
+
+/** Request body for the streaming `DataClient.chat`. `sessionId` is always sent (multi-turn memory,
+ * #66); `workspace` gates the shell/artifact tools (default false = read-only). History mode sets
+ * `start`/`end` (epoch seconds); Live mode omits both so the backend rolls its own window. */
+export interface ChatRequest {
+  question: string;
+  start?: number;
+  end?: number;
+  skills?: string[]; // reserved for a later picker (#66 out of scope)
+  sessionId: string;
+  workspace: boolean;
 }
 
-export interface SendMessageRequest {
-  conversationId: string;
-  message: CopilotMessage;
-  context?: Conversation['context'];
+interface ChatEventBase {
+  ts: string;
+}
+export interface UserMsgEvent extends ChatEventBase {
+  type: 'user_msg';
+  content: string;
+}
+export interface ThinkEvent extends ChatEventBase {
+  type: 'think';
+  content: string;
+}
+export interface ToolCallEvent extends ChatEventBase {
+  type: 'tool_call';
+  name: string;
+  arguments: Record<string, unknown>;
+  id: string;
+}
+export interface ToolResultEvent extends ChatEventBase {
+  type: 'tool_result';
+  id: string;
+  name: string;
+  content: string;
+  n: number;
+}
+export interface GateEvent extends ChatEventBase {
+  type: 'gate';
+  ok: boolean;
+  missing: string[];
+  retry: number;
+}
+export interface AssistantMsgEvent extends ChatEventBase {
+  type: 'assistant_msg';
+  content: string;
+}
+export interface ArtifactEvent extends ChatEventBase {
+  type: 'artifact';
+  name: string;
+  path?: string;
+  kind?: string;
+  [k: string]: unknown;
+}
+export type ChatEvent =
+  | UserMsgEvent
+  | ThinkEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | GateEvent
+  | AssistantMsgEvent
+  | ArtifactEvent;
+
+/** One `[source:offset]` citation lifted from the answer prose. */
+export interface TurnCitation {
+  id: string; // "metrics:0"
+  source: string; // "metrics"
+  offset: number; // 0
 }
 
-export interface SendMessageResponse {
-  message: CopilotMessage;
-  response?: CopilotResponse;
-}
-
-export interface CopilotFeedbackRequest {
-  conversationId: string;
-  messageId: string;
-  rating: 'up' | 'down';
-  note?: string;
+/** One folded copilot turn: the event trace, the final answer, its deduped citations, a
+ * citation-id → source tool_result map (so a chip can locate its evidence card), and the last
+ * gate outcome (undefined on a clarifying ask-back). */
+export interface CopilotTurn {
+  events: ChatEvent[];
+  answer: string;
+  citations: TurnCitation[];
+  citeMap: Record<string, ToolResultEvent>;
+  gate?: GateEvent;
 }

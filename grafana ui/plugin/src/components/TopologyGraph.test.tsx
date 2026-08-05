@@ -1,8 +1,7 @@
 import cytoscape from 'cytoscape';
 import topo from '../fixtures/topology.json';
 import { computePositions } from '../utils/topologyLayout';
-import { TopologyNodeLive } from '../data/MockDataClient';
-import { TopologyLink } from '../data/types';
+import { TopologyNodeLive, TopologyLink } from '../data/types';
 import { buildElements, applyLayout } from './TopologyGraph';
 
 // Grouped layout: applyLayout must place every node at its computed slot (cy.add alone does not reliably

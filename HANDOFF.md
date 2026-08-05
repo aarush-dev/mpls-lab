@@ -265,9 +265,21 @@ the param; single-fault path byte-identical, integrity — in-window/on-topic �
 case (the emulator collapses concurrency to one record + a count); a real emitter of n per-device
 records is **missing ticket #49**. Self-check: `python3 -m copilot.forensic.test_synthesis`.
 
-**Not done:** the emulator emitting n distinct per-fault records (#49); C1;
-Milestone B. Seeder does not set `node` on incidents, so `search_incidents`-by-device narrows to
-empty (S1 follow-up, noted in #46). Default `/chat` KB still needs a seeded `COPILOT_KB_URI`.
+T1 (#67, `grafana ui/plugin/src/data/`) — copilot chat data-layer seam. `DataClient.chat(request,
+onEvent) → Promise<CopilotTurn>` POSTs the real copilot `/chat` (separate service, `copilotBaseUrl`
+default :8100, `copilotTimeoutMs` 180s) and streams its SSE `event_wire` trace via `fetch` +
+`ReadableStream` reader (not EventSource — GET-only). Pure `parseSseFrames` + `mapEventsToTurn` in
+`data/copilotChat.ts`; trace model (`ChatEvent` union, `CopilotTurn`) in `types.ts`. **Mock mode +
+`MockDataClient` + `telemetrySynth` + `CopilotChat` deleted** — the data client always talks to real
+backends, no path can serve a canned answer. `config.mode`/`showDemoBadge` gone. `CopilotPage` is a
+placeholder until T2/#68 rebuilds it on the seam. Self-check: `yarn typecheck && yarn test:ci` (104
+tests). Contract docs (`grafana ui/{API_CONTRACT,INTEGRATION_GUIDE}.md`) updated.
+
+**Not done:** copilot UI rebuild on the `chat` seam (T2–T6/#68–#72: hook+page, trace+citations,
+multi-turn+localStorage, side panel, backend `workspace` flag); the emulator emitting n distinct
+per-fault records (#49); C1; Milestone B. Seeder does not set `node` on incidents, so
+`search_incidents`-by-device narrows to empty (S1 follow-up, noted in #46). Default `/chat` KB still
+needs a seeded `COPILOT_KB_URI`.
 
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.

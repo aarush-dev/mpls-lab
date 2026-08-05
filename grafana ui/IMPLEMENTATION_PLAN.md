@@ -1,12 +1,12 @@
 # Frontend Implementation Plan — Grafana NOC Copilot App Plugin
 
 > **Scope at plan time: frontend + mock data only** (§0–§14 below describe that build, M1–M5).
-> **Since then (M6, done — see §12):** `api` mode was built. `HttpDataClient` implements the full
-> `DataClient` interface against the live `dataapi` FastAPI service + fault-injection routes; it is
-> now the default. Mock mode still exists as a fallback. **Still not built:** the ML prediction model
-> and the Copilot LLM backend (separate, unbuilt component) — Copilot always runs against the mock,
-> in both modes, and predictions/incidents are derived from ground-truth `/labels`, not a real model.
-> Plan-first + milestone-gated per `CLAUDE.md`. Code is ground truth over docs.
+> **Since then (M6, done — see §12):** `api` mode was built, then (T1/#67) mock mode was deleted
+> entirely. `HttpDataClient` is now the only `DataClient` implementation, against the live `dataapi`
+> FastAPI service + fault-injection routes. **Still not built:** the ML prediction model — predictions
+> /incidents are derived from ground-truth `/labels`, not a real model. Copilot chat is now real
+> (T1/#67 wired `HttpDataClient.chat` to the live `:8100` copilot service via SSE) — no more mock
+> replies. Plan-first + milestone-gated per `CLAUDE.md`. Code is ground truth over docs.
 
 ---
 
@@ -288,10 +288,19 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   is kept as instant visual feedback layered on top, rolled back if the real inject fails. `dataapi`
   gained CORS (`localhost:3000` + `127.0.0.1:3000`) and must run single-worker (`./start.sh`) for the
   in-memory fault registry. Build green, `tsc --noEmit` clean, 109 jest tests pass.
+- **T1/#67 Delete mock, wire real copilot chat — DONE.** `MockDataClient.ts`, its test, `telemetrySynth.ts`,
+  and `CopilotChat.tsx` deleted — no mock mode anywhere. `config.ts` has no `mode`/`showDemoBadge`;
+  `DataClientContext.tsx` always builds one `HttpDataClient`. The 4 copilot methods
+  (`getConversation`/`createConversation`/`sendMessage`/`submitFeedback`) replaced by one
+  `chat(request: ChatRequest, onEvent): Promise<CopilotTurn>`, streaming the real `event_wire` SSE
+  trace from the copilot service (`:8100`, separate from `dataapi`'s `:8000`) via `fetch` +
+  `ReadableStream` (not `EventSource` — GET-only). Pure helpers `parseSseFrames`/`mapEventsToTurn` in
+  `data/copilotChat.ts`. `CopilotPage.tsx` is now a placeholder pending T2/#68 rebuild on the `chat`
+  seam.
 
-**Still not built:** the ML prediction model and the Copilot LLM backend — separate, unbuilt
-component. Predictions/incidents remain derived from ground-truth `/labels`, not a real predictor;
-Copilot remains mock in both modes. Kept unblocked by the `DataClient` seam.
+**Still not built:** the ML prediction model — separate, unbuilt component. Predictions/incidents
+remain derived from ground-truth `/labels`, not a real predictor. Copilot chat is now real (T1/#67);
+the UI consuming it lands in T2/#68. Kept unblocked by the `DataClient` seam.
 
 ---
 

@@ -2,7 +2,7 @@
 
 The `DataClient` interface (`plugin/src/data/DataClient.ts`) is the contract between UI and data layer. Domain types live in `plugin/src/data/types.ts`.
 
-Two implementations: `MockDataClient` (`plugin/src/data/MockDataClient.ts`, bundled fixture JSON) and `HttpDataClient` (`plugin/src/data/HttpDataClient.ts`, live `dataapi`), selected by `config.ts` (`mode`, defaults `'api'`).
+One implementation: `HttpDataClient` (`plugin/src/data/HttpDataClient.ts`, live `dataapi` + copilot). No mock mode.
 
 ## Interface
 
@@ -16,14 +16,11 @@ interface DataClient {
   getFlows(filters: Filters): Promise<FlowRecord[]>;
   getIncidents(filters: Filters): Promise<Incident[]>;
   getPredictions(filters: Filters): Promise<Prediction[]>;
-  getConversation(id: string): Promise<Conversation>;
-  createConversation(request: CreateConversationRequest): Promise<Conversation>;
-  sendMessage(request: SendMessageRequest): Promise<SendMessageResponse>;
-  submitFeedback(request: CopilotFeedbackRequest): Promise<void>;
+  chat(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<CopilotTurn>;
 }
 ```
 
-`MockDataClient` also exposes `setCursor(n)` to move its mock "now" over the fixture tape. Nothing calls it since the old demo-clock auto-play was replaced by `TimeControl` (see README "Data modes") — `MockDataClient` now stays pinned at cursor 0 unless a caller sets it explicitly. Not part of `DataClient`; `HttpDataClient` has no equivalent (a live backend has its own notion of "now"). Callers that want it should feature-detect: `if ('setCursor' in client) ...`.
+`setCursor`/`getActiveAlerts` don't exist — those were mock-only hooks on the deleted `MockDataClient`. `HttpDataClient` never implemented them; a live backend has its own notion of "now". Callers still feature-detect: `if ('setCursor' in client) ...`.
 
 ## Shared types (`types.ts`)
 
@@ -67,18 +64,11 @@ Response: `Incident { id, status: 'open'|'active'|'resolved'|'unknown', faultTyp
 Response: `Prediction { id, deviceId, faultType, confidence, timeToImpactSeconds, source: 'mock', issuedAtMs }`.
 `HttpDataClient`: derived client-side from `GET /labels` — no ML/prediction endpoint exists. Only rows in their pre-impact window (`t_start <= now < t_impact`) are surfaced; `confidence` ramps linearly from 0 at `t_start` to 1 at `t_impact`. These are ground-truth-derived, not model output — `source` stays `'mock'` on the shared type since no real predictor exists.
 
-### `getConversation(id: string): Promise<Conversation>`
-### `createConversation(request: CreateConversationRequest): Promise<Conversation>`
-### `sendMessage(request: SendMessageRequest): Promise<SendMessageResponse>`
-### `submitFeedback(request: CopilotFeedbackRequest): Promise<void>`
-`Conversation { id, messages: CopilotMessage[], context?: { deviceIds?, incidentId?, timeRange? } }`.
-`CopilotMessage { id, role: 'user'|'assistant', content, createdAt, state?: 'draft'|'sending'|'complete'|'error' }`.
-`CreateConversationRequest { context?; firstMessage? }`.
-`SendMessageRequest { conversationId, message: CopilotMessage, context? }`.
-`SendMessageResponse { message: CopilotMessage; response?: CopilotResponse }`.
-`CopilotResponse { summary, predictedIssue?, confidence?, timeToImpactSeconds?, affectedScope: string[], evidence: Evidence[], rootCauseHypotheses: string[], recommendedActions: RecommendedAction[], citations: Citation[], disclaimer? }`.
-`CopilotFeedbackRequest { conversationId, messageId, rating: 'up'|'down', note? }`.
-`HttpDataClient`: no matching endpoint in `dataapi/app.py` (that service is data-only, no LLM/copilot route) — all 4 methods forward to a private `MockDataClient` instance regardless of app mode. This group is unimplemented server-side; the ML prediction + Copilot LLM backend is a separate, unbuilt component (other team).
+### `chat(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<CopilotTurn>`
+Request: `ChatRequest { question: string; start?: number; end?: number; skills?: string[]; sessionId: string; workspace: boolean }`. `sessionId` is always sent (multi-turn memory); `workspace` gates the shell/artifact tools (default false = read-only). History mode sets `start`/`end` (epoch seconds); Live mode omits both so the backend rolls its own window.
+`HttpDataClient`: `POST ${copilotBaseUrl}/chat` (separate service, default `http://127.0.0.1:8100`, not `dataapi`'s `:8000`) with body `{ question, session_id, workspace, start?, end? }`. Streams the response as SSE via `fetch` + a `ReadableStream` reader (not `EventSource`, which is GET-only). `copilotTimeoutMs` (180s) backstops the whole call; an unreachable service rejects via `normalizeError` — the UI shows an honest error, never a fake reply.
+Each SSE frame is one `event_wire` dict (ADR-0009): `ChatEvent = UserMsgEvent | ThinkEvent | ToolCallEvent | ToolResultEvent | GateEvent | AssistantMsgEvent | ArtifactEvent`, each `{ts, type, ...payload}`. `onEvent` fires per event as it streams. The resolved `CopilotTurn { events, answer, citations, citeMap, gate? }` folds the trace: `answer` is the last `assistant_msg`; `citations: TurnCitation[]` (`{id, source, offset}`) are `[source:offset]` refs pulled from the answer, deduped in first-appearance order; `citeMap` maps each citation id to the `tool_result` event that produced it; `gate` is the last gate outcome (undefined on a clarifying ask-back).
+Transport helpers live in `data/copilotChat.ts`, pure and unit-tested: `parseSseFrames(buffer)` (incremental `\n\n`-delimited SSE splitter, carries partial frames forward) and `mapEventsToTurn(events)` (the folding logic above).
 
 ## Fault injection (`FaultInjectionPage.tsx` only — not part of `DataClient`)
 
@@ -89,13 +79,12 @@ Response: `Prediction { id, deviceId, faultType, confidence, timeToImpactSeconds
 - `getActiveFaults(): Promise<unknown>` → `GET /faults/active` — currently-running injections.
 - `revertFault(scenarioId): Promise<unknown>` → `POST /faults/revert/{scenario_id}` — cancels a running injection early.
 
-`MockDataClient` implements none of these; `FaultInjectionPage` feature-detects and falls back to visual-only escalation when they're absent.
+`HttpDataClient` exposes all 4; `FaultInjectionPage` feature-detects and falls back to visual-only escalation only if they're absent.
 
 ## Supporting types
 
 - `Evidence { label, detail, source: DataSourceKind }`
 - `RecommendedAction { title, detail }`
-- `Citation { title, href }`
 - `ApiError { status, code, message, retryable, requestId? }` — declared in `types.ts`; `HttpDataClient` throws these via `errors.ts` `normalizeError` on any fetch failure (`{ detail }` FastAPI body → `message`).
 
 ## `dataapi/app.py` reference (endpoints wired to the plugin)
