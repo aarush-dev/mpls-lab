@@ -3,7 +3,7 @@ import React, { PropsWithChildren } from 'react';
 import { NavLink, useRouteMatch } from 'react-router-dom';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2 } from '@grafana/ui';
+import { useStyles2, Button } from '@grafana/ui';
 
 import { TimeControl } from './TimeControl';
 import { LabStatusBadge } from './LabStatusBadge';
@@ -21,7 +21,7 @@ const NAV_LINKS = [
 ];
 
 /** Top-level layout: title + lab status + time control, nav, and the routed page content. */
-export function AppShell({ children }: PropsWithChildren<{}>) {
+export function AppShell({ children, onToggleCopilot }: PropsWithChildren<{ onToggleCopilot?: () => void }>) {
   const styles = useStyles2(getStyles);
   const { url } = useRouteMatch();
 
@@ -32,6 +32,11 @@ export function AppShell({ children }: PropsWithChildren<{}>) {
         <div className={styles.controls}>
           <LabStatusBadge />
           <TimeControl />
+          {onToggleCopilot && (
+            <Button variant="secondary" size="sm" icon="comment-alt" onClick={onToggleCopilot}>
+              Copilot
+            </Button>
+          )}
         </div>
       </div>
       <nav className={styles.nav}>

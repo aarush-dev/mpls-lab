@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 // Grafana 11.1 ships react-router-dom v5 (Switch/Route/useRouteMatch), NOT v6.
 // Use the v5 API — Routes/element do not exist on the host-provided module.
 import { Route, Switch, useRouteMatch } from 'react-router-dom';
@@ -14,6 +14,8 @@ import { StatusPage } from './pages/StatusPage';
 
 import { FaultInjectionPage } from './pages/FaultInjectionPage';
 import { AppShell } from './components/AppShell';
+import { CopilotPanel } from './components/CopilotPanel';
+import { CopilotChatProvider } from './hooks/CopilotChatContext';
 import { AlertToasterProvider, useToaster } from './components/AlertToaster';
 import { AppProvider, useAppDispatch, useAppState } from './state/AppContext';
 import { DataClientProvider, useDataClient } from './data/DataClientContext';
@@ -25,7 +27,9 @@ export function App(props: AppRootProps) {
     <AppProvider>
       <DataClientProvider>
         <AlertToasterProvider>
-          <AppInner {...props} />
+          <CopilotChatProvider>
+            <AppInner {...props} />
+          </CopilotChatProvider>
         </AlertToasterProvider>
       </DataClientProvider>
     </AppProvider>
@@ -40,6 +44,9 @@ function AppInner(_props: AppRootProps) {
   const dataClient = useDataClient();
   const { notify } = useToaster();
   void dataClient; // data reads happen per-page; kept here only for future app-level hooks.
+  // T5/#72: global copilot side panel — open state lives here so the top-bar toggle (in AppShell)
+  // and the panel itself share it. Panel mounts once above every route.
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   // Fault escalation timers: an injected fault stays healthy ~5s, then goes 'predicted' (amber +
   // T-minus alert), then 'down' (red) after its leadSec. Instant visual feedback layered on top of
@@ -122,7 +129,8 @@ function AppInner(_props: AppRootProps) {
   }, [injectedFaults, notify]);
 
   return (
-    <AppShell>
+    <AppShell onToggleCopilot={() => setCopilotOpen((v) => !v)}>
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
       <Switch>
         <Route exact path={path} component={OverviewPage} />
         <Route path={`${path}/topology`} component={TopologyPage} />

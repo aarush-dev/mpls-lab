@@ -289,8 +289,17 @@ cited evidence row; clicking it expands + scrolls to + highlights that row insid
 card (via the turn's `citeMap` from T1). Honest to the sync backend loop — cards burst in after
 "investigating…", not typed live. Self-check: `yarn typecheck && yarn test:ci` (112 tests).
 
-**Not done:** copilot UI rest (T4–T6/#70–#72:
-multi-turn+localStorage, side panel, backend `workspace` flag); the emulator emitting n distinct
+T4/T6 (#70/#71, commit 39820fdb) — multi-turn session (shared id, `localStorage` thread persist,
+New chat, Stop) + backend `workspace` flag with UI toggle and inline/download artifact rendering.
+
+T5 (#72, `hooks/CopilotChatContext.tsx`, `components/{CopilotChat,CopilotPanel}.tsx`) — global
+collapsible side panel. `useCopilotChat` lifted into `CopilotChatProvider` (mounted once in
+`App.tsx`) so the /copilot tab and the panel are ONE conversation off the same hook instance; the
+chat surface extracted to `CopilotChat` and reused by both. A top-bar "Copilot" button (`AppShell`)
+toggles a `@grafana/ui` `Drawer` that mounts above every route. Self-check: `yarn typecheck &&
+yarn test:ci` (122 tests).
+
+**Not done:** the emulator emitting n distinct
 per-fault records (#49); C1; Milestone B. Seeder does not set `node` on incidents, so
 `search_incidents`-by-device narrows to empty (S1 follow-up, noted in #46). Default `/chat` KB still
 needs a seeded `COPILOT_KB_URI`.
