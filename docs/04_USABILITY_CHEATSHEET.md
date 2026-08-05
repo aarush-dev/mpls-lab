@@ -87,6 +87,15 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=interface_ifHCInOctets" | j
 # Expected: > 0 (telemetry flowing from nodes)
 ```
 
+### Step 6: Start the copilot runtime (api + predictor + forensic trigger) (#55)
+```bash
+cd /root/LAB && ./copilot-up.sh
+# Brings up 3 procs, preflights dataapi :8000, verifies + predictor heartbeat.
+# api: http://127.0.0.1:8100  logs: /tmp/copilot-{api,predictor,trigger}.log
+# Boot autostart: sudo systemctl enable --now noc-copilot   (After=noc-lab.service)
+# Stop the procs (systemctl stop won't reach them — disowned): pkill -f 'copilot\.(emulator\.predictor|forensic\.trigger)'
+```
+
 ---
 
 ## 2. Observing the Network — The Dashboard

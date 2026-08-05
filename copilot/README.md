@@ -97,6 +97,30 @@ returns the config-selected `OpenAIClient` (R1) — a dead endpoint surfaces per
 as a startup `503`. The live end-to-end run is E1/#42. Self-check (stubbed, over HTTP):
 `python3 -m copilot.api.test_api`.
 
+## Runtime daemon (R4b/R5a, #55)
+
+The ADR-0014 pipeline (predict every `predict_interval_s` → alert → forensic case) runs as
+3 headless procs: the api (uvicorn :8100), the predictor loop
+(`python3 -m copilot.emulator.predictor`), and the forensic trigger
+(`python3 -m copilot.forensic.trigger`). Each loop has a `_main` entrypoint that reads the
+shared ledger + dataapi from env, wires the trigger's `handle` from the same `api.app.get_*`
+builders the request path uses, and stops on a `SIGTERM` delivered to that proc (e.g. `pkill -f
+copilot.emulator.predictor`). Note: `copilot-up.sh` `nohup … & disown`s the procs, so
+`systemctl stop noc-copilot` does NOT reach them (`KillMode=process` + disown reparents them out
+of the unit cgroup) — stop them by `pkill`, or split into per-proc units (the ceiling below).
+`run_predictor` re-reads `/labels`
+**every tick** (#55): a fault injected after boot is seen within one interval; a transient
+`/labels` outage skips the tick, never kills the loop.
+
+```bash
+./copilot-up.sh          # brings up all 3, preflights dataapi :8000, verifies + heartbeats
+```
+
+Boot autostart: `noc-copilot.service` (oneshot, `After=noc-lab.service`) runs `copilot-up.sh`.
+No `Restart=` — a dead proc goes unnoticed until the next `copilot-up.sh` (ceiling: per-proc
+`Restart=always` units). Self-checks: `python3 -m copilot.emulator.test_predictor`,
+`python3 -m copilot.forensic.test_trigger`.
+
 ## Tools (I1)
 
 `copilot/tools/registry.py` holds `TOOLS` (read tools → adapter method),

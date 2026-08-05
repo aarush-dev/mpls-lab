@@ -29,6 +29,8 @@ ledger.db
 copilot/sessions/
 copilot/cases/
 copilot/ledger.db
+forensic-cursor.json
+copilot/forensic-cursor.json
 
 # Python / tooling cruft
 __pycache__/

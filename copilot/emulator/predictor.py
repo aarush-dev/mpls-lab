@@ -30,16 +30,50 @@ def predict_once(cfg, labels: list[dict], ledger, now: str, *, drift_tick: int =
 
 def run_predictor(cfg, base_url: str, ledger, *, now_fn, stop_fn,
                   sleep=time.sleep, fetch=None) -> int:
-    """The periodic predictor (ADR-0014). Fetch the ground-truth timeline ONCE (a run's timeline is
-    fixed), then until `stop_fn()`: predict on the window ending `now_fn()`, persist, sleep
-    `cfg.predict_interval_s` (its first reader). `now_fn`/`stop_fn`/`sleep`/`fetch` are injected so
-    a test drives the loop deterministically; in production `now_fn` is a UTC clock, `stop_fn` a
-    shutdown flag, `sleep` is time.sleep. Returns the tick count. ponytail: a sleep-loop, not cron;
-    restart-safety rides persist's alert_id idempotency (ADR-0014), no separate cursor needed yet."""
-    labels = fetch_labels(base_url, fetch=fetch)
+    """The periodic predictor (ADR-0014). Until `stop_fn()`: re-read the ground-truth timeline,
+    predict on the window ending `now_fn()`, persist, sleep `cfg.predict_interval_s` (its first
+    reader). `now_fn`/`stop_fn`/`sleep`/`fetch` are injected so a test drives the loop
+    deterministically; in production `now_fn` is a UTC clock, `stop_fn` a shutdown flag, `sleep`
+    is time.sleep. Returns the tick count. #55: the timeline is fetched EVERY tick, not once at
+    boot -- a fault injected after the daemon started would otherwise be invisible forever (the loop
+    only ever saw the boot snapshot). ponytail: a sleep-loop, not cron; restart-safety rides
+    persist's alert_id idempotency (ADR-0014), no separate cursor needed yet."""
     tick = 0
     while not stop_fn():
-        predict_once(cfg, labels, ledger, now_fn(), drift_tick=tick)
+        # #55: one try guards fetch+predict so a transient dataapi outage skips the tick instead of
+        # silently killing the daemon (the pipeline-goes-dead ceiling this ticket closes). ponytail:
+        # broad except by design -- a daemon must outlive any single-tick fault; upgrade path is a
+        # typed retry/backoff on the transport if a specific error class needs distinct handling.
+        try:
+            predict_once(cfg, fetch_labels(base_url, fetch=fetch), ledger, now_fn(), drift_tick=tick)
+        except Exception as e:  # noqa: BLE001 -- keep-alive is the point
+            print(f"predictor tick {tick} failed (transient?): {e}", flush=True)
         tick += 1
         sleep(cfg.predict_interval_s)
     return tick
+
+
+def _main():  # pragma: no cover -- #55 process entrypoint, exercised by copilot-up.sh, not units
+    """Run the predictor as a headless daemon (copilot-up.sh / noc-copilot.service). Wall-clock UTC
+    now, ledger + dataapi from env (shared with the trigger + api), SIGTERM flips the stop flag.
+    ponytail: SIGTERM lands within one predict_interval_s (PEP 475 retries the sleep), fine for a
+    ~10s cadence; upgrade path is a threading.Event with a wakeable wait if instant stop matters."""
+    import os
+    import signal
+    from datetime import datetime, timezone
+
+    from copilot.config import load
+    from copilot.memory import Ledger
+
+    cfg = load()
+    base_url = os.environ.get("COPILOT_DATAAPI_URL", cfg.dataapi_url)
+    ledger = Ledger(os.environ.get("COPILOT_LEDGER_PATH", "ledger.db"))
+    stop = {"v": False}
+    signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("v", True))
+    run_predictor(cfg, base_url, ledger,
+                  now_fn=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  stop_fn=lambda: stop["v"])
+
+
+if __name__ == "__main__":
+    _main()

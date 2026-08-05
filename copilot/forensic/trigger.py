@@ -109,3 +109,33 @@ def run_forensic(cfg, ledger, cursor: Cursor, handle, *, stop_fn, sleep=time.sle
         tick += 1
         sleep(cfg.predict_interval_s)
     return tick
+
+
+def _main():  # pragma: no cover -- #55 process entrypoint, exercised by copilot-up.sh, not units
+    """Run the forensic trigger as a headless daemon (copilot-up.sh / noc-copilot.service). Shares
+    the ledger with the predictor + api; the Cursor persists the restart-safe position. The
+    production `handle` is R5b's case creator, wired from the SAME dependency builders the api uses
+    (copilot.api.app.get_*) so daemon and request path stay one config. SIGTERM flips the stop flag.
+    Function-local imports: api.app -> forensic.chat -> here would cycle at module load."""
+    import os
+    import signal
+
+    from copilot.api.app import (get_adapter, get_cases_root, get_kg, get_llm,
+                                 get_retriever, get_skills)
+    from copilot.config import load
+    from copilot.forensic.case import make_handler
+    from copilot.memory import Ledger
+
+    cfg = load()
+    ledger = Ledger(os.environ.get("COPILOT_LEDGER_PATH", "ledger.db"))
+    cursor = Cursor(os.environ.get("COPILOT_CURSOR_PATH", "forensic-cursor.json"))
+    handle = make_handler(live_adapter=get_adapter(cfg), llm=get_llm(cfg), cfg=cfg,
+                          cases_root=get_cases_root(), retriever=get_retriever(cfg),
+                          skills=get_skills(cfg), kg=get_kg(cfg))
+    stop = {"v": False}
+    signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("v", True))
+    run_forensic(cfg, ledger, cursor, handle, stop_fn=lambda: stop["v"])
+
+
+if __name__ == "__main__":
+    _main()

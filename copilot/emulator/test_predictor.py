@@ -3,7 +3,7 @@
 Prior art: dataapi/check_dataset.py (assert + __main__, no framework).
 Seams under test:
   predict_once(cfg, labels, ledger, now, drift_tick) -> one tick: predict on the window, persist
-  run_predictor(cfg, base_url, ledger, ...) -> the periodic driver (fetch once, tick, persist)
+  run_predictor(cfg, base_url, ledger, ...) -> the periodic driver (re-fetch, tick, persist)
   the gate-stress demonstration: heavy blocks more than oracle over one scenario set (acceptance #3)
 Run:  python3 -m copilot.emulator.test_predictor
 """
@@ -71,6 +71,45 @@ def test_run_predictor_walks_the_timeline_dedups_and_evolves_drift():
     assert ranks[0] < ranks[1], f"drift must climb across the run: {ranks}"   # A@tick0 < B@tick3
 
 
+def test_run_predictor_refetches_labels_each_tick_so_a_late_fault_is_seen():
+    # #55 staleness fix: the timeline is re-read EVERY tick, not once at boot. A fault injected
+    # after the daemon started must still produce a record within one tick. Fetch-once (the bug)
+    # sees the boot snapshot [] forever -> nothing ever fires.
+    calls = {"n": 0}
+    def fetch(_url):
+        calls["n"] += 1
+        return [] if calls["n"] == 1 else [EP_A]        # empty at boot; EP_A appears on tick 2
+    nows = ["2026-06-21T14:01:00Z"] * 3                  # all inside EP_A's active window
+    cfg = _cfg(emulate_pa=True, error_profile="oracle", predict_interval_s=10)
+    with tempfile.TemporaryDirectory() as d:
+        led = Ledger(os.path.join(d, "l.db"))
+        run_predictor(cfg, "http://x", led, now_fn=_seq(nows),
+                      stop_fn=_seq([False] * 3 + [True]), sleep=lambda s: None, fetch=fetch)
+        rows = led.by_time("0", "9")
+    assert calls["n"] == 3, f"labels must be re-fetched every tick, not once: {calls['n']}"
+    assert len(rows) == 1, "a fault injected after boot still fires (dedup across tick2,3 -> 1 row)"
+
+
+def test_run_predictor_survives_a_transient_labels_fetch_failure():
+    # #55: a per-tick fetch that raises (transient dataapi outage) must NOT kill the daemon -- the
+    # tick is skipped, the loop lives on, and a later good tick still fires.
+    calls = {"n": 0}
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("dataapi 503")           # transient outage on tick 1
+        return [EP_A]
+    nows = ["2026-06-21T14:01:00Z"] * 2
+    cfg = _cfg(emulate_pa=True, error_profile="oracle", predict_interval_s=10)
+    with tempfile.TemporaryDirectory() as d:
+        led = Ledger(os.path.join(d, "l.db"))
+        ticks = run_predictor(cfg, "http://x", led, now_fn=_seq(nows),
+                              stop_fn=_seq([False] * 2 + [True]), sleep=lambda s: None, fetch=fetch)
+        rows = led.by_time("0", "9")
+    assert ticks == 2, "the outage tick is counted and the loop keeps going"
+    assert len(rows) == 1, "the good tick after the outage still fires"
+
+
 # ---- the emulator's error_profile changes the REAL gate outcome (acceptance #3, honest) --------
 # HONEST SCOPE (spec-review finding, R4b): the ONLY deterministic lever a Prediction Record pulls
 # on `run_gate` is `abstain` (ADR-0008 §Nuances) -- and abstain RELIEVES the gate, it does not
@@ -104,6 +143,8 @@ def test_emulator_profile_drives_the_real_gate_via_abstain():
 def _run():
     test_predict_once_persists_an_active_fault_and_skips_a_quiet_window()
     test_run_predictor_walks_the_timeline_dedups_and_evolves_drift()
+    test_run_predictor_refetches_labels_each_tick_so_a_late_fault_is_seen()
+    test_run_predictor_survives_a_transient_labels_fetch_failure()
     test_emulator_profile_drives_the_real_gate_via_abstain()
     print("copilot.emulator.test_predictor OK")
 
