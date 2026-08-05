@@ -91,10 +91,11 @@ SYSTEM_PROMPT = (
     "tools (search_runbooks, search_incidents) to find the matching runbook and similar "
     "past incidents (pass a device to search_incidents to focus on nearby topology). Use "
     "walk_topology_graph to see the blast-radius / downstream devices of a fault and their "
-    "live status. Cite evidence by its bracketed id EXACTLY as it appears in the tool "
-    "result (telemetry e.g. [metrics:0], [events:2], [flows:0]; a runbook/incident e.g. "
-    "[runbook-mpls-ldp]) -- only cite an id you actually retrieved, list each separately, "
-    "NEVER a range like [metrics:3-5]. Every sentence that names a device MUST "
+    "live status. Cite evidence by the bracketed id shown at the START of each tool-result "
+    "line, EXACTLY as printed (telemetry e.g. [metrics:0], [events:2], [flows:0]; a "
+    "runbook/incident e.g. [incident-mpls-underlay-failure]; topology e.g. [topo:r2]) -- "
+    "only cite an id you actually retrieved, list each separately, NEVER a range like "
+    "[metrics:3-5]. Every sentence that names a device MUST "
     "carry such a citation, or it is rejected as unsupported. If the request is too vague "
     "to investigate, ask one clarifying question instead of calling a tool."
 )
@@ -174,7 +175,7 @@ def parse_tool_calls(content: str | None) -> tuple[ToolCall, ...]:
     return (ToolCall(name=str(name), arguments=args, id="parsed_0"),)
 
 
-CITE_RE = re.compile(r"\[[a-z_]+:\d+\]")   # evidence id shape the tools emit ([metrics:0], [events:2])
+CITE_RE = re.compile(r"\[[^\[\]]+\]")   # any bracketed id (matches gate.CITE_RE): [metrics:0], [runbook-mpls-ldp], [topo:pe1]
 
 
 def compact_history(history: list[dict], *, max_chars: int) -> list[dict]:
