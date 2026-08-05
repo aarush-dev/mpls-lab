@@ -210,14 +210,16 @@ curl -X POST 127.0.0.1:8000/faults/inject -H 'Content-Type: application/json' \
 # -> {"scenario_id": "node_failure-ce_branch3-<hex8>", "status": "injecting"}
 # 404 unknown scenario | 422 target role invalid for that scenario | 409 target already active
 
-# Currently-running injections
+# Currently-running injections; each row carries the live lifecycle:
+#   phase (buildup|impact|reverting), lead (s), t_impact (future ISO ts),
+#   alongside scenario_id, scenario, target, started_at, duration.
 curl localhost:8000/faults/active
 
 # Early revert (cancels the hold; orchestrator's own finally still reverts the lab)
 curl -X POST localhost:8000/faults/revert/node_failure-ce_branch3-<hex8>
 ```
 
-`run_scenario` gained an optional `cancel: threading.Event` param for this early-revert path — the guaranteed-revert `try/finally` is unchanged.
+`run_scenario` gained an optional `cancel: threading.Event` param for this early-revert path — the guaranteed-revert `try/finally` is unchanged. It also takes an optional `status: dict`: when given, it reports its phase into it at each transition (`buildup` with `lead`+`t_impact`, `impact`, `reverting`) via GIL-atomic key writes — the `/faults/active` registry reads that dict lock-free to project the live phase. Passing no `status` leaves behaviour unchanged (CLI/campaign callers).
 
 ### /datasets — The Main Event: Labeled Parquet
 

@@ -703,7 +703,7 @@ def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
 
 
 def run_scenario(name, target, severity="medium", duration=90,
-                 dry_run=False, cancel=None):
+                 dry_run=False, cancel=None, status=None):
     """buildup -> impact -> hold -> revert state machine for one live injection.
 
     Every scenario draws a precursor lead from the shared prior, floored to a
@@ -718,7 +718,12 @@ def run_scenario(name, target, severity="medium", duration=90,
     cancel: optional threading.Event. Set during buildup OR hold it wakes the wait
     and falls through to the same revert+clear (early-revert). If it fires before
     impact the physical injector never runs; the overlay is still cleared and a
-    label is still written with t_impact = t_start + lead."""
+    label is still written with t_impact = t_start + lead.
+
+    status: optional mutable dict. If given, phase is reported into it at each
+    transition -- buildup (with lead + t_impact), impact, reverting -- via plain
+    key writes (GIL-atomic, no lock). A caller (faults_api registry) can read it
+    concurrently to project the live lifecycle. None => behaviour unchanged."""
     if name not in SCENARIOS:
         raise SystemExit(f"unknown scenario '{name}'. choices: {list(SCENARIOS)}")
     spec = SCENARIOS[name](target, severity, duration)
@@ -743,6 +748,12 @@ def run_scenario(name, target, severity="medium", duration=90,
                       "type": spec["type"], "t_start": iso(t_start),
                       "lead_s": round(lead, 1), "overlay": overlay is not None,
                       "dry_run": dry_run}), flush=True)
+
+    def _status(**kw):
+        if status is not None:
+            status.update(kw)  # GIL-atomic key writes; no lock
+
+    _status(phase="buildup", lead=round(lead, 1), t_impact=iso(t_impact))
 
     def _wait(sec):
         cancel.wait(sec) if cancel is not None else time.sleep(sec)
@@ -797,6 +808,7 @@ def run_scenario(name, target, severity="medium", duration=90,
             if spec.get("extra"):
                 spec["extra"].apply()
             fired = True
+            _status(phase="impact")
             print(json.dumps({"event": "impact", "scenario_id": scenario_id,
                               "t_impact": iso(t_impact), "method": impact_method}),
                   flush=True)
@@ -807,6 +819,7 @@ def run_scenario(name, target, severity="medium", duration=90,
         print(json.dumps({"event": "scenario_error", "scenario_id": scenario_id,
                           "error": error}), flush=True)
     finally:
+        _status(phase="reverting")  # covers early-revert-before-impact too
         # Revert the physical action and clear the overlay INDEPENDENTLY: a failed
         # physical revert must never leave the overlay live on the controller.
         if fired:

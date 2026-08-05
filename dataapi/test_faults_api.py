@@ -4,6 +4,7 @@ The mocked run_scenario blocks on the cancel Event so a fault stays "active"
 until reverted -- exactly how the real one holds for `duration`. No lab needed.
 """
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,7 +19,10 @@ def client(monkeypatch):
     # Fake run_scenario: block on cancel so the target reads as busy until
     # revert (or the test process ends). Never touches docker/VM.
     def fake_run_scenario(name, target, severity="medium", duration=90,
-                          dry_run=False, cancel=None):
+                          dry_run=False, cancel=None, status=None):
+        if status is not None:  # mimic the real buildup->impact transition
+            status.update(phase="impact", lead=45.0,
+                          t_impact="2099-01-01T00:00:45+00:00")
         if cancel is not None:
             cancel.wait(timeout=30)
         return {"scenario_id": f"{name}-{target}-fake"}
@@ -43,6 +47,23 @@ def test_inject_registers_active(client):
     active = client.get("/faults/active").json()
     assert [a["scenario_id"] for a in active] == [sid]
     assert active[0]["target"] == "ce_branch1"
+
+
+def test_active_reports_lifecycle_phase(client):
+    # #85: /faults/active projects the real phase + lead + future t_impact.
+    r = client.post("/faults/inject", json={"scenario": "congestion", "target": "ce_branch1"})
+    sid = r.json()["scenario_id"]
+    # worker fills lead/t_impact just after thread start -- poll instead of racing it.
+    for _ in range(100):
+        row = client.get("/faults/active").json()[0]
+        if row["lead"] is not None:
+            break
+        time.sleep(0.01)
+    assert row["phase"] in ("buildup", "impact")
+    assert row["lead"] == 45.0
+    assert row["t_impact"] > row["started_at"]          # impact is in the future
+    client.post(f"/faults/revert/{sid}")
+    assert client.get("/faults/active").json() == []    # reverting drops the row
 
 
 def test_double_inject_same_target_409(client):
@@ -136,6 +157,23 @@ def test_early_revert_during_buildup_skips_fire(fake_lab):
     assert posts == [("apply", "ce_branch1", "congestion"),          # overlay still cleared
                      ("revert", "ce_branch1")]
     assert row["error"] == "early_revert_before_impact"              # not a real injection
+
+
+def test_status_dict_tracks_phases(fake_lab):
+    # #85: run_scenario reports buildup->impact->reverting into the status dict.
+    st = {}
+    row = orchestrator.run_scenario("congestion", "ce_branch1", duration=1, status=st)
+    assert st["phase"] == "reverting"                    # ends reverting
+    assert 30.0 <= st["lead"] <= 60.0                    # buildup carried the lead
+    assert st["t_impact"] == row["t_impact"]            # ...and the computed impact time
+
+
+def test_status_dict_early_revert_never_impacts(fake_lab):
+    st = {}
+    cancel = threading.Event()
+    cancel.set()
+    orchestrator.run_scenario("congestion", "ce_branch1", duration=1, cancel=cancel, status=st)
+    assert st["phase"] == "reverting"                    # buildup -> reverting, impact skipped
 
 
 def test_non_overlay_gets_lead_but_no_overlay(fake_lab):

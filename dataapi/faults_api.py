@@ -70,11 +70,11 @@ class InjectBody(BaseModel):
     duration: int = DEFAULT_DURATION
 
 
-def _runner(scenario_id, name, target, severity, duration, cancel):
+def _runner(scenario_id, name, target, severity, duration, cancel, status):
     """Thread body: run the scenario, then always drop it from the registry."""
     try:
         orchestrator.run_scenario(name, target, severity=severity,
-                                  duration=duration, cancel=cancel)
+                                  duration=duration, cancel=cancel, status=status)
     finally:
         with _LOCK:
             _ACTIVE.pop(scenario_id, None)
@@ -106,23 +106,34 @@ def inject(body: InjectBody):
     with _LOCK:
         if any(e["target"] == body.target for e in _ACTIVE.values()):
             raise HTTPException(409, f"'{body.target}' is already being injected")
+        # status: shared mutable dict the worker fills with the live phase
+        # (buildup/impact/reverting) via GIL-atomic key writes -- read below in
+        # /active without the lock. run_scenario owns lead + t_impact.
+        status = {"phase": "buildup"}
         _ACTIVE[scenario_id] = {
             "scenario": body.scenario, "target": body.target,
             "started_at": orchestrator.iso(orchestrator.now_utc()),
-            "duration": body.duration, "cancel": cancel,
+            "duration": body.duration, "cancel": cancel, "status": status,
         }
     threading.Thread(target=_runner, daemon=True, args=(
         scenario_id, body.scenario, body.target, body.severity,
-        body.duration, cancel)).start()
+        body.duration, cancel, status)).start()
     return {"scenario_id": scenario_id, "status": "injecting"}
 
 
 @router.get("/active")
 def active():
     with _LOCK:
-        return [{"scenario_id": sid, "scenario": e["scenario"], "target": e["target"],
-                 "started_at": e["started_at"], "duration": e["duration"]}
-                for sid, e in _ACTIVE.items()]
+        entries = list(_ACTIVE.items())
+    # status keys are read outside the lock: the worker writes them GIL-atomically.
+    # ponytail: lead/t_impact are null in the sub-ms window between inject and the
+    #   worker's first status write (phase seeded "buildup" at inject so it never is).
+    return [{"scenario_id": sid, "scenario": e["scenario"], "target": e["target"],
+             "started_at": e["started_at"], "duration": e["duration"],
+             "phase": e["status"].get("phase"),
+             "lead": e["status"].get("lead"),
+             "t_impact": e["status"].get("t_impact")}
+            for sid, e in entries]
 
 
 @router.post("/revert/{scenario_id}")
