@@ -297,10 +297,16 @@ Gates: lint, typecheck, unit, build, Compose startup, plugin-load, visual QA @19
   `ReadableStream` (not `EventSource` — GET-only). Pure helpers `parseSseFrames`/`mapEventsToTurn` in
   `data/copilotChat.ts`. `CopilotPage.tsx` is now a placeholder pending T2/#68 rebuild on the `chat`
   seam.
+- **T2/#68 Copilot tab answers for real — DONE.** `hooks/useCopilotChat.ts` drives the thread: one
+  `Turn` per exchange (question + streamed `events` + folded `turn` + `sending`/`done`/`error`
+  state), a `localStorage`-persisted `sessionId`, History mode sending `start`/`end` (epoch s) and
+  Live omitting both. `CopilotPage.tsx` rebuilt as a thin render — user/assistant bubbles,
+  "investigating…" spinner, error + Retry. First in-browser proof the mock is gone. Hook unit test
+  covers streaming growth, sending toggle, reject→retry, and the History/Live seam.
 
 **Still not built:** the ML prediction model — separate, unbuilt component. Predictions/incidents
-remain derived from ground-truth `/labels`, not a real predictor. Copilot chat is now real (T1/#67);
-the UI consuming it lands in T2/#68. Kept unblocked by the `DataClient` seam.
+remain derived from ground-truth `/labels`, not a real predictor. Copilot chat is real (T1/#67) and
+the tab answers for real (T2/#68); trace cards + citation chips land in later #66 tickets.
 
 ---
 

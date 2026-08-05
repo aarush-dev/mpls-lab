@@ -271,11 +271,18 @@ default :8100, `copilotTimeoutMs` 180s) and streams its SSE `event_wire` trace v
 `ReadableStream` reader (not EventSource — GET-only). Pure `parseSseFrames` + `mapEventsToTurn` in
 `data/copilotChat.ts`; trace model (`ChatEvent` union, `CopilotTurn`) in `types.ts`. **Mock mode +
 `MockDataClient` + `telemetrySynth` + `CopilotChat` deleted** — the data client always talks to real
-backends, no path can serve a canned answer. `config.mode`/`showDemoBadge` gone. `CopilotPage` is a
-placeholder until T2/#68 rebuilds it on the seam. Self-check: `yarn typecheck && yarn test:ci` (104
-tests). Contract docs (`grafana ui/{API_CONTRACT,INTEGRATION_GUIDE}.md`) updated.
+backends, no path can serve a canned answer. `config.mode`/`showDemoBadge` gone. Self-check:
+`yarn typecheck && yarn test:ci`. Contract docs (`grafana ui/{API_CONTRACT,INTEGRATION_GUIDE}.md`)
+updated.
 
-**Not done:** copilot UI rebuild on the `chat` seam (T2–T6/#68–#72: hook+page, trace+citations,
+T2 (#68, `grafana ui/plugin/src/hooks/`, `pages/CopilotPage.tsx`) — the Copilot tab answers for
+real. `hooks/useCopilotChat.ts` drives sending: one `Turn` per exchange (question + streamed
+`events` + folded `turn` + `sending`/`done`/`error`), a `localStorage`-persisted `sessionId`,
+History mode sending `start`/`end` (epoch s) and Live omitting both. `CopilotPage` rebuilt as a thin
+render — user/assistant bubbles, "investigating…" spinner, error + Retry. First in-browser proof the
+mock is gone. Self-check: `yarn typecheck && yarn test:ci` (108 tests).
+
+**Not done:** copilot UI rest (T3–T6/#69–#72: trace+citations,
 multi-turn+localStorage, side panel, backend `workspace` flag); the emulator emitting n distinct
 per-fault records (#49); C1; Milestone B. Seeder does not set `node` on incidents, so
 `search_incidents`-by-device narrows to empty (S1 follow-up, noted in #46). Default `/chat` KB still
