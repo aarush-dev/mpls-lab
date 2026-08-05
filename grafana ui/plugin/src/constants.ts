@@ -3,3 +3,6 @@
 export const APP_BASE = '/a/mplslab-noccopilot-app';
 
 export const nodeDetailPath = (id: string) => `${APP_BASE}/node/${encodeURIComponent(id)}`;
+
+export const incidentsPath = `${APP_BASE}/incidents`;
+export const incidentDetailPath = (id: string) => `${incidentsPath}/${encodeURIComponent(id)}`;

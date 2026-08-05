@@ -12,7 +12,7 @@ import { InterfaceTable } from '../components/InterfaceTable';
 import { FlowTable } from '../components/FlowTable';
 import { LogTerminal } from '../components/LogTerminal';
 import { nodeDetailPath } from '../constants';
-import { useAppState } from '../state/AppContext';
+import { useAppState, useAppDispatch } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { FlowRecord, Incident, MetricSeries, NetworkEvent, Prediction, TopologyGraph } from '../data/types';
 import { groupSeries } from '../utils/metricGroups';
@@ -22,6 +22,7 @@ export function NodeDetailPage() {
   const history = useHistory();
   const styles = useStyles2(getStyles);
   const { mode, refreshTick, range, injectedFaults } = useAppState();
+  const dispatch = useAppDispatch();
   const dataClient = useDataClient();
 
   const [telemetry, setTelemetry] = useState<MetricSeries[] | null>(null);
@@ -39,6 +40,11 @@ export function NodeDetailPage() {
   useEffect(() => {
     setTelemetry(null);
   }, [id]);
+
+  // Remember the viewed node so the nav "Node Detail" link routes here next time (no hardcoded pe1).
+  useEffect(() => {
+    dispatch({ type: 'SET_LAST_NODE', payload: { node: id } });
+  }, [id, dispatch]);
 
   useEffect(() => {
     let cancelled = false;

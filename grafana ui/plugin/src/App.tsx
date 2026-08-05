@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 // Grafana 11.1 ships react-router-dom v5 (Switch/Route/useRouteMatch), NOT v6.
 // Use the v5 API — Routes/element do not exist on the host-provided module.
-import { Route, Switch, useRouteMatch } from 'react-router-dom';
+import { Route, Switch, useRouteMatch, matchPath, useLocation } from 'react-router-dom';
 import { AppRootProps } from '@grafana/data';
 
 import { OverviewPage } from './pages/OverviewPage';
@@ -39,6 +39,9 @@ export function App(props: AppRootProps) {
 function AppInner(_props: AppRootProps) {
   // Base path/url where Grafana mounted this app (/a/mplslab-noccopilot-app).
   const { path } = useRouteMatch();
+  const location = useLocation();
+  // On the full-page /copilot view the drawer would duplicate the chat surface — suppress it there.
+  const onCopilotPage = !!matchPath(location.pathname, { path: `${path}/copilot`, exact: true });
   const { injectedFaults } = useAppState();
   const dispatch = useAppDispatch();
   const dataClient = useDataClient();
@@ -130,13 +133,13 @@ function AppInner(_props: AppRootProps) {
 
   return (
     <AppShell onToggleCopilot={() => setCopilotOpen((v) => !v)}>
-      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      <CopilotPanel open={copilotOpen && !onCopilotPage} onClose={() => setCopilotOpen(false)} />
       <Switch>
         <Route exact path={path} component={OverviewPage} />
         <Route path={`${path}/topology`} component={TopologyPage} />
         <Route path={`${path}/node/:id`} component={NodeDetailPage} />
         <Route path={`${path}/telemetry`} component={TelemetryPage} />
-        <Route path={`${path}/incidents`} component={IncidentsPage} />
+        <Route exact path={`${path}/incidents/:id?`} component={IncidentsPage} />
         <Route path={`${path}/copilot`} component={CopilotPage} />
         <Route path={`${path}/inject`} component={FaultInjectionPage} />
         <Route path={`${path}/status`} component={StatusPage} />
