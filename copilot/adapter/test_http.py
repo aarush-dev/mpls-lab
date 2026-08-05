@@ -83,6 +83,38 @@ def test_metrics_selector_and_latest_sample():
     assert "value=91" in ev.content and "metric=node_cpu_pct" in ev.content
 
 
+def test_metrics_ranged_returns_multiple_samples_per_series():
+    # #56: ranged mode returns EVERY in-window sample of a series (not just the latest), so a
+    # trend claim can be cited over multiple points; default stays latest-only (test above).
+    routes = {"/metrics": {"result": [
+        {"metric": {"__name__": "node_cpu_pct", "device": "pe1"},
+         "values": [[W_START + 10, "40"], [W_START + 40, "70"], [W_START + 70, "91"]]},
+    ]}}
+    res = _adapter(routes).metrics(_filters(ranged=True))
+    assert len(res.evidence) == 3
+    assert [ev.ts for ev in res.evidence] == [W_START + 10, W_START + 40, W_START + 70]
+    assert [ev.device for ev in res.evidence] == ["pe1", "pe1", "pe1"]
+    assert "value=40" in res.evidence[0].content and "value=91" in res.evidence[2].content
+
+
+def test_metrics_ranged_caps_series_and_samples():
+    # #56: an explicit cap bounds a wide ranged query -- at most _RANGED_MAX_SERIES series, each
+    # decimated to <= _RANGED_MAX_SAMPLES samples (endpoints kept), so it can't flood context.
+    from copilot.adapter.http import _RANGED_MAX_SAMPLES, _RANGED_MAX_SERIES
+    big = [[W_START + i, str(i)] for i in range(_RANGED_MAX_SAMPLES * 4)]
+    routes = {"/metrics": {"result": [
+        {"metric": {"__name__": "m", "device": f"d{s}"}, "values": big}
+        for s in range(_RANGED_MAX_SERIES + 3)
+    ]}}
+    # limit high enough that serve_rows doesn't mask the adapter cap.
+    res = _adapter(routes).metrics(_filters(ranged=True, limit=50))
+    devices = {ev.device for ev in res.evidence}
+    assert len(devices) <= _RANGED_MAX_SERIES
+    per_series = [ev for ev in res.evidence if ev.device == "d0"]
+    assert 0 < len(per_series) <= _RANGED_MAX_SAMPLES
+    assert per_series[0].ts == W_START and per_series[-1].ts == W_START + len(big) - 1  # endpoints kept
+
+
 def test_validate_runs_before_any_fetch():
     # critical: serve_rows must validate BEFORE the fetch thunk fires, or an over-broad / frozen
     # call does a wire read (past T_snapshot!) before the guard bites. Count fetches to prove it.
@@ -216,6 +248,8 @@ def _run():
     test_events_ts_reaches_evidence_as_int_no_typeerror_at_gate()
     test_flows_stamp_reaches_evidence_as_int()
     test_metrics_selector_and_latest_sample()
+    test_metrics_ranged_returns_multiple_samples_per_series()
+    test_metrics_ranged_caps_series_and_samples()
     test_validate_runs_before_any_fetch()
     test_http_get_maps_faults_to_adaptererror()
     test_flows_pattern_ignores_ts_digits()

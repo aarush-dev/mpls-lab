@@ -45,6 +45,11 @@ _STEP = 30           # /metrics range step seconds (mirrors dataapi's default)
 # source, so the older/newer tail is dropped AND next_page reads exhausted off the truncated set
 # -- partial coverage read as complete. Upgrade to server-side paging if that window is real.
 _FETCH_CAP = 1000
+# #56 ranged-mode caps: a trend read returns many samples per series, so it's bounded twice --
+# at most _RANGED_MAX_SERIES series, each decimated to <= _RANGED_MAX_SAMPLES samples -- so a
+# wide selector can't flood the agent's context. serve_rows' `limit` still caps total rows after.
+_RANGED_MAX_SERIES = 5
+_RANGED_MAX_SAMPLES = 20
 
 
 def _iso_to_epoch(s) -> int | None:
@@ -74,11 +79,27 @@ def _selector(filters: Filters) -> str:
     return "{%s}" % ",".join(m)
 
 
+def _series_samples(series: dict) -> list:
+    """Every (ts, value) of a Prometheus series -- range `values` (ascending) or a lone instant
+    `value`. Empty if the series carries neither."""
+    return series.get("values") or ([series["value"]] if "value" in series else [])
+
+
 def _latest_sample(series: dict):
-    """Latest (ts, value) of a Prometheus series -- range `values` (ascending) or instant
-    `value`. None if the series carries neither."""
-    samples = series.get("values") or ([series["value"]] if "value" in series else [])
+    """Latest (ts, value) of a series (default `query_metrics` contract). None if empty."""
+    samples = _series_samples(series)
     return tuple(samples[-1]) if samples else None
+
+
+def _decimate(samples: list, cap: int) -> list:
+    """Down to <= `cap` evenly-spaced samples, first and last always kept, so a trend's SHAPE
+    survives the cap (endpoints matter for 'ramped for N min'). cap >= 2 (the constant).
+    # ponytail: even-spacing decimation -- loses an interior spike that falls between two kept
+    # points. Upgrade to peak-preserving (LTTB) if a mid-window-spike claim ever needs it."""
+    n = len(samples)
+    if n <= cap:
+        return samples
+    return [samples[round(i * (n - 1) / (cap - 1))] for i in range(cap)]
 
 
 def _matches(row: dict, pattern: str) -> bool:
@@ -134,20 +155,24 @@ class HttpAdapter:
     def _metrics_rows(self, filters: Filters) -> list[dict]:
         data = self._fetch("/metrics", {"query": _selector(filters), "start": filters.start,
                                         "end": filters.end, "step": _STEP})
+        result = data.get("result", ())
+        if filters.ranged:                                   # #56: trend evidence, not one point
+            result = result[:_RANGED_MAX_SERIES]
         rows = []
-        for series in data.get("result", ()):
+        for series in result:
             labels = series.get("metric", {})
-            sample = _latest_sample(series)
-            if sample is None:
-                continue
-            ts, val = sample
+            if filters.ranged:
+                samples = _decimate(_series_samples(series), _RANGED_MAX_SAMPLES)
+            else:
+                latest = _latest_sample(series)
+                samples = [latest] if latest is not None else []
             # drop the names row.update sets below too, so a Prometheus label literally called
             # `metric`/`value`/`ts` can't be reported in place of the real field.
-            row = {k: v for k, v in labels.items()
-                   if k not in ("__name__", "device", "metric", "value", "ts")}
-            row.update(metric=labels.get("__name__"), value=val,
-                       device=labels.get("device"), ts=int(float(ts)))
-            rows.append(row)
+            base = {k: v for k, v in labels.items()
+                    if k not in ("__name__", "device", "metric", "value", "ts")}
+            for ts, val in samples:
+                rows.append({**base, "metric": labels.get("__name__"), "value": val,
+                             "device": labels.get("device"), "ts": int(float(ts))})
         return rows
 
     def _events_rows(self, filters: Filters) -> list[dict]:

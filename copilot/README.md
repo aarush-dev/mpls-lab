@@ -129,6 +129,10 @@ No `Restart=` — a dead proc goes unnoticed until the next `copilot-up.sh` (cei
 Read tools: `query_metrics` → `adapter.metrics`, `search_logs` → `adapter.events`,
 `flows` → `adapter.flows` — all ride the F2 mandatory-filter contract (window +
 device/pattern + limit ≤ `MAX_LIMIT`), per-item provenance, paging (ADR-0006/0015).
+`query_metrics` also takes `ranged=true` (#56): opt-in multi-sample trend series
+(latest-only by default) so a "ramped over N min" claim can cite multiple points;
+bounded by an adapter cap (`_RANGED_MAX_SERIES`×`_RANGED_MAX_SAMPLES`, http.py).
+Charting from chat is **out of scope** — Grafana owns charts; ranged is evidence only.
 Retrieval tools (I2b): `search_runbooks` / `search_incidents` search the I2a
 `Retriever` scoped by provenance; `search_incidents` also takes a focus `device` →
 topology-hop proximity filter (see below). Bad args (over-broad filter, non-int

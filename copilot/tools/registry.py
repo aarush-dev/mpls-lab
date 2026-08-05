@@ -39,7 +39,10 @@ class Cite:
 # name -> (adapter method, description advertised to the model). The adapter method
 # is the seam: swapping stub<->HTTP never touches this table (ADR-0006).
 TOOLS: dict[str, tuple[str, str]] = {
-    "query_metrics": ("metrics", "Read device metrics within the investigation window."),
+    "query_metrics": ("metrics", "Read device metrics within the investigation window. "
+                      "Pass ranged=true for a multi-sample trend series (cited evidence for "
+                      "'ramped/climbed over N min' claims), not just the latest point. Charting "
+                      "is out of scope -- Grafana owns charts (#56)."),
     "search_logs": ("events", "Search device logs/events within the investigation window."),
     "flows": ("flows", "Read network flow records within the investigation window."),
 }
@@ -69,6 +72,9 @@ TOOL_SPECS = [{
         "pattern": {"type": "string"},
         "limit": {"type": "integer"},
         "offset": {"type": "integer"},
+        # ranged is metrics-only trend evidence (#56) -- advertising it on events/flows, which
+        # already return multi-row, would just mislead the model.
+        **({"ranged": {"type": "boolean"}} if name == "query_metrics" else {}),
     }},
 } for name, (_, desc) in TOOLS.items()] + [
     {"name": "search_runbooks", "description": RETRIEVAL_TOOLS["search_runbooks"][1],
@@ -113,7 +119,15 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
         for k in ("limit", "offset"):                    # let Filters own the defaults
             if k in arguments:
                 narrow[k] = int(arguments[k])
-        filters = Filters(start=window.start, end=window.end,
+        # ranged (#56, metrics-only): opt-in trend series. A weak model may send a JSON string;
+        # treat only real truthy / "true"/"1" as on so "false"/"0" doesn't read as on (ADR-0015).
+        ranged = str(arguments.get("ranged")).lower() in ("true", "1")
+        # a ranged read with no explicit limit must not clip to Filters' default (10): opting into
+        # a trend means wanting the samples, so raise the default to the cap (still model-override-
+        # able, still <= MAX_LIMIT). Otherwise "ramped over N min" evidence arrives truncated.
+        if ranged and "limit" not in narrow:
+            narrow["limit"] = MAX_LIMIT
+        filters = Filters(start=window.start, end=window.end, ranged=ranged,
                           t_snapshot=window.t_snapshot, **narrow)
     except ValueError as e:
         return f"error: {e}", ()

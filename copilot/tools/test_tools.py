@@ -62,7 +62,9 @@ def test_registry_covers_read_and_retrieval_tools():
     # read tools expose narrowing args only -- NOT start/end (loop owns the window, ADR-0002)
     specs = {s["name"]: set(s["parameters"]["properties"]) for s in TOOL_SPECS}
     for name in TOOLS:
-        assert specs[name] == {"device", "pattern", "limit", "offset"}, name
+        # query_metrics adds the #56 ranged trend flag; the rest expose narrowing args only.
+        expected = {"device", "pattern", "limit", "offset"}
+        assert specs[name] == (expected | {"ranged"} if name == "query_metrics" else expected), name
     # retrieval tools take a query (+ k); incidents adds the hop-filter narrowing.
     assert specs["search_runbooks"] == {"query", "k"}
     assert specs["search_incidents"] == {"query", "k", "device", "hops"}
@@ -195,6 +197,44 @@ def test_query_metrics_still_routes_to_metrics():
     assert len(cites) == 3 and "[metrics:0]" in obs
 
 
+def test_query_metrics_ranged_flag_reaches_adapter():
+    # #56: the `ranged` arg must flow through dispatch into Filters.ranged so the adapter can
+    # return a trend series. Capture the Filters the adapter is called with.
+    seen = []
+
+    class Recorder:
+        def metrics(self, filters):
+            seen.append(filters)
+            return _adapter().metrics(filters)
+
+    dispatch("query_metrics", {"device": "r1", "ranged": True}, Recorder(), WINDOW)
+    assert seen and seen[0].ranged is True
+    # default (no flag) stays latest-per-series -- ranged False.
+    dispatch("query_metrics", {"device": "r1"}, Recorder(), WINDOW)
+    assert seen[1].ranged is False
+
+
+def test_query_metrics_ranged_default_limit_not_clipped_to_ten():
+    # #56: opting into a trend but not naming a limit must NOT clip to Filters' default 10 --
+    # the samples are the point. 15 in-window samples for one device -> all 15 returned.
+    from copilot.adapter import MAX_LIMIT
+    rows = [{"device": "r1", "ts": 100 + i, "cpu": 50 + i} for i in range(15)]
+    ad = StubAdapter(metrics_rows=rows, topology=TOPOLOGY)
+    _, ranged = dispatch("query_metrics", {"device": "r1", "ranged": True}, ad, WINDOW)
+    assert len(ranged) == 15 <= MAX_LIMIT           # not truncated to 10
+    _, default = dispatch("query_metrics", {"device": "r1"}, ad, WINDOW)
+    assert len(default) == 10                        # default read still caps at 10 (unchanged)
+
+
+def test_query_metrics_advertises_ranged_only_on_metrics():
+    # ranged is a metrics-only trend flag; advertising it on search_logs/flows would mislead the
+    # model. It appears in query_metrics' schema and nowhere else.
+    specs = {s["name"]: s for s in TOOL_SPECS}
+    assert "ranged" in specs["query_metrics"]["parameters"]["properties"]
+    assert "ranged" not in specs["search_logs"]["parameters"]["properties"]
+    assert "ranged" not in specs["flows"]["parameters"]["properties"]
+
+
 def test_unfiltered_call_rejected_with_guidance():
     # inherits the F2 mandatory-filter contract: no device/pattern -> guidance, not rows.
     obs, cites = dispatch("search_logs", {}, _adapter(), WINDOW)
@@ -239,6 +279,9 @@ def _run():
     test_search_logs_routes_to_events()
     test_flows_routes_to_flows()
     test_query_metrics_still_routes_to_metrics()
+    test_query_metrics_ranged_flag_reaches_adapter()
+    test_query_metrics_ranged_default_limit_not_clipped_to_ten()
+    test_query_metrics_advertises_ranged_only_on_metrics()
     test_unfiltered_call_rejected_with_guidance()
     test_unknown_tool_reports_error_not_raise()
     test_non_int_limit_reports_error_not_raise()

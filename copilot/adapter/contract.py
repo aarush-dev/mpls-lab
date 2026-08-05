@@ -50,6 +50,8 @@ class Filters:
     limit: int = 10
     offset: int = 0
     t_snapshot: int | None = None   # forensic pin (ADR-0002); None => not frozen, no cap on end
+    ranged: bool = False            # #56: metrics only -- return the multi-sample series (trend
+                                    # evidence) instead of collapsing to the latest per-series sample
 
     def validate(self, max_limit: int = MAX_LIMIT) -> None:
         if self.start is None or self.end is None:

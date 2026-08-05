@@ -78,6 +78,7 @@ The standing fix is the **codependency check** in `CLAUDE.md`: every ticket decl
 | R4a | 20 | PA-emulator core (`copilot/emulator/emulate.py` — ground-truth `/labels` → full §3.3 record, oracle-deterministic) + `emulate_pa` seam + `persist`→ledger; `abstain`→gate soften + `fault_type`→skill steer; resolved §3.3.1 (health in-record, `n_concurrent`) |
 | R4b | 21 | emulator `error_profile` knobs (confusable cause + evolving R0–R5 drift) + `emulator/predictor.py` periodic firing loop (`predict_once`/`run_predictor`, reads `cfg.predict_interval_s`, ADR-0014); gate interaction exercised via #20's `abstain` lever (see §gate-stress caveat, #21) |
 | E1 | 42 | **end-to-end: real chat on real model + real dataapi + seeded KB** |
+| — | 56 | `query_metrics` opt-in `ranged` mode: multi-sample **trend evidence** (default latest-only unchanged), adapter-capped series×samples. Charting stays out of scope — Grafana owns charts | live dataapi (default 1 pt → ranged 20 pts, gate passes) |
 
 **#42 (E1) closing is the first moment `/chat` answers a real question end to end** — not #16. R1 is
 now a config-swap tested against a fake OpenAI-shaped server + one smoke call; the honest end-to-end
