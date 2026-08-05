@@ -202,9 +202,11 @@ def get_case(cid: str, cases_root: str = Depends(get_cases_root)) -> dict:
     # or traversal id is a 404, never a read outside the case root.
     try:
         case_dir = resolve_case_dir(cases_root, cid)
-    except ValueError:
+        return read_case(case_dir)
+    except (ValueError, FileNotFoundError):
+        # ValueError: unknown/traversal id. FileNotFoundError: a case dir still mid-investigation
+        # (prediction.json written, case.md not yet) -- not-yet-readable is a 404, not a 500.
         raise HTTPException(status_code=404, detail="unknown case")
-    return read_case(case_dir)
 
 
 @app.post("/chat")

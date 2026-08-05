@@ -639,6 +639,39 @@ def test_get_case_returns_report_prediction_and_chats():
     bad = client.get("/cases/..%2f..%2fetc")
     assert bad.status_code == 404, "unknown/traversal id is a 404, not a read"
 
+    # the realpath-containment guard (not just the sanitiser): a case dir that is a symlink
+    # OUT of cases_root must 404 -- resolves outside root, never a read past the boundary.
+    outside = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, outside, ignore_errors=True)
+    with open(os.path.join(outside, "case.md"), "w") as fh:
+        fh.write("secret")
+    os.symlink(outside, os.path.join(root, "escape"))
+    esc = client.get("/cases/escape")
+    assert esc.status_code == 404, "a symlink escaping cases_root is a 404, not a read outside root"
+
+
+def test_mid_investigation_case_is_not_listed_and_details_404():
+    # #57 race: create_case writes prediction.json BEFORE case.md (the seconds-long initial
+    # investigation runs between). A dashboard poll must not list such a case, and a direct detail
+    # hit on it is a 404 (not-yet-readable), never a 500 off an unguarded open(case.md).
+    import json
+    import os
+
+    from copilot.api.app import get_cases_root
+
+    root = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    os.makedirs(os.path.join(root, "half"))
+    with open(os.path.join(root, "half", "prediction.json"), "w") as fh:
+        json.dump({"device": "pe6", "decision": {"calibrated_probability": 0.9}}, fh)
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_cases_root] = lambda: root
+    client = TestClient(app)
+
+    assert client.get("/cases").json() == [], "a case with no case.md yet is not listed"
+    assert client.get("/cases/half").status_code == 404, "detail on a mid-write case is a 404, not 500"
+
 
 def test_cors_allows_the_ui_origin():
     # ADR-0010 (Amended): the separate-team UI at :3000 reaches POST /chat cross-origin;
@@ -714,6 +747,7 @@ def _run():
     test_get_unknown_artifact_is_404()
     test_get_cases_lists_case_summaries()
     test_get_case_returns_report_prediction_and_chats()
+    test_mid_investigation_case_is_not_listed_and_details_404()
     test_cors_allows_the_ui_origin()
     test_chat_streams_tool_call_and_cited_answer()
     test_case_id_routes_to_a_frozen_follow_up_over_http()

@@ -35,16 +35,17 @@ def case_chats(case_dir: str) -> SessionStore:
 
 def list_cases(cases_root: str) -> list[dict]:
     """Every forensic case under `cases_root` as a triage summary (#57), sorted by id. A case dir
-    is one holding a prediction.json (skips half-written/foreign dirs). Read-only -- the dashboard's
-    list view. Missing root -> [] (no case has fired yet)."""
+    is a COMPLETE one -- gated on case.md, the last file create_case writes -- so a case still
+    mid-investigation (prediction.json present, case.md not yet) is skipped, never listed with a
+    detail route that would 404. Read-only. Missing root -> [] (no case has fired yet)."""
     if not os.path.isdir(cases_root):
         return []
     out = []
     for cid in sorted(os.listdir(cases_root)):
-        pj = os.path.join(cases_root, cid, "prediction.json")
-        if not os.path.isfile(pj):
+        cdir = os.path.join(cases_root, cid)
+        if not os.path.isfile(os.path.join(cdir, "case.md")):
             continue
-        with open(pj) as fh:
+        with open(os.path.join(cdir, "prediction.json")) as fh:
             out.append(case_summary(json.load(fh), cid))
     return out
 
@@ -53,7 +54,7 @@ def read_case(case_dir: str) -> dict:
     """One case's readable payload (#57): the case.md report, the frozen prediction record, and the
     chat ids under it. `case_dir` is a path the caller already resolved+confined (resolve_case_dir),
     so no untrusted id reaches here. Read-only."""
-    cid = os.path.basename(case_dir.rstrip(os.sep))
+    cid = os.path.basename(case_dir)
     with open(os.path.join(case_dir, "case.md")) as fh:
         case_md = fh.read()
     with open(os.path.join(case_dir, "prediction.json")) as fh:

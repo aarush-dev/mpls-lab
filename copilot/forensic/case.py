@@ -56,8 +56,12 @@ def case_id(record: dict) -> str:
 
 
 def _dump(path: str, obj) -> None:
-    with open(path, "w") as fh:
+    # ponytail: atomic (tmp + os.replace) so a concurrent reader (#57's /cases poller) never sees a
+    # half-written json -> JSONDecodeError. os.replace is atomic on the same filesystem.
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
         json.dump(obj, fh)
+    os.replace(tmp, path)
 
 
 def _load(path: str, default=None):
@@ -210,7 +214,7 @@ def case_severity(record: dict) -> str:
     p = dec.get("calibrated_probability")
     if p is None:
         return "unknown"
-    return "high" if p >= 0.8 else "medium" if p >= (dec.get("threshold") or 0.5) else "low"
+    return "high" if p >= 0.8 else "medium" if p >= dec.get("threshold", 0.5) else "low"
 
 
 def case_summary(record: dict, cid: str) -> dict:
@@ -288,8 +292,12 @@ def create_case(record: dict, window: WindowContext, *, live_adapter, llm, cfg,
     outcome = investigate_record(record, _case_question(record), window, replay,
                                  llm=llm, cfg=cfg, retriever=retriever, skills=skills, kg=kg)
     md = render_case_md(record, window, outcome, cid)
-    with open(os.path.join(case_dir, "case.md"), "w") as fh:
+    # atomic: case.md is #57's completeness marker (list_cases gates on it) -- it must appear whole
+    # or not at all, else a poller lists a case whose report a detail read finds half-written.
+    md_tmp = os.path.join(case_dir, "case.md.tmp")
+    with open(md_tmp, "w") as fh:
         fh.write(md)
+    os.replace(md_tmp, os.path.join(case_dir, "case.md"))
     # R6a: persist the creation run as the first chat so a follow-up resumes it (ADR-0014 "spawn
     # chats"). Function-local import: chat.py imports ReplayAdapter from here, so top-level would cycle.
     # Seed only if empty -- an idempotent re-fire (backstop) must not double the chat's history.
