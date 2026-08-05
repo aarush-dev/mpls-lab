@@ -16,8 +16,9 @@ Endpoints:
 import glob
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
@@ -70,6 +71,27 @@ def metrics(
         return {"result": sources.vm_query(query)}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"VictoriaMetrics error: {e}")
+
+
+@app.post("/metrics/batch")
+def metrics_batch(payload: dict = Body(...)):
+    """Run N range queries in one request. Node detail fires 32 PromQL queries per load;
+    over an ssh -L tunnel that is 32 round-trips. VM is local, so fan them out in a thread
+    pool here and return one array (input order). A failed query -> {result: []} so one dead
+    metric never sinks the batch (matches the per-metric try/except the client had)."""
+    queries = payload.get("queries") or []
+    start = payload.get("start")
+    end = payload.get("end") or int(time.time())
+    step = payload.get("step", 30)
+
+    def run(q):
+        try:
+            return {"result": sources.vm_query_range(q, start, end, step)}
+        except Exception:  # noqa: BLE001
+            return {"result": []}
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return {"results": list(pool.map(run, queries))}
 
 
 @app.get("/events")

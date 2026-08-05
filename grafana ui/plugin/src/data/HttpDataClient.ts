@@ -326,31 +326,31 @@ export class HttpDataClient implements DataClient {
     const end = Math.floor(toMs / 1000);
     const step = 30;
 
-    const perEntry = await Promise.all(
-      METRIC_CATALOG.map(async (desc) => {
-        const query = desc.promql.replace(/\$dev/g, deviceId);
-        let resp: PromResp;
-        try {
-          resp = await this.fetchJson<PromResp>(`/metrics${this.qs({ query, start, end, step })}`);
-        } catch {
-          return [] as MetricSeries[]; // one dead metric must not sink the page
-        }
-        return (resp.result ?? []).map((s): MetricSeries => {
-          const device = s.metric.device ?? deviceId;
-          const entity = desc.entityLabel ? s.metric[desc.entityLabel] : undefined;
-          const key = `${device}${entity ? `:${entity}` : ''}:${desc.name}`;
-          const points: MetricPoint[] = (s.values ?? []).map(([t, v]) => ({ tMs: t * 1000, value: num(v) }));
-          return {
-            key,
-            label: entity ? `${desc.label} (${entity})` : desc.label,
-            unit: desc.unit,
-            source: desc.source,
-            points,
-          };
-        });
+    // One batched POST instead of 32 per-metric GETs: over an ssh -L tunnel each request is a
+    // round-trip, and the browser only runs ~6 at once. The backend fans them out to VM locally.
+    const queries = METRIC_CATALOG.map((desc) => desc.promql.replace(/\$dev/g, deviceId));
+    let resp: { results?: PromResp[] };
+    try {
+      resp = await this.postJson<{ results?: PromResp[] }>('/metrics/batch', { queries, start, end, step });
+    } catch {
+      return []; // whole batch failed (backend down) — page shows its error/empty state
+    }
+    const results = resp.results ?? [];
+    return METRIC_CATALOG.flatMap((desc, i) =>
+      (results[i]?.result ?? []).map((s): MetricSeries => {
+        const device = s.metric.device ?? deviceId;
+        const entity = desc.entityLabel ? s.metric[desc.entityLabel] : undefined;
+        const key = `${device}${entity ? `:${entity}` : ''}:${desc.name}`;
+        const points: MetricPoint[] = (s.values ?? []).map(([t, v]) => ({ tMs: t * 1000, value: num(v) }));
+        return {
+          key,
+          label: entity ? `${desc.label} (${entity})` : desc.label,
+          unit: desc.unit,
+          source: desc.source,
+          points,
+        };
       })
     );
-    return perEntry.flat();
   }
 
   // --- events / flows -------------------------------------------------------------------------
