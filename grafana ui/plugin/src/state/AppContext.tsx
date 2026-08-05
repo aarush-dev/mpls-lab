@@ -22,11 +22,13 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
-/** Live refresh cadence: pull fresh data from the backend every 1s while in live mode.
- *  Note: visible granularity is still bounded by the VM scrape interval + the query step —
- *  a 1s refresh re-fetches faster than new samples land, so the graph updates the moment a
- *  fresh scrape appears rather than every second. */
-export const LIVE_REFRESH_MS = 1000;
+/** Live refresh cadence: pull fresh data from the backend every 5s while in live mode.
+ *  ponytail: was 1s (619f8a8d) — but NodeDetailPage fans out ~38 requests per tick (32 metrics +
+ *  /topology + 3×/labels + events + flows) and fetchJson does NOT abort on effect cleanup, so a 1s
+ *  tick queued 38 un-abortable fetches/sec into the browser's ~6 conn/origin slots faster than they
+ *  drained → permanent slot starvation → node detail stuck on "Loading…". 5s drains fine. If sub-5s
+ *  liveness is ever needed, abort superseded fetches in the effect cleanup first, then lower this. */
+export const LIVE_REFRESH_MS = 5000;
 
 // Global time context. In live mode a 1s interval dispatches TICK{nowMs}, sliding the window to
 // [now-liveWindow, now] and bumping refreshTick so every page refetches. In history mode the
