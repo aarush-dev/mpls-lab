@@ -1,0 +1,19 @@
+[Unit]
+Description=PA live-alerts bridge (scores live topology via PA service -> dashboard alerts)
+After=network.target noc-pa.service
+Wants=noc-pa.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/LAB
+Environment=PA_URL=http://127.0.0.1:8001
+Environment=PA_ALERTS_URL=http://127.0.0.1:8002
+Environment=PA_ALERT_MODE=rank
+Environment=PA_ALERT_INTERVAL_S=15
+Environment=PYTHONPATH=/root/LAB
+ExecStart=/root/pa-venv/bin/uvicorn pa_alerts.service:app --host 127.0.0.1 --port 8002 --workers 1
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -44,6 +44,23 @@ app.add_middleware(
 )
 app.include_router(faults_api.router)
 
+# PA live-alert bridge: the pa_alerts service (:8002) scores the live topology
+# through the graph-v2 model and exposes current predictions/alerts. Proxied here
+# so the Grafana plugin keeps ONE data origin (:8000, already CORS-allowed).
+PA_ALERTS_URL = os.environ.get("PA_ALERTS_URL", "http://127.0.0.1:8002").rstrip("/")
+
+
+@app.get("/pa/alerts")
+def pa_alerts():
+    import httpx
+    try:
+        r = httpx.get(f"{PA_ALERTS_URL}/alerts", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:  # service down -> empty, so the panel degrades gracefully
+        return {"ts": None, "mode": None, "warm": False, "alerts": [],
+                "predictions": [], "n_scored": 0, "error": f"pa_alerts unreachable: {e}"}
+
 
 @app.get("/")
 def root():
