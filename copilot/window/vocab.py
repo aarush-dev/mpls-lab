@@ -7,13 +7,9 @@ It is ALSO fetchable at runtime from `/v1/health.channels`; this copy lets the
 builder + tests run without the service and is asserted equal to health in PA-A8.
 
 `entity_type_code` / `site_type_code` feed the encoder's metadata embeddings. The
-training vocab (built first-seen during `prepare`, prepare.py:77) was NOT shipped
-with the run, so exact codes are unrecoverable. We map the known lab categories to
-stable small ints and fall back to 0 for anything unseen. This is a MINOR signal
-(an embedding row); a wrong code slightly perturbs one input, it cannot break
-inference. Upgrade path: if the training vocab is exported, replace these maps.
-ponytail: best-effort map, 0-fallback -- documented approximation, not a guess
-dressed as truth.
+codes below are the EXACT training vocab, recovered from the run's prepared
+manifest (`bah-data:/prepared/manifest.json` `vocabs`), so they line up with the
+weights. Unknown categories fall back to 0.
 """
 from __future__ import annotations
 
@@ -31,10 +27,10 @@ CHANNELS: list[str] = [
 ]
 assert len(CHANNELS) == 28
 
-# Approximate metadata codes (0-fallback). Order = the three entity types + the
-# lab's site types; exact training codes need the (unshipped) vocab.
-_ENTITY_TYPE_CODE = {"interface": 0, "tunnel": 1, "device": 2}
-_SITE_TYPE_CODE = {"core": 0, "pe": 1, "branch": 2, "hub": 3, "dc": 4}
+# EXACT training codes, recovered from the run's prepared manifest.json `vocabs`
+# (bah-data:/prepared/manifest.json). No longer a guess.
+_ENTITY_TYPE_CODE = {"device": 0, "tunnel": 1, "interface": 2}
+_SITE_TYPE_CODE = {"branch": 0, "dc": 1, "hub": 2, "core": 3, "pe": 4}
 
 
 def entity_type_code(entity_type: str) -> int:
