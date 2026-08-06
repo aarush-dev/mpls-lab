@@ -56,15 +56,34 @@ _VALID_FROM = pd.Timestamp("2000-01-01", tz="UTC")
 
 
 def _inventory(meta: dict) -> dict:
-    """Minimal device inventory for `_static_edges`: site_type per device. P
-    routers = core, PE routers = pe. That is all snapshot_edges needs (device
-    tiers drive ospf/ldp/ibgp; interface lists only feed dropped self-loops)."""
+    """Device inventory for `_static_edges`: site_type per device (+ CE tunnels).
+
+    P routers = core, PE = pe drive ospf/ldp/ibgp/srlg. CE spokes/hubs + their
+    wg_tunnel edges are ADDED here (PA-#131): the model trained with wg_tunnel in
+    its relation set, so without CE<->hub edges every live CE/tunnel entity collapses
+    to a device node with ZERO edges -> the graph refinement gives CE windows no
+    neighbour context (self-pool only), unlike training. Reuse controller/topo to
+    derive the exact live spoke<->hub tunnels (same node naming the generator uses)."""
     inv: dict[str, dict] = {}
     for members in meta.get("pops", {}).values():
         for p in members:
             inv[p] = {"site_type": "core"}
     for pe in meta.get("pe_pop", {}):
         inv[pe] = {"site_type": "pe"}
+    # CE spokes + hubs + wg_tunnel edges (spoke<->every hub). _static_edges reads
+    # inventory[dev]["tunnels"] as "spoke-hub" strings for the branch/dc/hub tier.
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "controller"))
+        import topo as _topo
+        model = _topo.build_model()
+        hubs = [h["node"] for h in model["hubs"]]
+        for h in model["hubs"]:
+            inv[h["node"]] = {"site_type": "hub", "tunnels": []}
+        for sp in model["spokes"]:
+            inv[sp["node"]] = {"site_type": sp["site_type"],
+                               "tunnels": [f'{sp["node"]}-{hub}' for hub in hubs]}
+    except Exception as e:  # core edges still valid; CE nodes just stay edgeless
+        print(f"warn: CE inventory skipped ({e!r}); wg_tunnel edges absent", file=sys.stderr)
     return inv
 
 
