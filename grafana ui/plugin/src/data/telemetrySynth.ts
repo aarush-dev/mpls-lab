@@ -9,12 +9,14 @@ import metaJson from '../fixtures/meta.json';
 import type { MetricSeries, MetricPoint, DataSourceKind } from './types';
 import { BucketMeta, bucketToTsMs } from '../utils/time';
 
-// Mock-only stress thresholds, tuned to TUNNEL_METRICS' own synthetic ranges below (latency
-// 20-60ms, jitter 1-8ms, loss 0-2%) — NOT the same scale as the real backend's
-// topologyStyles.STRESS_* (baseline ~1-2ms), so kept separate rather than shared.
-const MOCK_STRESS_LATENCY_MS = 22;
-const MOCK_STRESS_JITTER_MS = 3;
-const MOCK_STRESS_LOSS_PCT = 0.7;
+// Mock-only stress thresholds — NOT the same scale as the real backend's topologyStyles.STRESS_*
+// (kept separate, see tunnelStressAt below). Set above TUNNEL_METRICS' own synthetic ranges
+// (latency 20-60ms, jitter 1-8ms, loss 0-2%) so ambient sine noise never trips it: this filler is
+// a pure function of (deviceId, bucket), it does not react to injectedFaults, so any threshold
+// inside its normal range would eventually false-positive on idle nodes with no fault injected.
+const MOCK_STRESS_LATENCY_MS = 70;
+const MOCK_STRESS_JITTER_MS = 10;
+const MOCK_STRESS_LOSS_PCT = 3;
 
 // Local BucketMeta (mirrors MockDataClient.MOCK_BUCKET_META) — imported here instead of from
 // MockDataClient to avoid a circular import. tMs is overwritten by getTelemetry's monotonic

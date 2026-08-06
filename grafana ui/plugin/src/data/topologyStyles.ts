@@ -38,9 +38,13 @@ export function colorForState(state?: 'red' | 'amber' | 'yellow' | 'green'): str
 }
 
 // "Stressed" (yellow) thresholds for live sdwan_tunnel_latency_ms/jitter_ms/loss_pct — real
-// backend only (baseline ~1-2ms per controller.py, congestion-scenario impact fires at 8ms).
+// backend only. Sized from the actual running lab (no fault injected): sampled max across all
+// 168 tunnels over ~30s was ~145ms latency / ~119ms jitter / ~50% loss (this sim's tunnels run
+// noisier than controller.py's on-paper baseline), and real spoke degree is 4-6 (checked
+// /topology). BASE * (1 + min_degree/5) clears the observed max with margin, so nothing reads
+// stressed at idle — only once an injected fault pushes a tunnel past this.
 // Scaled by node degree (connection count): a node with more links has more redundancy, so it
 // takes a bigger excursion to call it stressed. Effective threshold = BASE * (1 + degree / 5).
-export const STRESS_LATENCY_MS = 10;
-export const STRESS_JITTER_MS = 5;
-export const STRESS_LOSS_PCT = 2;
+export const STRESS_LATENCY_MS = 110;
+export const STRESS_JITTER_MS = 85;
+export const STRESS_LOSS_PCT = 35;
