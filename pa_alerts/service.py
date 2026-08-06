@@ -33,7 +33,7 @@ from fastapi import FastAPI
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from copilot.window.vocab import CHANNELS
+from copilot.window.vocab import CHANNELS, entity_type_code, site_type_code
 from copilot.window.build import build_windows
 
 PA_URL = os.environ.get("PA_URL", "http://127.0.0.1:8001").rstrip("/")
@@ -72,7 +72,7 @@ def _now_iso() -> str:
 def _score_once() -> list[dict]:
     """Build live windows, score the whole topology in one graph pass."""
     now = _now_iso()
-    wins = build_windows(now, CHANNELS)
+    wins = build_windows(now, CHANNELS, etc_of=entity_type_code, stc_of=site_type_code)
     if not wins:
         return []
     entities = [{"entity_id": e, "device": w["device"], "entity_type": w["entity_type"],

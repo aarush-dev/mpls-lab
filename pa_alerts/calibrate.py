@@ -29,7 +29,7 @@ import httpx
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from copilot.window.vocab import CHANNELS
+from copilot.window.vocab import CHANNELS, entity_type_code, site_type_code
 from copilot.window.build import build_windows
 
 PA_URL = os.environ.get("PA_URL", "http://127.0.0.1:8001").rstrip("/")
@@ -45,7 +45,7 @@ def _now_iso():
 
 def _score():
     now = _now_iso()
-    wins = build_windows(now, CHANNELS)
+    wins = build_windows(now, CHANNELS, etc_of=entity_type_code, stc_of=site_type_code)
     ents = [{"entity_id": e, "device": w["device"], "entity_type": w["entity_type"],
              "vrf": w["vrf"], "window": w["window"], "entity_type_code": w["etc"],
              "site_type_code": w["stc"]} for e, w in wins.items()]
