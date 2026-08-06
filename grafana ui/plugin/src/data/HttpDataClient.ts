@@ -210,6 +210,24 @@ export class HttpDataClient implements DataClient {
     }
   }
 
+  /** Instant PromQL vector (e.g. `max by(device)(...)`). device -> value; malformed/missing device rows skipped. */
+  private async instantVector(query: string): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const resp = await this.fetchJson<PromResp>(`/metrics${this.qs({ query })}`);
+    for (const s of resp.result ?? []) {
+      const dev = s.metric.device;
+      const v = s.value?.[1];
+      if (!dev || v == null) {
+        continue;
+      }
+      const n = parseFloat(v);
+      if (!Number.isNaN(n)) {
+        out.set(dev, n);
+      }
+    }
+    return out;
+  }
+
   // Full /labels was 174KB and every node load fetched it 3x (topology + incidents + predictions).
   // The server now supports ?device= to scope the response, so per-device callers (incidents,
   // predictions) send only their device's rows over the tunnel. Collapse concurrent/burst calls
@@ -242,14 +260,17 @@ export class HttpDataClient implements DataClient {
   // --- topology -------------------------------------------------------------------------------
 
   async getTopology(filters: Filters): Promise<TopologyGraph> {
-    const [topo, labels] = await Promise.all([
+    const [topo, labels, latency, jitter, loss] = await Promise.all([
       this.fetchJson<RawTopologyResp>('/topology'),
       this.fetchLabels().catch(() => [] as RawLabelRow[]),
+      this.instantVector('max by(device)(sdwan_tunnel_latency_ms)').catch(() => new Map<string, number>()),
+      this.instantVector('max by(device)(sdwan_tunnel_jitter_ms)').catch(() => new Map<string, number>()),
+      this.instantVector('max by(device)(sdwan_tunnel_loss_pct)').catch(() => new Map<string, number>()),
     ]);
     const nowS = Date.now() / 1000;
 
     // device -> live health from the ground-truth timeline.
-    const state = new Map<string, 'red' | 'amber'>();
+    const state = new Map<string, 'red' | 'amber' | 'yellow'>();
     for (const l of labels) {
       const dev = HttpDataClient.deviceOf(l);
       if (!dev) {
@@ -262,6 +283,19 @@ export class HttpDataClient implements DataClient {
         state.set(dev, 'red');
       } else if (nowS >= s && nowS < i && state.get(dev) !== 'red') {
         state.set(dev, 'amber');
+      }
+    }
+
+    // No red/amber ground-truth state: check live tunnel metrics for stress.
+    for (const n of topo.nodes) {
+      if (state.has(n.id)) {
+        continue;
+      }
+      const l = latency.get(n.id) ?? 0;
+      const j = jitter.get(n.id) ?? 0;
+      const p = loss.get(n.id) ?? 0;
+      if (l > 5 || j > 3 || p > 1) {
+        state.set(n.id, 'yellow');
       }
     }
 

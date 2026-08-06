@@ -23,15 +23,16 @@ export function styleForRole(role: string): RoleStyle {
   return roleStyles[role] ?? defaultRoleStyle;
 }
 
-// Health-state colors. red = down, amber = precursor, green = healthy.
-export const stateColors: Record<'red' | 'amber' | 'green', string> = {
+// Health-state colors. red = down, amber = precursor (blue), yellow = stressed, green = healthy.
+export const stateColors: Record<'red' | 'amber' | 'yellow' | 'green', string> = {
   red: '#e02f44',
-  amber: '#ff9830',
+  amber: '#5794f2',
+  yellow: '#f2cc0c',
   green: '#56a64b',
 };
 
 export const neutralColor = '#8e9297';
 
-export function colorForState(state?: 'red' | 'amber' | 'green'): string {
+export function colorForState(state?: 'red' | 'amber' | 'yellow' | 'green'): string {
   return state ? stateColors[state] : neutralColor;
 }
