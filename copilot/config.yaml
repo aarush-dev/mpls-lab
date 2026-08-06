@@ -11,6 +11,7 @@ embed_profile: nim          # nim | unsloth-local
 emulate_pa: true            # ADR-0003: PA-emulator feeds records until the real PA ships
 kg_enabled: true            # ADR-0007: curated KG -- additive, never critical-path
 ledger_to_kb: true          # ADR-0009: finalized case verdicts feed the Knowledge Base
+gate_enabled: false         # ADR-0008: I4a/I4b quality gate. See COPILOT_GATE_DISABLE env (app.py)
 history_compaction: false   # ADR-0015: summarize old chat turns (off by default)
 
 # -- knobs --------------------------------------------------------------------
@@ -18,11 +19,18 @@ window_x_min: 10            # ADR-0002: X, rolling/forensic window length (minut
 window_x_max: 60            # ADR-0002: X_max, salvage anchored-live lookback cap (minutes)
 gate_min_evidence: 2       # ADR-0008: N, deterministic pre-gate evidence floor
 gate_max_retries: 2        # ADR-0008: agentic retries when the gate fails
-step_cap: 8                # ADR-0005: max agent-loop turns per investigation
-tool_call_cap: 6           # ADR-0005: max tool invocations per investigation
+step_cap: 100              # ADR-0005: max agent-loop turns per investigation (runaway backstop)
+tool_call_cap: 100         # ADR-0005: max tool invocations per investigation (runaway backstop)
 error_profile: light       # ADR-0003: oracle | light | heavy
 predict_interval_s: 3      # ADR-0014: PA/emulator predict-loop cadence (seconds). #48: safe at 3s --
                            # case creation is cause-gated (idempotent by alert_id), so the expensive
                            # adapter-drain+agent run is decoupled from tick rate; only the cheap
                            # predict/persist-noop/poll scale. Faster fault->case detection latency.
 dataapi_url: http://127.0.0.1:8000  # A1/ADR-0006: HttpAdapter base URL (COPILOT_DATAAPI_URL overrides)
+
+# -- real PA service (ADR-0003; used when emulate_pa: false) ------------------
+pa_url: http://127.0.0.1:8001   # PA-A3: real PA inference service base URL
+pa_target_fpr: 0.01             # PA-A3: conformal alert budget (0.005|0.01|0.02|0.05)
+pa_top_k: 3                     # PA-A3: fault causes per entity
+pa_mode: snapshot               # PA-A3/G4: snapshot (graph v2) | temporal (baseline)
+pa_topology_id: live_lab        # PA-G1: topology_id the snapshot edges key on
