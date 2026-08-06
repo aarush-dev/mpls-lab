@@ -7,17 +7,11 @@
 The LLM backend is **one OpenAI-compatible HTTP client**, config = `{base_url, model, api_key}`,
 selected by a **master-config profile**:
 
-- `gemma` (current) → on-prem gemma-4 at `10.0.0.5:8888` (OpenAI-compatible, keyless). Default profile.
-- `nim` (interim) → NVIDIA NIM / hosted, `gpt-oss-20b` (or a hosted nemotron via `.env` model override).
-- `unsloth-local` (final) → a local API URL served on the air-gapped network.
+- `nim` (interim) → NVIDIA NIM, `gpt-oss-20b`.
+- `unsloth-local` (final) → a local API URL served on the air-gapped network (Gemma, later).
 
 Model/provider swap = **one config line**. Native OpenAI function-calling when the endpoint supports
 it, an owned JSON/ReAct parser as fallback (ADR-0005).
-
-`gemma` carries its **own** base-url env (`COPILOT_LLM_BASE_URL_GEMMA`), not `nim`'s
-`COPILOT_LLM_BASE_URL` — a hosted-NIM `.env` sets the latter to the nvidia URL, which would otherwise
-hijack the gemma profile. The served model id is server-mangled (`mtp-gemma-4-26B-A4B-it-Q8_0`) and
-has already changed once; it is pinned in the profile and overridable via `COPILOT_LLM_MODEL_GEMMA`.
 
 ## Context
 

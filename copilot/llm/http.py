@@ -17,20 +17,14 @@ Self-check:  python3 -m copilot.llm.test_http
 Live smoke (opt-in, needs a running endpoint):  COPILOT_LLM_SMOKE=1 python3 -m copilot.llm.test_http
 """
 import json
-import logging
 import os
 import re
-import time
 
 from copilot.config import Config
 from copilot.llm.client import Reply, ToolCall
 
-log = logging.getLogger(__name__)
-
-_TIMEOUT = 600.0     # per-chunk read timeout (streamed, so this is a silence gap, not total time).
-                     # was 120s (one serial call), then 240s; concurrent requests share hosted
-                     # NIM's rate limit and reasoning gaps between chunks widen under load, so
-                     # raised again to a runaway backstop rather than a tuned working budget.
+_TIMEOUT = 120.0     # a real multi-round investigation turn on a 20B model is slow; generous so a
+                     # healthy-but-slow completion is not cut off client-side as a false outage.
 
 
 # profile -> (base-url env, base-url default, model env, model default). Both the endpoint AND
@@ -42,12 +36,6 @@ _PROFILES = {
             "COPILOT_LLM_MODEL_NIM", "gpt-oss-20b"),
     "unsloth-local": ("COPILOT_LLM_BASE_URL_LOCAL", "http://127.0.0.1:8001/v1",
                       "COPILOT_LLM_MODEL_LOCAL", "unsloth/gpt-oss-20b"),
-    # gemma: on-prem gemma-4 (OpenAI-compatible, keyless). Its OWN base-url env, NOT nim's
-    # COPILOT_LLM_BASE_URL -- an existing hosted-NIM .env sets that to the nvidia URL, which would
-    # otherwise hijack this profile. Model id is server-mangled (mtp-...-Q8_0) and has changed
-    # once already; pin it here, override via COPILOT_LLM_MODEL_GEMMA when the served model renames.
-    "gemma": ("COPILOT_LLM_BASE_URL_GEMMA", "http://10.0.0.5:8888/v1",
-              "COPILOT_LLM_MODEL_GEMMA", "mtp-gemma-4-26B-A4B-it-Q8_0"),
 }
 
 
@@ -77,77 +65,19 @@ class OpenAIClient:
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None) -> Reply:
         import httpx
-        body = {"model": self._model, "messages": messages, "stream": True}
+        body = {"model": self._model, "messages": messages}
         if tools:
             body["tools"] = [_as_function(t) for t in tools]
         if self._effort:                  # gpt-oss burns tokens on reasoning -> tier it explicitly;
             body["reasoning_effort"] = self._effort   # unset (default) keeps the plain OpenAI body.
-        elif "nemotron" in self._model:   # nvidia default recipe: thinking on, budgeted
-            body["chat_template_kwargs"] = {"enable_thinking": True}
-            body["reasoning_budget"] = 16384
-        # streamed so _TIMEOUT is a per-chunk read timeout, not a total-completion one: a slow
-        # multi-round turn keeps resetting it as tokens trickle in, instead of blocking on one
-        # read for the whole (possibly minutes-long) non-streamed body (#trigger-crash timeout).
-        headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
-        n_msgs, t0 = len(messages), time.monotonic()
-        log.info("-> %s model=%s n_messages=%s tools=%s", self._url, self._model, n_msgs,
-                 len(tools) if tools else 0)
-        # #114 (secondary): a hosted backend's 429 is a rate limit, not a hard failure -- retry
-        # with a short backoff instead of crashing /chat straight to a 500. Bounded (3 tries
-        # total) so a persistently-down/over-quota backend still surfaces the error. 503 too: the
-        # shared on-prem gemma box returns 503 upstream_error under concurrent load (transient),
-        # same treatment as a rate limit.
-        for attempt in range(3):
-            try:
-                with httpx.stream("POST", f"{self._url}/chat/completions", json=body,
-                                  headers=headers, timeout=_TIMEOUT) as r:
-                    if r.status_code in (429, 503) and attempt < 2:
-                        log.warning("<- %s %d, retrying (attempt %d)", self._url,
-                                    r.status_code, attempt + 1)
-                        time.sleep(2 * (attempt + 1))
-                        continue
-                    r.raise_for_status()
-                    msg = _accumulate_stream(r)
-                break
-            except Exception:
-                log.exception("<- %s FAILED after %.1fs", self._url, time.monotonic() - t0)
-                raise
-        log.info("<- %s ok in %.1fs tool_calls=%s", self._url, time.monotonic() - t0,
-                 len(msg.get("tool_calls") or []))
-        return _to_reply(msg)
-
-
-def _accumulate_stream(r) -> dict:
-    """SSE `chat.completions` chunks -> one assembled message dict (same shape as the non-streamed
-    `choices[0].message`). Tool-call deltas arrive by `index` with `name`/`arguments` split across
-    chunks (arguments is a growing JSON-string fragment), so accumulate by index and join strings."""
-    content_parts = []
-    calls: dict[int, dict] = {}
-    for line in r.iter_lines():
-        if not line.startswith("data: "):
-            continue
-        data = line[len("data: "):]
-        if data == "[DONE]":
-            break
-        choices = json.loads(data).get("choices") or []   # some chunks (e.g. trailing usage-only) carry none
-        if not choices:
-            continue
-        delta = choices[0].get("delta") or {}
-        if delta.get("content"):
-            content_parts.append(delta["content"])
-        for i, tc in enumerate(delta.get("tool_calls") or []):
-            slot = calls.setdefault(tc.get("index", i), {"id": "", "function": {"name": "", "arguments": ""}})
-            if tc.get("id"):
-                slot["id"] = tc["id"]
-            fn = tc.get("function") or {}
-            if fn.get("name"):
-                slot["function"]["name"] += fn["name"]
-            if fn.get("arguments"):
-                slot["function"]["arguments"] += fn["arguments"]
-    return {
-        "content": "".join(content_parts) or None,
-        "tool_calls": [calls[i] for i in sorted(calls)],
-    }
+        r = httpx.post(
+            f"{self._url}/chat/completions",
+            json=body,
+            headers={"Authorization": f"Bearer {self._key}"} if self._key else {},
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        return _to_reply(r.json()["choices"][0]["message"])
 
 
 def _as_function(spec: dict) -> dict:

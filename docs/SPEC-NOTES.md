@@ -1181,30 +1181,6 @@ None of the above touches the ML or Copilot pipeline (`copilot/`, synthetic gene
 schema). Fault injection, telemetry, and the plugin UI are infra/observability work only — no
 new model, no new retrieval behavior. Do not read this section as ML progress.
 
-## Copilot: switch LLM to on-prem gemma-4 (default profile)
-
-Moved the default LLM off the hosted NVIDIA backend (nemotron via `nim` + nvidia `.env`) to an
-on-prem **gemma-4** at `10.0.0.5:8888`. Probed the endpoint before touching code — it speaks the
-exact OpenAI `/chat/completions` wire the client already parses: streaming SSE + `[DONE]`,
-`delta.content`, native `tool_calls` (indexed deltas, id/name/arguments), multi-turn tool-result
-round-trip. **Zero server-side changes needed.** Added a `gemma` profile (ADR-0004) rather than
-env-overriding `nim`, because:
-
-- **Own base-url env** (`COPILOT_LLM_BASE_URL_GEMMA`): the hosted `.env` sets `nim`'s shared
-  `COPILOT_LLM_BASE_URL` to the nvidia URL, which would hijack the profile.
-- **Pinned, mangled model id** `mtp-gemma-4-26B-A4B-it-Q8_0` (changed once mid-test — server renames
-  it); override via `COPILOT_LLM_MODEL_GEMMA`.
-- Gemma is **keyless** and ignores the stray nvidia Bearer still in `.env` (verified) — no key change.
-- `embed_profile` stays `nim` (no gemma embedder); the profile enums are now split (`_LLM_PROFILES`
-  vs `_EMBED_PROFILES`) so `gemma` can't be set as an embed profile.
-
-**Server fault mode (transient, under concurrent load):** the shared box (nvext scheduler showed
-~20 concurrent reqs) returned a `503 upstream_error` once, and once a `200` with an **empty SSE
-stream** (0.3s, no content/tool_calls). 503 is now retried like a 429 (`http.py`, bounded 3 tries).
-The empty-`200` is **not** retried — a legitimately blank terminal turn is also possible (#126), so
-it degrades to an empty `Reply` the gate handles rather than masking real empties. If empty-200s
-recur at rate, that is a server bug (200 must carry a completion), not a client one.
-
 ## Copilot E1 (#42): the real end-to-end run — what real gpt-oss forced
 
 The first run with **zero doubles** (real gpt-oss-20b on NVIDIA-hosted nim + live dataapi + real

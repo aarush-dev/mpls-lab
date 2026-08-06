@@ -81,13 +81,11 @@ def setup(cfg=None):
     returns a completion. A dead endpoint / bad key fails HERE, loudly, before any question runs.
     """
     cfg = cfg or load()
-    assert cfg.llm_profile in ("nim", "gemma"), \
-        f"E1 runs a hosted OpenAI-compatible profile (nim|gemma), got {cfg.llm_profile!r}"
-    assert cfg.llm_profile == "gemma" or cfg.llm_api_key, \
-        "COPILOT_LLM_API_KEY unset -- put it in copilot/.env (gitignored)"
+    assert cfg.llm_profile == "nim", f"E1 runs the nim profile, got {cfg.llm_profile!r}"
+    assert cfg.llm_api_key, "COPILOT_LLM_API_KEY unset -- put it in copilot/.env (gitignored)"
 
     client = make_client(cfg)
-    assert isinstance(client, OpenAIClient), "hosted profile must resolve to the real HTTP client"
+    assert isinstance(client, OpenAIClient), "nim profile must resolve to the real HTTP client"
 
     dataapi = os.environ.get("COPILOT_DATAAPI_URL", cfg.dataapi_url)
     _assert_reachable(dataapi)
@@ -216,8 +214,8 @@ def _selfcheck():
     resolve, dataapi reachable, KB seeds over the real embedder, one model smoke -- WITHOUT the
     full question loop (so it's cheap). Needs the .env key + a live dataapi; skips if absent."""
     cfg = load()
-    if cfg.llm_profile not in ("nim", "gemma") or (cfg.llm_profile == "nim" and not cfg.llm_api_key):
-        print("e2e self-check SKIPPED (no hosted llm profile / key in copilot/.env)")
+    if cfg.llm_profile != "nim" or not cfg.llm_api_key:
+        print("e2e self-check SKIPPED (no nim key in copilot/.env)")
         return
     try:
         _assert_reachable(os.environ.get("COPILOT_DATAAPI_URL", cfg.dataapi_url))

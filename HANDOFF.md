@@ -304,12 +304,5 @@ per-fault records (#49); C1; Milestone B. Seeder does not set `node` on incident
 `search_incidents`-by-device narrows to empty (S1 follow-up, noted in #46). Default `/chat` KB still
 needs a seeded `COPILOT_KB_URI`.
 
-**LLM backend = on-prem gemma-4 (current default).** `llm_profile: gemma` → `10.0.0.5:8888`
-(OpenAI-compatible, keyless), model `mtp-gemma-4-26B-A4B-it-Q8_0`. Own base-url env
-(`COPILOT_LLM_BASE_URL_GEMMA`) so the hosted `.env`'s `COPILOT_LLM_BASE_URL` can't hijack it; model
-id overridable via `COPILOT_LLM_MODEL_GEMMA` (server renames it). `nim`/`unsloth-local` still
-selectable. Verified end-to-end (chat + native tool-calls + multi-turn); 503 now retried. See
-ADR-0004 + SPEC-NOTES "switch LLM to on-prem gemma-4".
-
 ## Git
 - Remote: `github.com/aarush-dev/mpls-lab` (public). `main` and `sidd` are level. Generated artifacts (`topology/`, `dataapi/datasets/`, `airgap/images/`, WG keys, `refs/`) are gitignored — reproduce via the generators. Exception: the three reference Parquets in `DATASETS.md` are force-added and tracked.

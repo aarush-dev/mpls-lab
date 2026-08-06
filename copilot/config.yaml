@@ -4,14 +4,14 @@
 # .env.example). Any secret key in this file is REJECTED by load().
 
 # -- backend profiles (ADR-0004 / ADR-0006): swap with one line ---------------
-llm_profile: gemma          # gemma (on-prem gemma-4, current) | nim | unsloth-local (air-gapped)
+llm_profile: nim            # nim (interim) | unsloth-local (final, air-gapped)
 embed_profile: nim          # nim | unsloth-local
 
 # -- feature flags ------------------------------------------------------------
 emulate_pa: true            # ADR-0003: PA-emulator feeds records until the real PA ships
 kg_enabled: true            # ADR-0007: curated KG -- additive, never critical-path
 ledger_to_kb: true          # ADR-0009: finalized case verdicts feed the Knowledge Base
-gate_enabled: true          # ADR-0008: I4a/I4b quality gate. See COPILOT_GATE_DISABLE env (app.py)
+gate_enabled: false         # ADR-0008: I4a/I4b quality gate. See COPILOT_GATE_DISABLE env (app.py)
 history_compaction: false   # ADR-0015: summarize old chat turns (off by default)
 
 # -- knobs --------------------------------------------------------------------
