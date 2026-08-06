@@ -144,8 +144,6 @@ production prediction stack and the fully-offline LLM deployment are still futur
 **Future work (not built here)**
 - **The production prediction stack** — the experts + meta-learner that emit real Prediction
   Records. A separate workstream owns this; the copilot uses the emulator in its place today.
-  *(Design lives in `docs/plans/PA.md`; it is not built in this repo, so this document set does
-  not cover its training, architecture, or results.)*
 - **Fully-offline LLM deployment.** The end-to-end run used a network-hosted model. The local
   offline profile (`unsloth-local`) exists as a configured path, but an air-gapped end-to-end LLM
   run has not been demonstrated yet. *(The data/telemetry stack's air-gap is verified on its own.)*
