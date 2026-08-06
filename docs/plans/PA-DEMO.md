@@ -96,3 +96,10 @@ output — no ground-truth echo.
 - Rank logic: ambient-high stays silent, injected spike fires (unit + live smoke).
 - /alerts shape matches the banner; toast on new alert.
 - Model detects faults on its own data: 76% TPR @ ~1% FPR (labeled test windows).
+- **Full dry-run (2026-08-06, mode A):** `congestion high ce_branch7 300s`. 0 alerts
+  through buildup; fired **pre-impact** at p_any 0.81 (~74 s before t_impact), climbed
+  0.81→0.90→0.98, ETA counting down, on the `:8000/pa/alerts` dashboard feed. Only the
+  injected device sustained (one collateral device was a 2-tick transient, cleared).
+- **Threshold mode B not demo-ready:** even after 15-min recalibration it over-fires on
+  the live lab (device calibrated_probability is non-stationary, swings ~0.5–0.8 healthy).
+  Needs a 45–60 min healthy calibration to set per-entity bars above the swings. Use A.
