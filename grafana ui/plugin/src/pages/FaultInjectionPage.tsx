@@ -1,157 +1,197 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { PluginPage } from '@grafana/runtime';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { useStyles2, Select, Button, Icon, Alert } from '@grafana/ui';
 
-import { useAppState, useAppDispatch } from '../state/AppContext';
+import { LIVE_REFRESH_MS } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
-import { FaultScenario, InjectFaultRequest, TopologyNode } from '../data/types';
+import { ActiveFault, FaultScenario, InjectFaultRequest, TopologyNode } from '../data/types';
+import { targetOptions, isValidTarget } from '../data/faultTargets';
 import { nodeDetailPath } from '../constants';
 
 // Fault Injection: fires a REAL fault in the simulated lab (dataapi /faults/inject -> orchestrator
-// -> docker exec) so live graphs + logs actually break, AND drives the client-side visual escalation
-// (state.injectedFaults) for instant amber->red feedback. Auto-reverts after `duration`; "Revert now"
-// (/faults/revert) cancels early. If the real inject fails, the optimistic visual is rolled back.
+// -> docker exec) and watches each injection follow the backend's true lifecycle
+// (buildup -> impact -> hold -> revert) via GET /faults/active. No client-side visual layer: the
+// rows ARE the registry, so they survive a page refresh and clear when the backend reverts.
 
-// Fallback scenario list if the backend /faults/scenarios probe fails (e.g. mock mode).
-const FALLBACK_SCENARIOS = [
-  'node_failure', 'congestion', 'bgp_flap', 'ospf_area_flap', 'ldp_session_flap', 'tunnel_degrade',
-  'controller_drift', 'policy_drift', 'core_partition', 'pop_isolation', 'srlg_cut', 'gray_failure',
-];
-const DURATIONS = [30, 60, 90, 180];
+const SEVERITIES: Array<InjectFaultRequest['severity']> = ['low', 'medium', 'high'];
+const DEFAULT_DURATION = 90;
 
-// Persist node -> scenario_id so "Revert now" survives a page refresh.
-const INJECT_IDS_KEY = 'noc.injectIds';
-function loadInjectIds(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(INJECT_IDS_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
-}
-
+// The fault methods live on HttpDataClient beyond the shared DataClient interface; mock mode has
+// none of them, so the page degrades to an empty (visual-only) list.
 interface FaultApi {
   getScenarios?: () => Promise<FaultScenario[]>;
   injectFault?: (r: InjectFaultRequest) => Promise<{ scenario_id: string }>;
+  getActiveFaults?: () => Promise<ActiveFault[]>;
   revertFault?: (id: string) => Promise<unknown>;
+}
+
+const parseMs = (iso?: string | null): number | undefined => {
+  if (!iso) {
+    return undefined;
+  }
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? undefined : ms;
+};
+
+/** Phase-driven display: color, icon, and a live countdown label recomputed from cached times. */
+function phaseView(f: ActiveFault, nowMs: number, styles: ReturnType<typeof getStyles>) {
+  const impactMs = parseMs(f.t_impact);
+  const sec = (ms: number) => Math.max(0, Math.round((ms - nowMs) / 1000));
+  if (f.phase === 'reverting') {
+    return { color: styles.pending, icon: 'clock-nine' as const, label: 'reverting…' };
+  }
+  if (f.phase === 'impact') {
+    const revertMs = impactMs !== undefined && f.duration != null ? impactMs + f.duration * 1000 : undefined;
+    return {
+      color: styles.red,
+      icon: 'exclamation-circle' as const,
+      label: revertMs !== undefined ? `impact · hold, revert in ${sec(revertMs)}s` : 'impact · hold',
+    };
+  }
+  // buildup (or a null phase in the sub-ms window before the worker's first status write).
+  return {
+    color: styles.amber,
+    icon: 'exclamation-triangle' as const,
+    label: impactMs !== undefined ? `buildup · impact in ${sec(impactMs)}s` : 'buildup · arming…',
+  };
 }
 
 export function FaultInjectionPage() {
   const styles = useStyles2(getStyles);
-  const { injectedFaults } = useAppState();
-  const dispatch = useAppDispatch();
   const dataClient = useDataClient();
   const faultApi = dataClient as unknown as FaultApi;
 
   const [nodes, setNodes] = useState<TopologyNode[]>([]);
   const [scenarios, setScenarios] = useState<FaultScenario[]>([]);
-  const [node, setNode] = useState<string | undefined>(undefined);
-  const [scenario, setScenario] = useState<string>(FALLBACK_SCENARIOS[0]);
-  const [duration, setDuration] = useState<number>(90);
+  const [scenario, setScenario] = useState<string | undefined>(undefined);
+  const [target, setTarget] = useState<string | undefined>(undefined);
+  const [severity, setSeverity] = useState<InjectFaultRequest['severity']>('medium');
+  const [duration, setDuration] = useState<number>(DEFAULT_DURATION);
+  const [active, setActive] = useState<ActiveFault[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  // node -> backend scenario_id, so "Revert now" can cancel the real fault early.
-  // Persisted (localStorage) so early-revert still works after a page refresh.
-  const [injectIds, setInjectIds] = useState<Record<string, string>>(loadInjectIds);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(INJECT_IDS_KEY, JSON.stringify(injectIds));
-    } catch {
-      // storage unavailable — ids just won't survive refresh.
-    }
-  }, [injectIds]);
-
+  // Topology + real scenario catalog. Re-runs if the client swaps (mock<->live); a client outage
+  // just leaves the catalog empty (Inject stays disabled) rather than throwing.
   useEffect(() => {
     let cancelled = false;
-    dataClient.getTopology({}).then((g) => {
-      if (!cancelled) {
-        setNodes(g.nodes);
-      }
-    });
-    if (typeof faultApi.getScenarios === 'function') {
-      faultApi
-        .getScenarios()
-        .then((s) => !cancelled && Array.isArray(s) && s.length > 0 && setScenarios(s))
-        .catch(() => undefined);
-    }
+    dataClient.getTopology({}).then((g) => !cancelled && setNodes(g.nodes)).catch(() => undefined);
+    faultApi
+      .getScenarios?.()
+      .then((s) => {
+        if (!cancelled && Array.isArray(s) && s.length > 0) {
+          setScenarios(s);
+          setScenario((cur) => cur ?? s[0].name);
+          setDuration((cur) => (cur === DEFAULT_DURATION ? s[0].default_duration : cur));
+        }
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [dataClient, faultApi]);
 
-  const scenarioNames: string[] = scenarios.length > 0 ? scenarios.map((s) => String(s.name)) : FALLBACK_SCENARIOS;
+  // Active-fault registry: own ~5s poll (mode-independent — the tab drives real faults even when
+  // the global clock is paused in history). `mutSeq` drops a stale in-flight response that would
+  // otherwise resurrect a row an optimistic revert just cleared.
+  const mutSeq = useRef(0);
+  const fetchActive = useCallback(() => {
+    const seq = mutSeq.current;
+    faultApi
+      .getActiveFaults?.()
+      .then((a) => Array.isArray(a) && seq === mutSeq.current && setActive(a))
+      .catch(() => undefined);
+  }, [faultApi]);
+  useEffect(() => {
+    fetchActive();
+    const id = setInterval(fetchActive, LIVE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [fetchActive]);
 
-  const nodeOptions = useMemo<Array<SelectableValue<string>>>(
-    () => nodes.map((n) => ({ label: `${n.id} (${n.role})`, value: n.id })),
-    [nodes]
-  );
+  // Local 1s display tick: recompute countdown labels from cached impact times (no network).
+  useEffect(() => {
+    if (active.length === 0) {
+      return undefined;
+    }
+    setNowMs(Date.now()); // fresh clock on (re)start so the first label isn't stale
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active.length]);
+
+  const current = useMemo(() => scenarios.find((s) => s.name === scenario), [scenarios, scenario]);
+  const validRoles = current?.valid_roles ?? [];
+  // Only device targets have a node-detail page; pop/srlg/custom targets render as plain text.
+  const nodeIds = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
+
   const scenarioOptions = useMemo<Array<SelectableValue<string>>>(
-    () => scenarioNames.map((f) => ({ label: f, value: f })),
-    [scenarioNames]
+    () => scenarios.map((s) => ({ label: s.name, value: s.name, description: s.description })),
+    [scenarios]
   );
+  const targetOpts = useMemo<Array<SelectableValue<string>>>(
+    () => targetOptions(validRoles, nodes).map((o) => ({ label: o.label, value: o.value })),
+    [validRoles, nodes]
+  );
+
+  const onScenario = (name?: string) => {
+    if (!name) {
+      return;
+    }
+    setScenario(name);
+    setTarget(undefined);
+    const s = scenarios.find((x) => x.name === name);
+    if (s) {
+      setDuration(s.default_duration);
+    }
+  };
 
   const inject = async () => {
-    if (!node) {
+    if (!scenario || !target) {
       return;
     }
     setErr(null);
-    // Optimistic client-side visual escalation (instant feedback).
-    dispatch({ type: 'INJECT_FAULT', payload: { node, faultType: scenario } });
-
+    // Client-side coarse role pre-check; the backend 422 is the backstop for sub-role rules.
+    if (validRoles.length > 0 && !isValidTarget(target, validRoles)) {
+      setErr(`Target '${target}' is not valid for '${scenario}' (roles: ${validRoles.join(', ')}).`);
+      return;
+    }
     if (typeof faultApi.injectFault !== 'function') {
-      return; // mock mode: visual only.
+      setErr('Backend offline — fault injection unavailable in demo mode.');
+      return;
     }
     setBusy(true);
     try {
-      const res = await faultApi.injectFault({ scenario, target: node, duration });
-      if (res?.scenario_id) {
-        setInjectIds((m) => ({ ...m, [node]: res.scenario_id }));
-      }
+      await faultApi.injectFault({ scenario, target, severity, duration });
+      fetchActive(); // reflect the new injection immediately
     } catch (e) {
-      // Real inject failed — roll back the visual so we never show a fault the sim didn't take.
-      dispatch({ type: 'CLEAR_FAULT', payload: { node } });
       const msg = (e as { message?: string })?.message ?? 'inject failed';
-      setErr(`Could not inject ${scenario} on ${node}: ${msg}`);
+      setErr(`Could not inject ${scenario} on ${target}: ${msg}`);
     } finally {
       setBusy(false);
     }
   };
 
-  const clearOne = (n: string) => {
-    dispatch({ type: 'CLEAR_FAULT', payload: { node: n } });
-    const id = injectIds[n];
-    if (id && typeof faultApi.revertFault === 'function') {
-      faultApi.revertFault(id).catch(() => undefined);
-    }
-    setInjectIds((m) => {
-      const next = { ...m };
-      delete next[n];
-      return next;
-    });
+  const revertOne = (id: string) => {
+    mutSeq.current++; // invalidate any in-flight fetch so it can't resurrect this row
+    faultApi.revertFault?.(id).catch(() => undefined);
+    setActive((a) => a.filter((f) => f.scenario_id !== id)); // optimistic; next poll confirms
   };
-
-  const clearAll = () => {
-    if (typeof faultApi.revertFault === 'function') {
-      Object.values(injectIds).forEach((id) => faultApi.revertFault!(id).catch(() => undefined));
-    }
-    setInjectIds({});
-    dispatch({ type: 'CLEAR_INJECTED' });
+  const revertAll = () => {
+    mutSeq.current++;
+    active.forEach((f) => faultApi.revertFault?.(f.scenario_id).catch(() => undefined));
+    setActive([]);
   };
-
-  const liveApi = typeof faultApi.injectFault === 'function';
 
   return (
     <PluginPage>
       <h1>Fault Injection</h1>
       <p className={styles.help}>
-        Fires a <strong>real</strong> fault in the simulated lab — live graphs and logs actually break —
-        and shows instant escalation: healthy ~5s, then a prediction (<span className={styles.amber}>amber</span>,
-        30/60/90s lead — Grafana Alerting + toast), then <span className={styles.red}>red</span> across every page.
-        The fault auto-reverts after the chosen duration; <em>Revert now</em> cancels it early.
-        {!liveApi && ' (Backend offline — running in visual-only demo mode.)'}
+        Fires a <strong>real</strong> fault in the simulated lab — live graphs and logs actually break — then
+        follows the backend lifecycle: <span className={styles.amber}>buildup</span> (precursor lead) →{' '}
+        <span className={styles.red}>impact</span> → hold → auto-revert after the duration. <em>Revert now</em>{' '}
+        cancels early.
       </p>
 
       {err && (
@@ -162,61 +202,79 @@ export function FaultInjectionPage() {
 
       <div className={styles.controls}>
         <Select
-          placeholder="Select node"
-          options={nodeOptions}
-          value={node ? { label: node, value: node } : null}
-          onChange={(v) => setNode(v?.value)}
-          width={32}
-        />
-        <Select
+          placeholder="Scenario"
           options={scenarioOptions}
-          value={{ label: scenario, value: scenario }}
-          onChange={(v) => v?.value && setScenario(v.value)}
+          value={scenario ? { label: scenario, value: scenario } : null}
+          onChange={(v) => onScenario(v?.value)}
           width={28}
         />
+        <Select
+          placeholder="Target"
+          options={targetOpts}
+          value={target ? { label: target, value: target } : null}
+          onChange={(v) => setTarget(v?.value)}
+          allowCustomValue
+          onCreateOption={(v) => setTarget(v)}
+          width={30}
+        />
+        <Select<InjectFaultRequest['severity']>
+          options={SEVERITIES.map((s) => ({ label: s!, value: s }))}
+          value={{ label: severity!, value: severity }}
+          onChange={(v) => v?.value && setSeverity(v.value)}
+          width={16}
+        />
         <Select<number>
-          options={DURATIONS.map((d) => ({ label: `${d}s`, value: d }))}
+          options={[30, 60, 90, 180].map((d) => ({ label: `${d}s`, value: d }))}
           value={{ label: `${duration}s`, value: duration }}
           onChange={(v) => v?.value && setDuration(v.value)}
+          allowCustomValue
+          onCreateOption={(v) => {
+            const n = Number(v);
+            if (Number.isFinite(n) && n > 0) {
+              setDuration(Math.round(n));
+            }
+          }}
           width={14}
         />
-        <Button icon="bolt" variant="destructive" onClick={inject} disabled={!node || busy}>
+        <Button icon="bolt" variant="destructive" onClick={inject} disabled={!scenario || !target || busy}>
           {busy ? 'Injecting…' : 'Inject fault'}
         </Button>
       </div>
 
       <div className={styles.activeHead}>
-        <h3 className={styles.sectionTitle}>Active injected faults ({injectedFaults.length})</h3>
-        {injectedFaults.length > 0 && (
-          <Button size="sm" variant="secondary" fill="outline" onClick={clearAll}>
+        <h3 className={styles.sectionTitle}>Active faults ({active.length})</h3>
+        {active.length > 0 && (
+          <Button size="sm" variant="secondary" fill="outline" onClick={revertAll}>
             Revert all
           </Button>
         )}
       </div>
 
-      {injectedFaults.length === 0 ? (
+      {active.length === 0 ? (
         <span className={styles.empty}>None. Inject a fault above.</span>
       ) : (
         <ul className={styles.list}>
-          {injectedFaults.map((f) => (
-            <li key={f.node} className={styles.row}>
-              <Icon
-                name={f.phase === 'down' ? 'exclamation-circle' : f.phase === 'predicted' ? 'exclamation-triangle' : 'clock-nine'}
-                className={f.phase === 'predicted' ? styles.amber : f.phase === 'pending' ? styles.pending : styles.red}
-              />
-              <a className={styles.node} href={nodeDetailPath(f.node)}>
-                {f.node}
-              </a>
-              <span className={styles.fault}>
-                {f.faultType} ·{' '}
-                {f.phase === 'pending' ? 'arming…' : f.phase === 'predicted' ? `predicted in ${f.leadSec}s` : 'down'}
-                {injectIds[f.node] ? ' · live' : ''}
-              </span>
-              <Button size="sm" variant="secondary" fill="outline" onClick={() => clearOne(f.node)}>
-                Revert now
-              </Button>
-            </li>
-          ))}
+          {active.map((f) => {
+            const v = phaseView(f, nowMs, styles);
+            return (
+              <li key={f.scenario_id} className={styles.row}>
+                <Icon name={v.icon} className={v.color} />
+                {nodeIds.has(f.target) ? (
+                  <a className={styles.node} href={nodeDetailPath(f.target)}>
+                    {f.target}
+                  </a>
+                ) : (
+                  <span className={styles.node}>{f.target}</span>
+                )}
+                <span className={styles.fault}>
+                  {f.scenario} · {v.label}
+                </span>
+                <Button size="sm" variant="secondary" fill="outline" onClick={() => revertOne(f.scenario_id)}>
+                  Revert now
+                </Button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </PluginPage>
