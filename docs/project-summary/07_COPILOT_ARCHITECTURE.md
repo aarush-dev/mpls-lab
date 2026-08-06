@@ -35,7 +35,7 @@ flowchart LR
     DISP --> WS["workspace tools<br/>(read/write/edit/bash/present)"]
     TOOLS -->|observation + Cites| LLM
     WS -->|observation| LLM
-    LLM -->|answer + [source:offset]| GATE["quality gate<br/>pre-gate + self-judge"]
+    LLM -->|"answer + [source:offset]"| GATE["quality gate<br/>pre-gate + self-judge"]
     GATE -->|pass| ANS["cited answer"]
     GATE -->|fail ≤2| LLM
     GATE -->|final fail| MISS["'what's missing'"]
