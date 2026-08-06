@@ -2,11 +2,6 @@
 
 **Air-Gapped Predictive NOC Copilot — ISRO BAH 2026**
 
-This folder documents the project as a full engineering system: what was built, why, how the
-pieces fit together, and where the project stands. It is written for a technical reader who wants
-the whole picture without reading source files. It does not replace the reference docs under
-`docs/01_…`–`docs/05_…`; it sits above them.
-
 > **Document set.** This overview is the map. The rest drill in:
 > [01 Simulation](01_SIMULATION.md) ·
 > [02 Dataset Generation](02_DATASET_GENERATION.md) ·
@@ -15,12 +10,6 @@ the whole picture without reading source files. It does not replace the referenc
 > [09 Deployment & Demo](09_DEPLOYMENT_AND_DEMO.md) ·
 > [10 Future Prospects](10_FUTURE_PROSPECTS.md)
 >
-> **Scope note.** The predictive ML stack (feature/representation learning, expert models,
-> meta-learner, training, results) is a **separate workstream and is not built in this
-> repository.** This repo builds the network, telemetry, and data foundation, plus the LLM-facing
-> copilot. It talks to the prediction stack through one JSON handoff (the *Prediction Record*) and
-> stands in for it with a full-fidelity emulator. Docs about training and model internals are
-> therefore not part of this set.
 
 ---
 
