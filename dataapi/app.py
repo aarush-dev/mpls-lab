@@ -125,8 +125,8 @@ def flows(
 
 
 @app.get("/labels")
-def labels():
-    return {"rows": sources.label_rows()}
+def labels(device: str = Query(None)):
+    return {"rows": sources.label_rows(device=device)}
 
 
 @app.get("/topology")

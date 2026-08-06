@@ -210,20 +210,26 @@ export class HttpDataClient implements DataClient {
     }
   }
 
-  // /labels is 174KB and every node load fetches it 3x (topology + incidents + predictions).
-  // Collapse concurrent/burst calls onto one in-flight request with a 2s TTL so a single load —
-  // and its 5s refresh siblings — pay for it once. ponytail: process-wide, fine for one browser tab.
-  private labelsCache?: { at: number; p: Promise<RawLabelRow[]> };
-  private async fetchLabels(): Promise<RawLabelRow[]> {
+  // Full /labels was 174KB and every node load fetched it 3x (topology + incidents + predictions).
+  // The server now supports ?device= to scope the response, so per-device callers (incidents,
+  // predictions) send only their device's rows over the tunnel. Collapse concurrent/burst calls
+  // onto one in-flight request per cache key (device, or '' for the full set) with a 2s TTL so a
+  // single load — and its 5s refresh siblings — pay for it once.
+  // ponytail: process-wide Map, fine for one browser tab.
+  private labelsCache = new Map<string, { at: number; p: Promise<RawLabelRow[]> }>();
+  private async fetchLabels(device?: string): Promise<RawLabelRow[]> {
+    const key = device ?? '';
     const now = Date.now();
-    if (this.labelsCache && now - this.labelsCache.at < 2000) {
-      return this.labelsCache.p;
+    const cached = this.labelsCache.get(key);
+    if (cached && now - cached.at < 2000) {
+      return cached.p;
     }
-    const p = this.fetchJson<{ rows: RawLabelRow[] }>('/labels').then((resp) => resp.rows ?? []);
-    this.labelsCache = { at: now, p };
+    const url = device ? `/labels?device=${encodeURIComponent(device)}` : '/labels';
+    const p = this.fetchJson<{ rows: RawLabelRow[] }>(url).then((resp) => resp.rows ?? []);
+    this.labelsCache.set(key, { at: now, p });
     p.catch(() => {
-      if (this.labelsCache?.p === p) {
-        this.labelsCache = undefined; // don't cache a rejection
+      if (this.labelsCache.get(key)?.p === p) {
+        this.labelsCache.delete(key); // don't cache a rejection
       }
     });
     return p;
@@ -393,7 +399,7 @@ export class HttpDataClient implements DataClient {
   // --- incidents / predictions (derived from /labels) -----------------------------------------
 
   async getIncidents(filters: Filters): Promise<Incident[]> {
-    const labels = await this.fetchLabels();
+    const labels = await this.fetchLabels(filters.device);
     const nowS = Date.now() / 1000;
     const out: Incident[] = [];
     for (const l of labels) {
@@ -435,7 +441,7 @@ export class HttpDataClient implements DataClient {
   }
 
   async getPredictions(filters: Filters): Promise<Prediction[]> {
-    const labels = await this.fetchLabels();
+    const labels = await this.fetchLabels(filters.device);
     const nowS = Date.now() / 1000;
     const out: Prediction[] = [];
     for (const l of labels) {

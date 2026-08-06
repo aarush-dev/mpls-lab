@@ -14,7 +14,7 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
  *  tick queued 38 un-abortable fetches/sec into the browser's ~6 conn/origin slots faster than they
  *  drained → permanent slot starvation → node detail stuck on "Loading…". 5s drains fine. If sub-5s
  *  liveness is ever needed, abort superseded fetches in the effect cleanup first, then lower this. */
-export const LIVE_REFRESH_MS = 5000;
+export const LIVE_REFRESH_MS = 30000;
 
 // Global time context. In live mode a 1s interval dispatches TICK{nowMs}, sliding the window to
 // [now-liveWindow, now] and bumping refreshTick so every page refetches. In history mode the

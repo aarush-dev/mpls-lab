@@ -17,7 +17,7 @@ import { stateColors } from '../data/topologyStyles';
 export function TopologyPage() {
   const styles = useStyles2(getStyles);
   const history = useHistory();
-  const { refreshTick, range, filters } = useAppState();
+  const { range, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [nodes, setNodes] = useState<TopologyNodeLive[]>([]);
@@ -28,7 +28,7 @@ export function TopologyPage() {
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
   const [snapshot, setSnapshot] = useState<MetricSeries[] | null>(null);
 
-  // Lazily pull the hovered node's telemetry for the mini card (one small fetch per hover).
+  // ponytail: refetch on hovered node change only, not every refreshTick.
   const hoverId = hover?.id ?? null;
   useEffect(() => {
     if (!hoverId) {
@@ -44,13 +44,12 @@ export function TopologyPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, hoverId, refreshTick, range.fromMs, range.toMs]);
+  }, [dataClient, hoverId]);
 
+  // ponytail: graph structure is static — refetch on filter change / mount / manual reload only,
+  // not on every refreshTick.
   useEffect(() => {
     let cancelled = false;
-    // Do NOT flip to 'loading' on refresh ticks — that unmounts the graph every 5s and makes it
-    // blink/re-layout. Keep the mounted graph and just replace its data; only the very first load
-    // (or a manual reload) shows the loading state.
     dataClient
       .getTopology(filters)
       .then((graph) => {
@@ -71,7 +70,7 @@ export function TopologyPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, refreshTick, filters, reloadToken]);
+  }, [dataClient, filters, reloadToken]);
 
   const filteredNodes = useMemo(() => {
     const term = search.trim().toLowerCase();

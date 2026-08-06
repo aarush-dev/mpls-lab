@@ -18,10 +18,15 @@ import json
 import glob
 import os
 import subprocess
+import time
 from datetime import datetime, timezone
 
 import httpx
 import yaml
+
+# ponytail: mtime/TTL caches, module-level dicts -- ceiling is single-process
+# dataapi; a multi-worker deploy would need a shared cache (out of scope).
+_cache = {}
 
 # --- endpoints (localhost-mapped; fall back to container IPs if remapped) ---
 VM_URL = os.environ.get("VM_URL", "http://127.0.0.1:8428")
@@ -105,6 +110,9 @@ def events_rows(start: int, end: int, device: str = None, limit: int = 1000):
 # --------------------------------------------------------------------------
 # FLOWS -- nfacctd JSON purge records (printed to its stdout/log)
 # --------------------------------------------------------------------------
+_FLOW_TTL_S = float(os.environ.get("FLOW_CACHE_TTL_S", "5"))
+
+
 def flow_rows(limit: int = 500, device: str = None, since: int = None, until: int = None):
     """Parse recent nfacctd JSON flow records from `docker logs`.
     ponytail: nfacctd prints one JSON object per purged flow; we tail the log.
@@ -113,7 +121,21 @@ def flow_rows(limit: int = 500, device: str = None, since: int = None, until: in
     since/until (epoch s) scope the fetch itself, so a window is not silently
     reduced to whatever happens to be in the newest log lines. Raises on any
     docker failure -- a dead source must not look like "there were no flows".
+
+    ponytail: short-TTL cache -- `docker logs` is the heaviest call here and
+    the plugin polls constantly; a few-second staleness is fine.
     """
+    key = ("flow_rows", limit, device, since, until)
+    now = time.monotonic()
+    hit = _cache.get(key)
+    if hit and now - hit[0] < _FLOW_TTL_S:
+        return hit[1]
+    rows = _flow_rows_uncached(limit, device, since, until)
+    _cache[key] = (now, rows)
+    return rows
+
+
+def _flow_rows_uncached(limit, device, since, until):
     # 4 log lines per wanted record is empirical slack for non-purge chatter.
     cmd = ["docker", "logs", "--tail", str(limit * 4)]
     if since is not None:
@@ -156,14 +178,31 @@ def flow_rows(limit: int = 500, device: str = None, since: int = None, until: in
 # --------------------------------------------------------------------------
 # LABELS -- ground-truth fault timeline
 # --------------------------------------------------------------------------
-def label_rows():
-    rows = []
-    for path in sorted(glob.glob(LABELS_GLOB)):
-        with open(path) as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    rows.append(json.loads(line))
+def _label_device(row: dict):
+    """Mirror plugin's HttpDataClient.deviceOf: target.device, else device.
+    `target` is sometimes a bare device-name string, not a dict."""
+    target = row.get("target")
+    return (target.get("device") if isinstance(target, dict) else None) or row.get("device")
+
+
+def label_rows(device: str = None):
+    paths = sorted(glob.glob(LABELS_GLOB))
+    cache_key = ("label_rows", tuple(paths))
+    mtime_key = tuple(os.path.getmtime(p) for p in paths)
+    hit = _cache.get(cache_key)
+    if hit and hit[0] == mtime_key:
+        rows = hit[1]
+    else:
+        rows = []
+        for path in paths:
+            with open(path) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        rows.append(json.loads(line))
+        _cache[cache_key] = (mtime_key, rows)
+    if device:
+        rows = [r for r in rows if _label_device(r) == device]
     return rows
 
 
@@ -198,6 +237,17 @@ def _vrfs_for(role: str, spec: dict) -> list:
 
 
 def topology_graph():
+    paths = [CLAB_YML] + ([SPEC_YML] if os.path.exists(SPEC_YML) else [])
+    mtime_key = tuple(os.path.getmtime(p) for p in paths)
+    hit = _cache.get("topology_graph")
+    if hit and hit[0] == mtime_key:
+        return hit[1]
+    graph = _topology_graph_uncached()
+    _cache["topology_graph"] = (mtime_key, graph)
+    return graph
+
+
+def _topology_graph_uncached():
     clab = yaml.safe_load(open(CLAB_YML))
     spec = yaml.safe_load(open(SPEC_YML)) if os.path.exists(SPEC_YML) else {}
     nodes_in = clab["topology"]["nodes"]
@@ -221,3 +271,19 @@ def topology_graph():
         links.append({"source": an, "target": bn, "source_if": ai, "target_if": bi})
 
     return {"nodes": nodes, "links": links}
+
+
+if __name__ == "__main__":
+    g1 = topology_graph()
+    g2 = topology_graph()
+    assert g1 == g2 and g1 is _cache["topology_graph"][1] is g2, "topology cache mismatch"
+
+    all_rows = label_rows()
+    all_rows2 = label_rows()
+    assert all_rows == all_rows2, "label cache mismatch"
+    assert all_rows, "expected at least one label row for this self-check"
+    dev = _label_device(all_rows[0])
+    filtered = label_rows(device=dev)
+    assert 0 < len(filtered) <= len(all_rows), "device filter did not narrow rows"
+    assert all(_label_device(r) == dev for r in filtered), "device filter leaked rows"
+    print("sources.py self-check OK")

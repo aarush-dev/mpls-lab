@@ -40,6 +40,19 @@ export function NodeDetailPage() {
     setTelemetry(null);
   }, [id]);
 
+  // ponytail: topology is static graph structure — fetch once per device, not on every refreshTick.
+  useEffect(() => {
+    let cancelled = false;
+    dataClient.getTopology({}).then((topologyResult) => {
+      if (!cancelled) {
+        setTopology(topologyResult);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataClient, id]);
+
   useEffect(() => {
     let cancelled = false;
     setError(false);
@@ -51,18 +64,16 @@ export function NodeDetailPage() {
 
     Promise.all([
       dataClient.getTelemetry({ deviceId: id, timeRange }),
-      dataClient.getTopology({}),
       dataClient.getIncidents({ device: id }),
       dataClient.getPredictions({ device: id }),
       dataClient.getEvents({ device: id, timeRange: eventsTimeRange }),
       dataClient.getFlows({ device: id, timeRange }),
     ])
-      .then(([telemetryResult, topologyResult, incidentsResult, predictionsResult, eventsResult, flowsResult]) => {
+      .then(([telemetryResult, incidentsResult, predictionsResult, eventsResult, flowsResult]) => {
         if (cancelled) {
           return;
         }
         setTelemetry(telemetryResult);
-        setTopology(topologyResult);
         setIncidents(incidentsResult);
         setPredictions(predictionsResult);
         setEvents(eventsResult);
