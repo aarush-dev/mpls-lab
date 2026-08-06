@@ -530,8 +530,12 @@ def _fill_vrf(df):
     return df
 
 
-def build_dataset(start: int, end: int, step: int = 30) -> str:
-    """Build the joined labeled Parquet for [start,end]; return its path."""
+def export_df(start: int, end: int, step: int = 30):
+    """Assemble the joined labeled table for [start,end] and RETURN the DataFrame
+    (no write). Same rows/schema `build_dataset` persists -- one per
+    (device, entity, entity_type, ts-bucket) x the canonical COLUMNS. This is the
+    live seam the copilot window builder reads (PA-A5): a 30 s step over the last
+    84 min gives the 168x28 window the PA model wants, channels in COLUMNS order."""
     iface = _collect(_IF_METRICS, "interface", "interface", start, end, step)
     tunnel = _collect(_TUN_METRICS, "tunnel", "tunnel", start, end, step)
     # device-scoped rows: the entity label IS the device name
@@ -563,6 +567,12 @@ def build_dataset(start: int, end: int, step: int = 30) -> str:
     base = _apply_labels(base, step)
     base = _fill_vrf(base)
     base = finalize_schema(base)
+    return base
+
+
+def build_dataset(start: int, end: int, step: int = 30) -> str:
+    """Build the joined labeled Parquet for [start,end]; return its path."""
+    base = export_df(start, end, step)
 
     fname = f"dataset_{start}_{end}_{step}s.parquet"
     path = os.path.join(DATASETS_DIR, fname)
