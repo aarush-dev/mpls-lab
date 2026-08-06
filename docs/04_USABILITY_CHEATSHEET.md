@@ -210,7 +210,7 @@ python3 orchestrator.py --scenario congestion --target ce_branch1 --severity hig
 curl localhost:8000/faults/scenarios                      # list 21 scenarios + valid target roles
 curl -X POST 127.0.0.1:8000/faults/inject -H 'Content-Type: application/json' \
   -d '{"scenario":"node_failure","target":"ce_branch3","duration":45}'
-curl localhost:8000/faults/active                          # what's running now (+ phase/lead/t_impact)
+curl localhost:8000/faults/active                          # what's running now (+ phase/lead/t_impact, type/cause+severity)
 curl -X POST localhost:8000/faults/revert/<scenario_id>    # early revert
 ```
 ```bash
