@@ -38,12 +38,14 @@ class _OAIHandler(http.server.BaseHTTPRequestHandler):
         self.server.auths.append(self.headers.get("Authorization"))
         msg = self.server.replies[self.server.i]
         self.server.i += 1
-        payload = json.dumps({"choices": [{"message": msg}]}).encode()
+        # SSE, matching the real client's `stream: True` request (#trigger-crash timeout fix):
+        # one delta chunk carrying the whole scripted message, then [DONE].
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
-        self.wfile.write(payload)
+        chunk = {"choices": [{"delta": msg}]}
+        self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
 
     def log_message(self, *a):
         pass
@@ -104,10 +106,12 @@ def test_make_client_profile_swap_moves_endpoint_and_model():
     import os
     saved = {k: os.environ.pop(k, None) for k in
              ("COPILOT_LLM_BASE_URL", "COPILOT_LLM_MODEL_NIM",
-              "COPILOT_LLM_BASE_URL_LOCAL", "COPILOT_LLM_MODEL_LOCAL")}
+              "COPILOT_LLM_BASE_URL_LOCAL", "COPILOT_LLM_MODEL_LOCAL",
+              "COPILOT_LLM_BASE_URL_GEMMA", "COPILOT_LLM_MODEL_GEMMA")}
     try:
         nim = make_client(_cfg(llm_profile="nim"))
         local = make_client(_cfg(llm_profile="unsloth-local"))
+        gemma = make_client(_cfg(llm_profile="gemma"))
     finally:
         os.environ.update({k: v for k, v in saved.items() if v is not None})
     assert isinstance(nim, OpenAIClient) and isinstance(local, OpenAIClient)
@@ -115,6 +119,10 @@ def test_make_client_profile_swap_moves_endpoint_and_model():
         "distinct model per profile -- a swap must not reuse the wrong model id"
     assert nim._url != local._url, \
         "distinct endpoint per profile -- flipping to unsloth-local must not hit the nim URL"
+    # gemma resolves to its own on-prem endpoint + model, NOT nim's base-url env (which a hosted
+    # .env sets to the nvidia URL -- gemma must not inherit it)
+    assert gemma._model == "mtp-gemma-4-26B-A4B-it-Q8_0"
+    assert gemma._url == "http://10.0.0.5:8888/v1" and gemma._url != nim._url
     # defense-in-depth: an unvalidated profile (bypassing Config's enum check) is rejected
     raised = False
     try:
@@ -142,6 +150,49 @@ def test_api_key_sent_only_when_present():
         OpenAIClient(srv.url, "m", "").chat([{"role": "user", "content": "hi"}])
         assert srv.auths[0] == "Bearer sk-xyz"
         assert srv.auths[1] is None, "no key -> no Authorization header"
+
+
+class _FlakyHandler(http.server.BaseHTTPRequestHandler):
+    # 503 for the first `fail_n` requests, then a normal SSE completion. Mirrors the shared on-prem
+    # gemma box returning `upstream_error` 503 under concurrent load.
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(n)
+        self.server.hits += 1
+        if self.server.hits <= self.server.fail_n:
+            self.send_response(503)
+            self.end_headers()
+            self.wfile.write(b'{"error":{"code":503}}')
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(b'data: {"choices": [{"delta": {"content": "ok"}}]}\n\n')
+        self.wfile.write(b"data: [DONE]\n\n")
+
+    def log_message(self, *a):
+        pass
+
+
+def test_503_is_retried_then_succeeds():
+    # #114: a 503 (like a 429) is transient backend load, not a hard failure -- retry, don't crash
+    # /chat to a 500. Two 503s then a 200 must return the completion within the 3-try budget.
+    httpd = socketserver.TCPServer(("127.0.0.1", 0), _FlakyHandler)
+    httpd.hits, httpd.fail_n = 0, 2
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        import copilot.llm.http as H
+        orig = H.time.sleep
+        H.time.sleep = lambda *_: None                # don't actually back off in the test
+        try:
+            url = f"http://127.0.0.1:{httpd.server_address[1]}/v1"
+            reply = OpenAIClient(url, "m").chat([{"role": "user", "content": "hi"}])
+        finally:
+            H.time.sleep = orig
+    finally:
+        httpd.shutdown(); httpd.server_close()
+    assert reply.content == "ok", "503s must be retried, not surfaced as a failure"
+    assert httpd.hits == 3, "two 503s + one success = three requests (retry budget honored)"
 
 
 def test_as_function_wraps_flat_and_is_idempotent():
@@ -245,6 +296,7 @@ def _run():
     test_make_client_profile_swap_moves_endpoint_and_model()
     test_reasoning_effort_rides_body_only_when_set()
     test_api_key_sent_only_when_present()
+    test_503_is_retried_then_succeeds()
     test_as_function_wraps_flat_and_is_idempotent()
     test_to_reply_parses_calls_and_degrades_bad_args()
     test_to_reply_strips_harmony_channel_leak_from_tool_name()

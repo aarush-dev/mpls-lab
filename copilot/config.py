@@ -9,7 +9,7 @@ defaults; `config.yaml` overlays operational overrides on top. `load()` merges
 and validates enums/ranges. Missing YAML is fine -> pure defaults.
 
 Field provenance (see docs/adr/):
-  llm_profile / embed_profile   ADR-0004 / ADR-0006  (nim | unsloth-local)
+  llm_profile / embed_profile   ADR-0004 / ADR-0006  (llm: gemma|nim|unsloth-local; embed: nim|unsloth-local)
   emulate_pa / error_profile    ADR-0003             (emulator seam; oracle|light|heavy)
   kg_enabled                    ADR-0007             (default-on, never critical-path)
   ledger_to_kb                  ADR-0009             (case verdict -> KB, default on)
@@ -31,7 +31,9 @@ from dataclasses import dataclass, field
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_YAML = os.path.join(HERE, "config.yaml")
 
-_LLM_PROFILES = frozenset({"nim", "unsloth-local"})
+_EMBED_PROFILES = frozenset({"nim", "unsloth-local"})
+# gemma is an LLM-only backend (no embedding model), so it widens the LLM set, not the embed one.
+_LLM_PROFILES = _EMBED_PROFILES | {"gemma"}
 _ERROR_PROFILES = frozenset({"oracle", "light", "heavy"})
 # ADR-0003 R0-R5 ladder, mirrored (not imported) from gate.DRIFT_LADDER: importing gate here is a
 # cycle (config <- gate <- tools <- retrieval <- embedder <- config). A frozen 6-rung taxonomy.
@@ -50,9 +52,9 @@ _SECRET_ENV = {
 @dataclass(frozen=True)
 class Config:
     # -- profiles (ADR-0004 / ADR-0006): swap backend with one line ------------
-    llm_profile: str = "nim"          # nim (interim) | unsloth-local (final, air-gapped)
+    llm_profile: str = "gemma"        # gemma (on-prem gemma-4, current) | nim | unsloth-local
                                       # read by llm.make_client (R1) to pick the backend
-    embed_profile: str = "nim"        # follows the LLM profile pattern
+    embed_profile: str = "nim"        # follows the LLM profile pattern (no gemma embedder)
 
     # -- feature flags --------------------------------------------------------
     emulate_pa: bool = True           # ADR-0003: emulator feeds records until real PA exists
@@ -72,6 +74,9 @@ class Config:
     window_x_max: int = 60            # ADR-0002: X_max, salvage lookback cap (minutes)
     gate_min_evidence: int = 2        # ADR-0008: N, pre-gate evidence floor
     gate_max_retries: int = 2         # ADR-0008: agentic retries on gate fail
+    empty_answer_max_retries: int = 2  # #126: separate budget for a blank terminal turn -- a
+                                      # model glitch, not an evidence deficiency; must not share
+                                      # (or starve) gate_max_retries
     step_cap: int = 100                # ADR-0005: max loop turns per investigation -- a runaway-
                                       # loop backstop only, not a working budget (was 8 then 12;
                                       # real investigations kept hitting it before concluding)
@@ -101,8 +106,8 @@ class Config:
     def __post_init__(self):
         assert self.llm_profile in _LLM_PROFILES, \
             f"llm_profile={self.llm_profile!r} not in {sorted(_LLM_PROFILES)}"
-        assert self.embed_profile in _LLM_PROFILES, \
-            f"embed_profile={self.embed_profile!r} not in {sorted(_LLM_PROFILES)}"
+        assert self.embed_profile in _EMBED_PROFILES, \
+            f"embed_profile={self.embed_profile!r} not in {sorted(_EMBED_PROFILES)}"
         assert self.error_profile in _ERROR_PROFILES, \
             f"error_profile={self.error_profile!r} not in {sorted(_ERROR_PROFILES)}"
         assert self.drift_distrust_at in _DRIFT_RUNGS, \
@@ -112,6 +117,7 @@ class Config:
         assert self.predict_interval_s > 0, "predict_interval_s must be > 0"
         assert self.gate_min_evidence >= 1, "gate_min_evidence must be >= 1"
         assert self.gate_max_retries >= 0, "gate_max_retries must be >= 0"
+        assert self.empty_answer_max_retries >= 0, "empty_answer_max_retries must be >= 0"
         assert self.step_cap >= 1, "step_cap must be >= 1"
         assert self.tool_call_cap >= 1, "tool_call_cap must be >= 1"
         assert 0 < self.exec_timeout_s <= self.exec_max_timeout_s, \
@@ -171,7 +177,7 @@ def _load_dotenv():
 def _selfcheck():
     # 1. code defaults ARE the documented F0 defaults
     d = Config()
-    assert d.llm_profile == "nim" and d.embed_profile == "nim"
+    assert d.llm_profile == "gemma" and d.embed_profile == "nim"
     assert d.emulate_pa is True and d.kg_enabled is True and d.ledger_to_kb is True
     assert d.gate_enabled is True
     assert d.history_compaction is False
