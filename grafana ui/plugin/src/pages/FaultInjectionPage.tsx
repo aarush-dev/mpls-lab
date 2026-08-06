@@ -6,9 +6,10 @@ import { useStyles2, Select, Button, Icon, Alert } from '@grafana/ui';
 
 import { LIVE_REFRESH_MS } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
-import { ActiveFault, FaultScenario, InjectFaultRequest, TopologyNode } from '../data/types';
+import { ActiveFault, FaultScenario, ForensicCase, InjectFaultRequest, TopologyNode } from '../data/types';
 import { targetOptions, isValidTarget } from '../data/faultTargets';
-import { nodeDetailPath } from '../constants';
+import { nodeDetailPath, copilotPath } from '../constants';
+import { formatUtc } from '../utils/time';
 
 // Fault Injection: fires a REAL fault in the simulated lab (dataapi /faults/inject -> orchestrator
 // -> docker exec) and watches each injection follow the backend's true lifecycle
@@ -24,6 +25,7 @@ interface FaultApi {
   getScenarios?: () => Promise<FaultScenario[]>;
   injectFault?: (r: InjectFaultRequest) => Promise<{ scenario_id: string }>;
   getActiveFaults?: () => Promise<ActiveFault[]>;
+  getCases?: () => Promise<ForensicCase[]>;
   revertFault?: (id: string) => Promise<unknown>;
 }
 
@@ -70,6 +72,7 @@ export function FaultInjectionPage() {
   const [severity, setSeverity] = useState<InjectFaultRequest['severity']>('medium');
   const [duration, setDuration] = useState<number>(DEFAULT_DURATION);
   const [active, setActive] = useState<ActiveFault[]>([]);
+  const [cases, setCases] = useState<ForensicCase[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -94,22 +97,27 @@ export function FaultInjectionPage() {
     };
   }, [dataClient, faultApi]);
 
-  // Active-fault registry: own ~5s poll (mode-independent — the tab drives real faults even when
-  // the global clock is paused in history). `mutSeq` drops a stale in-flight response that would
-  // otherwise resurrect a row an optimistic revert just cleared.
+  // Active-fault registry + copilot cases on one ~5s tick (mode-independent — the tab drives real
+  // faults even when the global clock is paused in history). `mutSeq` drops a stale active response
+  // that would otherwise resurrect a row an optimistic revert just cleared; cases have no such
+  // mutation, so a rare out-of-order poll just self-heals on the next tick.
   const mutSeq = useRef(0);
-  const fetchActive = useCallback(() => {
+  const fetchLive = useCallback(() => {
     const seq = mutSeq.current;
     faultApi
       .getActiveFaults?.()
       .then((a) => Array.isArray(a) && seq === mutSeq.current && setActive(a))
       .catch(() => undefined);
+    faultApi
+      .getCases?.()
+      .then((c) => Array.isArray(c) && setCases(c))
+      .catch(() => undefined);
   }, [faultApi]);
   useEffect(() => {
-    fetchActive();
-    const id = setInterval(fetchActive, LIVE_REFRESH_MS);
+    fetchLive();
+    const id = setInterval(fetchLive, LIVE_REFRESH_MS);
     return () => clearInterval(id);
-  }, [fetchActive]);
+  }, [fetchLive]);
 
   // Local 1s display tick: recompute countdown labels from cached impact times (no network).
   useEffect(() => {
@@ -120,6 +128,12 @@ export function FaultInjectionPage() {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [active.length]);
+
+  // Newest-first by timestamp; null ts sinks to the bottom.
+  const sortedCases = useMemo(
+    () => [...cases].sort((a, b) => (Date.parse(b.ts ?? '') || 0) - (Date.parse(a.ts ?? '') || 0)),
+    [cases]
+  );
 
   const current = useMemo(() => scenarios.find((s) => s.name === scenario), [scenarios, scenario]);
   const validRoles = current?.valid_roles ?? [];
@@ -164,7 +178,7 @@ export function FaultInjectionPage() {
     setBusy(true);
     try {
       await faultApi.injectFault({ scenario, target, severity, duration });
-      fetchActive(); // reflect the new injection immediately
+      fetchLive(); // reflect the new injection immediately
     } catch (e) {
       const msg = (e as { message?: string })?.message ?? 'inject failed';
       setErr(`Could not inject ${scenario} on ${target}: ${msg}`);
@@ -272,6 +286,32 @@ export function FaultInjectionPage() {
                 <Button size="sm" variant="secondary" fill="outline" onClick={() => revertOne(f.scenario_id)}>
                   Revert now
                 </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <h3 className={styles.sectionTitle}>Copilot cases ({sortedCases.length})</h3>
+      <p className={styles.help}>
+        Forensic cases the predictor → trigger pipeline opened. Each links to the copilot chat.
+      </p>
+      {sortedCases.length === 0 ? (
+        <span className={styles.empty}>None yet. Cases open as the pipeline reacts to a fault.</span>
+      ) : (
+        <ul className={styles.list}>
+          {sortedCases.map((c) => {
+            const t = Date.parse(c.ts ?? '');
+            return (
+              <li key={c.id} className={styles.row}>
+                <span className={styles.node}>{c.device ?? '—'}</span>
+                <span className={styles.fault}>
+                  {c.fault_type ?? 'unknown'} · {c.severity}
+                  {Number.isFinite(t) ? ` · ${formatUtc(t)}` : ''}
+                </span>
+                <a href={copilotPath}>
+                  Open copilot <Icon name="arrow-right" />
+                </a>
               </li>
             );
           })}
