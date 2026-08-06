@@ -1,0 +1,8 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734451+00:00", "content": "Follow up on case_id that doesn't exist: case-does-not-exist-123."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:22.125046+00:00", "ok": false, "missing": ["empty answer"], "retry": 0}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:43.800403+00:00", "ok": true, "missing": [], "retry": 1}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:43.800424+00:00", "content": "I can't investigate a non-existent case ID. What specific network issue or device would you like me to look into? Please provide a device name, symptom (e.g., latency, tunnel down), or topology area so I can gather relevant telemetry and runbooks."}
+

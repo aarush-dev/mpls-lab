@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.733661+00:00", "content": "Ask a follow-up that needs bash/workspace tools without workspace=true."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:28.913283+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:28.913309+00:00", "content": "I'm a read-only network investigator with access to live-telemetry tools (query_metrics, search_logs, flows) and knowledge-base tools (search_runbooks, search_incidents, walk_topology_graph). I don't have access to bash or workspace tools.\n\nCould you clarify what network issue you'd like me to investigate? For example:\n- A specific device showing symptoms (high latency, packet loss, tunnel flaps, etc.)\n- A time window of interest\n- A particular service or application affected\n\nWith that information, I can query metrics, search logs, check flows, find relevant runbooks, and map the topology blast radius -- all with cited evidence."}
+

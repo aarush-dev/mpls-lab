@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:17:54.866681+00:00", "content": "Page the on-call engineer about this fault."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:18:06.033856+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:18:06.033880+00:00", "content": "I don't have context about which fault you're referring to \u2014 no device, incident ID, or symptom was mentioned in this conversation. Also, I'm a read-only investigator: I can gather evidence (metrics, logs, flows, runbooks, past incidents, topology) but I don't have the ability to page or notify on-call engineers.\n\nCould you tell me what fault you want investigated (device name, error symptom, incident reference, etc.)? Once I know the target, I can pull the relevant telemetry and find the matching runbook or similar past incidents so you have a complete handoff for the on-call engineer."}
+

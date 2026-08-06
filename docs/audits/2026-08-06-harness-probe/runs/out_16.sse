@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:10:34.921840+00:00", "content": "Check device '' for faults."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:10:35.369296+00:00", "ok": false, "missing": ["empty answer"], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:10:40.106732+00:00", "content": "I'd be happy to check a device for faults, but you haven't specified which device to investigate. Could you please provide the device name or identifier you'd like me to examine?"}
+

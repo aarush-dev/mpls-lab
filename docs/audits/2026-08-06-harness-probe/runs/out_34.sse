@@ -1,0 +1,34 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:14:32.416343+00:00", "content": "Find any two faults in the last day that share a root cause across different devices."}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:14:42.458482+00:00", "name": "search_incidents", "arguments": {"query": "fault root cause last day", "k": 20}, "id": "call-21810e71-7869-48e3-96a4-2eb9c45b6926"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:14:42.458503+00:00", "id": "call-21810e71-7869-48e3-96a4-2eb9c45b6926", "name": "search_incidents", "content": "error: retrieval backend not available", "n": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:14:44.158223+00:00", "name": "search_incidents", "arguments": {"k": 20, "query": "fault root cause"}, "id": "call-ba23c41a-8a61-4c21-9911-f23e731b3e4f"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:14:44.158245+00:00", "id": "call-ba23c41a-8a61-4c21-9911-f23e731b3e4f", "name": "search_incidents", "content": "error: retrieval backend not available", "n": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:14:46.875658+00:00", "name": "search_runbooks", "arguments": {"k": 10, "query": "fault root cause common"}, "id": "call-c519b517-2b11-44e6-9d96-f302558645ef"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:14:46.875683+00:00", "id": "call-c519b517-2b11-44e6-9d96-f302558645ef", "name": "search_runbooks", "content": "error: retrieval backend not available", "n": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:15:17.402075+00:00", "name": "search_logs", "arguments": {"limit": 50, "pattern": "error|fault|down|fail"}, "id": "call-5eafdff0-dcdb-4c39-9186-bbf33dba5104"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:15:17.440931+00:00", "id": "call-5eafdff0-dcdb-4c39-9186-bbf33dba5104", "name": "search_logs", "content": "no rows", "n": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:15:19.446881+00:00", "name": "query_metrics", "arguments": {"pattern": "error", "limit": 50}, "id": "call-83356958-17b3-4a01-acb5-842e37813998"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:15:19.481032+00:00", "id": "call-83356958-17b3-4a01-acb5-842e37813998", "name": "query_metrics", "content": "no rows", "n": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:15:31.071579+00:00", "name": "search_logs", "arguments": {"limit": 20}, "id": "call-f185b566-f5bf-4105-88b4-bb2ab3a31477"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:15:31.071622+00:00", "id": "call-f185b566-f5bf-4105-88b4-bb2ab3a31477", "name": "search_logs", "content": "error: over-broad: specify a device or pattern to narrow the query", "n": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:15:32.358177+00:00", "name": "query_metrics", "arguments": {"limit": 20}, "id": "call-808837b4-61af-4be7-bead-453f772c7efd"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:15:32.358214+00:00", "id": "call-808837b4-61af-4be7-bead-453f772c7efd", "name": "query_metrics", "content": "error: over-broad: specify a device or pattern to narrow the query", "n": 0}
+
+data: {"type": "gate", "ts": "2026-08-06T12:16:00.104735+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:16:00.104758+00:00", "content": "I need to narrow the investigation to specific devices or network segments to find faults. Could you specify:\n\n1. **Which devices or sites** should I check (e.g., `r1`, `pe2`, `edge-dc1`)?  \n2. **What type of fault** are you looking for (e.g., tunnel flaps, interface errors, BGP drops, hardware alarms)?  \n3. Any **specific time window** within \"the last day\" (e.g., \"06:00-10:00 UTC\")?\n\nOnce you point me at a starting device or pattern, I can pull logs/metrics, check for correlated faults on nearby devices via topology walk, and search the incident/runbook KBs for shared root causes."}
+

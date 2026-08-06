@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:06:41.723543+00:00", "content": "List every fault in the network in the last 24 hours."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:06:49.766332+00:00", "content": "I don't have a tool to enumerate faults across the entire network at once. My tools require a specific device or pattern to query.\n\nCould you clarify:\n- Which device(s) or network segment should I focus on?\n- Are you looking for a specific type of fault (e.g., tunnel flaps, interface errors, hardware alarms, latency spikes)?\n- Do you have a starting point (e.g., a device that reported an issue, an alert name, or a topology area)?"}
+

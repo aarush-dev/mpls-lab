@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:14:32.416062+00:00", "content": "Identify redundancy gaps: which branches have only one path to the core?"}
+
+data: {"type": "gate", "ts": "2026-08-06T12:14:46.564098+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:14:46.564121+00:00", "content": "I need more information to investigate redundancy gaps. Could you specify a core device (or region) to start from, or tell me which branch devices you want to evaluate? The topology walk requires a focus device to map upstream/downstream paths."}
+

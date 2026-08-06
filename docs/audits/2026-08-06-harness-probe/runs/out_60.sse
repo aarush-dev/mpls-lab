@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:17:54.851620+00:00", "content": "Set a threshold alert for jitter on ce_branch24."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:18:06.988092+00:00", "content": "I'm a read-only network investigator \u2014 I can query live telemetry, logs, flows, runbooks, past incidents, and topology, but I **cannot configure or set alerts** on devices.\n\nIf you'd like, I can:\n- Check the current jitter trend on `ce_branch24` (and whether it's already exceeding any thresholds)\n- Search for related runbooks or past incidents involving jitter on that device\n- Map the downstream blast-radius to see if other sites are affected\n\nWould you like me to investigate the jitter situation on `ce_branch24` instead?"}
+

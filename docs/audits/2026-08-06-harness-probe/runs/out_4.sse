@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:06:41.722180+00:00", "content": "Which devices had the most faults in the last 24 hours?"}
+
+data: {"type": "gate", "ts": "2026-08-06T12:07:12.752316+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:07:12.752340+00:00", "content": "I'd be happy to help identify devices with the most faults, but I need to narrow the scope. The log search tool requires a specific device to query. Could you clarify:\n\n1. **Which devices or network segment** should I investigate? (e.g., specific router/switch names, a site, or a topology area)\n2. **What type of \"faults\"** are you most concerned about? (e.g., interface errors, hardware alarms, protocol flaps, SD-WAN tunnel issues)\n\nAlternatively, if you have a particular device in mind as a starting point, I can search its logs and then use topology walk to explore downstream/upstream neighbors for related faults."}
+

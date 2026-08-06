@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:16:35.502522+00:00", "content": "Ask for ranged metrics with no time window at all."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:16:52.725325+00:00", "content": "I'd be happy to fetch ranged metrics for you. To do that, I need to know:\n\n**Which device** should I query, and **what metric pattern** are you interested in (e.g., `latency`, `jitter`, `loss`, `tunnel`, `temperature`, `fan`, `power`, etc.)?"}
+

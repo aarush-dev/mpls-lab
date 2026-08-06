@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:12:35.882674+00:00", "content": "Investigate ce_branch4 for a 30-day window."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:12:40.809544+00:00", "content": "I'd be happy to investigate ce_branch4, but I need more context to focus the investigation effectively. What specific aspect would you like me to examine over the 30-day window?\n\nFor example:\n- **Hardware health** (fan, power, PSU, temperature)\n- **Network performance** (SD-WAN tunnel latency, jitter, loss)\n- **Interface counters** (errors, drops, utilization)\n- **Logs/events** (specific patterns like \"flap\", \"crash\", \"OOM\", \"BGP\")\n- **Flow records** (top talkers, application traffic, anomalies)\n\nOr do you have a specific symptom or alert you're investigating?"}
+

@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734541+00:00", "content": "Ask a follow-up question about a case's window one year past its snapshot."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:24.770016+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:24.770039+00:00", "content": "I need more details to investigate. Which specific case, device, or time window are you referring to? Please provide the device name, case ID, or the exact time range you'd like me to look at."}
+

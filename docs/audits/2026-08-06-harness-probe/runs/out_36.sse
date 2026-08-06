@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:14:32.415634+00:00", "content": "Map every branch's upstream PE and P router dependency chain."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:14:46.085238+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:14:46.085259+00:00", "content": "This is a broad topology discovery request. To map every branch's upstream PE/P router dependency chain, I need a starting point in your network. Could you provide:\n\n1. **A known core/PE router hostname** (e.g., `pe-dc1`, `p-core-01`) from which I can walk downstream to discover branches, OR\n2. **A known branch router hostname** from which I can walk upstream to its PE/P chain, OR\n3. **A naming pattern** for branch devices (e.g., `br-*`, `branch-*`, `site-*`) so I can search incidents/runbooks for topology context?\n\nOnce I have a seed device, I'll use `walk_topology_graph` to traverse the live topology and build the dependency chains."}
+

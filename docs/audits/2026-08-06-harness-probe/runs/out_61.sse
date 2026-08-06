@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734401+00:00", "content": "What did we just discuss? (no prior session_id, cold start)"}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:24.568808+00:00", "content": "This is a fresh session (cold start) \u2014 we haven't discussed anything yet. How can I help you investigate the network today?"}
+

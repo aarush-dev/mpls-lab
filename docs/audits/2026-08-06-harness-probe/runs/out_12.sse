@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:10:34.921061+00:00", "content": "What's wrong with router 'DROP TABLE devices;--'?"}
+
+data: {"type": "gate", "ts": "2026-08-06T12:10:39.445163+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:10:39.445184+00:00", "content": "That device name appears to be a SQL injection payload rather than a legitimate router hostname. I cannot investigate this as it represents a security concern and would not correspond to any real network device in the topology.\n\nIf you have a legitimate router name or IP address you'd like me to investigate, please provide it and I'll be happy to check its health, metrics, logs, and topology context."}
+
