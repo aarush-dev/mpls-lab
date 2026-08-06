@@ -12,7 +12,7 @@ import tempfile
 
 from copilot.adapter import StubAdapter
 from copilot.retrieval import Doc, HashEmbedder, LanceRetriever
-from copilot.tools import Cite, RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
+from copilot.tools import Cite, RETRIEVAL_SPECS, RETRIEVAL_TOOLS, TOOLS, TOOL_SPECS, dispatch
 from copilot.window import WindowContext
 
 WINDOW = WindowContext(100, 200)
@@ -57,8 +57,11 @@ def test_registry_covers_read_and_retrieval_tools():
     assert set(TOOLS) == {"query_metrics", "search_logs", "flows"}
     assert set(RETRIEVAL_TOOLS) == {"search_runbooks", "search_incidents"}
     names = {s["name"] for s in TOOL_SPECS}
-    assert names == set(TOOLS) | set(RETRIEVAL_TOOLS) | {"walk_topology_graph"}, \
-        "every tool advertised in TOOL_SPECS"
+    assert names == set(TOOLS) | {"walk_topology_graph"}, \
+        "read tools + topology walk advertised unconditionally in TOOL_SPECS"
+    # #122: retrieval tools split into RETRIEVAL_SPECS -- the loop advertises them only when
+    # a retriever is wired (mirrors BASH_SPEC/PRESENT_SPEC), never dead-probed otherwise.
+    assert {s["name"] for s in RETRIEVAL_SPECS} == set(RETRIEVAL_TOOLS)
     # read tools expose narrowing args only -- NOT start/end (loop owns the window, ADR-0002)
     specs = {s["name"]: set(s["parameters"]["properties"]) for s in TOOL_SPECS}
     for name in TOOLS:
@@ -66,10 +69,28 @@ def test_registry_covers_read_and_retrieval_tools():
         expected = {"device", "pattern", "limit", "offset"}
         assert specs[name] == (expected | {"ranged"} if name == "query_metrics" else expected), name
     # retrieval tools take a query (+ k); incidents adds the hop-filter narrowing.
-    assert specs["search_runbooks"] == {"query", "k"}
-    assert specs["search_incidents"] == {"query", "k", "device", "hops"}
+    rspecs = {s["name"]: set(s["parameters"]["properties"]) for s in RETRIEVAL_SPECS}
+    assert rspecs["search_runbooks"] == {"query", "k"}
+    assert rspecs["search_incidents"] == {"query", "k", "device", "hops"}
     # I3 walk: a focus device (+ hop radius) -- no window (loop owns it, ADR-0002).
     assert specs["walk_topology_graph"] == {"device", "hops"}
+
+
+def test_read_tool_unknown_device_is_distinguished_from_no_data():
+    # #119: "no rows" used to mean unknown device / no data this window / malformed pattern
+    # indistinguishably -- runs wasted 2-6 reads against a misspelled device before finally
+    # calling walk_topology_graph (the only tool that gave this signal). Read tools now check
+    # device existence against the same topology the walk already uses.
+    obs, cites = dispatch("query_metrics", {"device": "ghost"}, _adapter(), WINDOW)
+    assert cites == () and obs.startswith("error: unknown device") and "ghost" in obs
+
+
+def test_read_tool_known_device_no_data_echoes_the_effective_filters():
+    # a known device with genuinely no rows this window is a clean negative -- but the filters
+    # that produced it are echoed so a malformed pattern (or the wrong device) is visible
+    # instead of silently indistinguishable from "nothing happened".
+    obs, cites = dispatch("query_metrics", {"device": "r4"}, _adapter(), WINDOW)   # r4: no metrics
+    assert cites == () and obs == "no rows for device='r4'"
 
 
 def test_dispatch_surfaces_structured_cites_for_the_gate():
@@ -86,6 +107,16 @@ def test_dispatch_surfaces_structured_cites_for_the_gate():
     assert dispatch("query_metrics", {}, _adapter(), WINDOW)[1] == ()
 
 
+def test_call_index_namespaces_read_ids_across_tool_calls():
+    # #124: id=f"{source}:{i}" restarts at 0 every call -> two query_metrics calls in the same
+    # investigation both cite "metrics:0", ambiguous which call's row a citation means. A
+    # `call_index` namespaces them; omitted (None), the id is unchanged (back-compat).
+    _, first = dispatch("query_metrics", {"device": "r1"}, _adapter(), WINDOW, call_index=0)
+    _, second = dispatch("query_metrics", {"device": "r1"}, _adapter(), WINDOW, call_index=1)
+    assert first[0].id != second[0].id
+    assert first[0].id == "metrics@0:0" and second[0].id == "metrics@1:0"
+
+
 def test_walk_topology_graph_returns_enriched_subgraph():
     # I3 acceptance: blast-radius from a focus device -> the correct hop-ordered subgraph,
     # each node enriched with live status from /metrics. Line r1-r2-r3-r4; metrics only on r1.
@@ -95,6 +126,15 @@ def test_walk_topology_graph_returns_enriched_subgraph():
     assert "[topo:r1] hop 0: cpu=92" in obs, "focus cited + enriched with its latest metric"
     assert "[topo:r2] hop 1: no metrics" in obs and "[topo:r3] hop 2: no metrics" in obs
     assert "r4" not in obs, "beyond the hop radius"
+
+
+def test_walk_topology_graph_emits_a_mechanically_checkable_total_header():
+    # #117: runs in the audit reported invented totals ("46 devices" for an actual 38) even
+    # though the walk enumerates every node one-per-line. Emit a `total=N (hop_i=count)` header
+    # so a count claim can be checked mechanically instead of trusted.
+    obs, cites = dispatch("walk_topology_graph", {"device": "r1", "hops": 2}, _adapter(), WINDOW)
+    header = obs.splitlines()[0]
+    assert header == f"total={len(cites)} (hop0=1 hop1=1 hop2=1)"
 
 
 def test_walk_topology_graph_unknown_device_reports_guidance():
@@ -122,6 +162,19 @@ def test_walk_topology_graph_missing_device_reports_guidance():
 def test_walk_topology_graph_bad_hops_reports_guidance_not_crash():
     obs, cites = dispatch("walk_topology_graph", {"device": "r1", "hops": None}, _adapter(), WINDOW)
     assert cites == () and obs.startswith("error:")
+
+
+def test_walk_topology_graph_hops_is_ceilinged():
+    # #125: hops had no ceiling -- hops=1000 on the real 148-node topology dumped every node
+    # in one ~44.7KB observation (a 79s response). A long chain here stands in for that: an
+    # oversized hops request must still stop well short of the whole graph.
+    n = 20
+    ids = [f"c{i}" for i in range(n)]
+    chain = {"nodes": [{"id": i} for i in ids],
+             "links": [{"source": ids[i], "target": ids[i + 1]} for i in range(n - 1)]}
+    a = StubAdapter(topology=chain)
+    obs, cites = dispatch("walk_topology_graph", {"device": "c0", "hops": 1000}, a, WINDOW)
+    assert 0 < len(cites) < n, f"hops=1000 must be clamped, got {len(cites)} of {n} nodes"
 
 
 def test_search_runbooks_routes_to_retriever_with_full_provenance():

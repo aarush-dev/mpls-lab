@@ -5,7 +5,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
 
 import { TopologyLink, TopologyNodeLive } from '../data/types';
-import { styleForRole, colorForState } from '../data/topologyStyles';
+import { styleForRole, colorForState, BLINK_BLUE_A, BLINK_BLUE_B } from '../data/topologyStyles';
 import { computePositions, Point } from '../utils/topologyLayout';
 
 interface Props {
@@ -14,6 +14,10 @@ interface Props {
   onSelectNode: (id: string) => void;
   /** Hover a device -> id + rendered position (relative to the graph container); null on mouse-out. */
   onHoverNode?: (id: string | null, pos: { x: number; y: number } | null) => void;
+  /** Device ids the live PA pipeline currently flags — these nodes fade-blink blue. */
+  precursorIds?: Set<string>;
+  /** Device ids matching the search box — highlighted (white outline + glow), NOT filtered out. */
+  matchIds?: Set<string>;
 }
 
 export const POP_PREFIX = 'pop::';
@@ -81,12 +85,14 @@ export function applyLayout(cy: Core, positions: Map<string, Point>) {
   cy.fit(undefined, 30);
 }
 
-export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props) {
+export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode, precursorIds, matchIds }: Props) {
   const styles = useStyles2(getStyles);
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const setKeyRef = useRef<string>('');
   const positionsRef = useRef<Map<string, Point>>(new Map());
+  // Ids currently running a blink animation, so the effect only starts/stops the delta.
+  const blinkingRef = useRef<Set<string>>(new Set());
   const onSelectRef = useRef(onSelectNode);
   onSelectRef.current = onSelectNode;
   const onHoverRef = useRef(onHoverNode);
@@ -176,6 +182,19 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
           selector: 'edge.state-yellow',
           style: { 'line-color': colorForState('yellow') },
         },
+        {
+          // Search matches: white outline + a soft white halo (overlay = the "glow"). Other nodes
+          // stay fully visible — search highlights, it does not filter.
+          selector: 'node.search-hl',
+          style: {
+            'border-width': 3,
+            'border-color': '#ffffff',
+            'border-opacity': 1,
+            'overlay-color': '#ffffff',
+            'overlay-opacity': 0.25,
+            'overlay-padding': 8,
+          },
+        },
       ],
       layout: { name: 'grid' },
     });
@@ -217,6 +236,9 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
 
     if (setChanged) {
       cy.elements().remove();
+      // Elements are recreated -> any in-flight blink animations are now dead; forget them so the
+      // blink effect (which also depends on `nodes`) restarts them on the fresh elements.
+      blinkingRef.current.clear();
       positionsRef.current = computePositions(nodes);
       cy.add(buildElements(nodes, links, positionsRef.current));
       applyLayout(cy, positionsRef.current);
@@ -241,6 +263,70 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
       });
     }
   }, [nodes, links]);
+
+  // Search highlight: toggle the search-hl class so matches get a white outline + glow. Pure class
+  // flip — no element add/remove, so the graph never relayouts on a keystroke.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) {
+      return;
+    }
+    const match = matchIds ?? new Set<string>();
+    cy.batch(() => {
+      cy.nodes('[!isPop]').forEach((n) => {
+        if (match.has(n.id())) {
+          n.addClass('search-hl');
+        } else {
+          n.removeClass('search-hl');
+        }
+      });
+    });
+  }, [matchIds, nodes]);
+
+  // PA-precursor blink: fade flagged nodes between two blue shades via chained cytoscape animations.
+  // Only start/stop the delta vs what's already blinking; on stop, revert to the state/base color.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) {
+      return;
+    }
+    const want = precursorIds ?? new Set<string>();
+    const running = blinkingRef.current;
+
+    // Deterministic flip between the two blue shades (don't read back computed style — cytoscape
+    // returns it as rgb(), which never equals the hex constant, so a readback toggle would stick).
+    const step = (id: string, toB: boolean) => {
+      const ele = cy.getElementById(id);
+      if (ele.empty() || !running.has(id)) {
+        return;
+      }
+      ele.animate(
+        { style: { 'background-color': toB ? BLINK_BLUE_B : BLINK_BLUE_A } },
+        { duration: 650, easing: 'ease-in-out-sine', complete: () => step(id, !toB) }
+      );
+    };
+
+    // stop cleared ids -> revert to stylesheet-driven color
+    running.forEach((id) => {
+      if (!want.has(id)) {
+        running.delete(id);
+        const ele = cy.getElementById(id);
+        if (ele.nonempty()) {
+          ele.stop();
+          ele.removeStyle('background-color');
+        }
+      }
+    });
+    // start newly-flagged ids: seed at shade A, then fade toward B (loops from there)
+    want.forEach((id) => {
+      const ele = cy.getElementById(id);
+      if (!running.has(id) && ele.nonempty()) {
+        running.add(id);
+        ele.style('background-color', BLINK_BLUE_A);
+        step(id, true);
+      }
+    });
+  }, [precursorIds, nodes]);
 
   return <div ref={containerRef} className={styles.container} />;
 }

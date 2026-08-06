@@ -61,6 +61,20 @@ def test_results_capped_with_provenance_and_paging():
     assert a.events(_win(limit=10, offset=20)).next_page is None
 
 
+def test_result_landing_exactly_at_the_cap_is_marked_potentially_truncated():
+    # #125: a result of exactly MAX_LIMIT rows is indistinguishable from "there were exactly
+    # 100, no more" -- but a real over-cap read (120 rows truncated to 100) looks identical.
+    # Landing exactly at the hard cap always gets the paging marker, even when there may be
+    # nothing more behind it (the model can drill in and get a clean "no rows").
+    rows = [{"device": "r1", "ts": 100 + i, "msg": f"line {i}"} for i in range(MAX_LIMIT)]
+    res = StubAdapter(events_rows=rows).events(_win(limit=MAX_LIMIT))
+    assert len(res.evidence) == MAX_LIMIT
+    assert res.next_page == str(MAX_LIMIT), "exactly-at-cap must still signal possible truncation"
+    # below the cap, an exact-page-fit with genuinely nothing more still reports no more (unchanged).
+    res2 = StubAdapter(events_rows=rows[:10]).events(_win(limit=10))
+    assert res2.next_page is None
+
+
 def test_serve_filters_rows_outside_the_window():
     # ADR-0002 (R3): /events is a windowed source -> rows outside [start,end], and rows with
     # no ts to prove they are in-window, are NOT served. This is what made the pre-R3

@@ -130,6 +130,22 @@ def _fault_ref(label: dict, profile: str) -> dict:
     return {"device": dev, "cause": _confuse(label, profile, str(label.get("type", "unknown")))}
 
 
+def _alert_id(sid: str, cause: str) -> str:
+    """The episode's alert_id (ADR-0014/#48). Keyed by scenario_id + the reported `cause` -- the one
+    material signal that changes the ANSWER. A tick that only drifts confidence/TTI/model-health (or
+    grows n_concurrent) keeps the same id, so re-emitting it is a ledger no-op (INSERT OR IGNORE) and
+    the open case stays frozen at its first record (the ADR-0002 freeze holds). A cause refinement
+    (congestion -> core_congestion) mints a fresh id, so the record lands in the ledger and the
+    Forensic trigger opens a NEW case at its own frozen T_snapshot: freshness is a new investigation,
+    never in-place mutation. Each case stays lock-on-first; freshness rides the multi-case model.
+    ponytail: cause ONLY, deliberately NOT n_concurrent -- creating a case drains the live adapter +
+    runs an agent (forensic.case.create_case), so keying on the churning concurrency count would
+    re-investigate on every 1->2->3 tick and hammer dataapi/the LLM for context that doesn't change
+    the fault. cause refines 0-2x/episode: bounded, load-justified. #48 named both signals; concurrency
+    freshness, if ever wanted, belongs behind a UI 'investigate the latest' click, not an auto-fire."""
+    return f"alt_{sid}__{cause}"
+
+
 def emulate_record(label: dict, *, error_profile: str = "light",
                    n_concurrent: int = 1, now: str | None = None,
                    drift_tick: int = 0, concurrent_faults: list[dict] | None = None) -> dict:
@@ -224,8 +240,8 @@ def emulate_record(label: dict, *, error_profile: str = "light",
         # ---- model-health, resolved conflict (a): folded into the ONE seam record ----
         "health": {"drift_state": drift_state, "codebook_novelty": novelty},
         # ---- pointer, not payload (§3.3) -- explanation is async ----
-        "explanation_ref": {"alert_id": f"alt_{sid}", "incident_memory_written": False,
-                            "explanation_status": "pending"},
+        "explanation_ref": {"alert_id": _alert_id(sid, ftype),
+                            "incident_memory_written": False, "explanation_status": "pending"},
     }
 
 
@@ -259,7 +275,9 @@ def to_wire(record: dict) -> dict:
 
 def persist(ledger, record: dict) -> None:
     """Append a Prediction Record to the Event Ledger, idempotent by alert_id (ADR-0009). The
-    alert_id is deterministic from the scenario_id, so a re-emit of the same episode is a no-op."""
+    alert_id is deterministic from the scenario_id + reported cause (see `_alert_id`, #48), so
+    re-emitting a same-cause tick is a no-op; a cause refinement mints a fresh id and lands as a new
+    row (a new forensic case)."""
     ledger.append(record["explanation_ref"]["alert_id"], to_wire(record), device=record.get("device"))
 
 

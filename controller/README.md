@@ -11,25 +11,27 @@ so `--selftest` runs anywhere).
 - **Model** (`topo.py`): derives hubs/spokes/tunnels/VRFs from `../topology-spec.yaml`
   using the same index arithmetic as the generator. 28 spokes (24 branch + 4 dc)
   x 6 hubs = **168 tunnels**.
-- **Metrics**: each tunnel's latency/jitter/loss is built from a **measured RTT
-  baseline** plus additive modelled layers:
-  - **Measured RTT cache** (enabled by `MEASURE_RTT=1`): a background thread runs
-    `ping -c2 -q -W1 -I wg0 <peer-wg-ip>` via `docker exec` into each spoke every
-    ~45 s. Propagation delay is ~constant so one refresh per minute is enough; this
-    avoids pinging all tunnels on every 5 s tick. The real physical delay comes from
-    per-site baseline netem the generator sets on each CE's `eth0` (branch ~41 ms,
-    hub ~17 ms, dc ~12 ms), so the controller reads TRUE RTT.
-  - **Per-tick layering**: `latency = measured_avg (cached) + queue_ms (diurnal
-    congestion model) + eth1 netem readback (active faults) + noise`;
-    `loss = max(measured_loss, modelled_floor) + micro-burst term`;
-    `jitter = (ping max−min from cache) + AR(1) walk`.
-  - The invented geography baseline was removed; the generator's site netem is now
-    the single source of propagation truth. Fault injection still writes to `eth1`
-    and is read back via netem readback, so fault-responsiveness is preserved.
-  - When `MEASURE_RTT` is unset or `0` (e.g. `--selftest`), the controller falls
-    back gracefully to the diurnal congestion model alone.
-- **Rekey events**: WireGuard rekeys ~every 2 min; under loss they cluster (handshake
-  retries) — a flap precursor. Emitted as JSON events + a cumulative counter metric.
+- **Metrics**: the 4 tunnel signals (latency/jitter/loss/rekeys) are drawn
+  **analytically** per tick, COPIED from the dataset generator so live telemetry sits
+  in the training distribution. There is no dataplane measurement (the wg0-ping path
+  was removed). Source of truth: `synthetic/generate.py:_gen_tunnels` (326-334) +
+  `_diurnal` (71-82); guarded by `test_tunnel_model.py`.
+  - **Per-tick draw** (`d = _diurnal(now) ∈ [0.15,1.0]`, per-site_type baseline from
+    `synthetic/profile.json`): `latency = max(1, gauss(lat.mean, lat.std*0.4) + d*8) +
+    eth1 netem readback`; `jitter = max(0.1, gauss(jit.mean, jit.std*0.5) + d*0.5)`;
+    `loss = max(0, gauss(loss.mean, max(loss.std,0.05)*0.5)) + d*0.02 + eth1 netem`.
+    No EMA — the generator draws each bucket independently.
+  - **Diurnal** runs on **real UTC wall-clock** (matches the dataset), so a full cycle
+    spans 24h; `DIURNAL_PERIOD` no longer drives these 4 (still drives offered load).
+  - **Baselines** load from the shipped `synthetic/profile.json` (`tunnel_baseline_by_site`),
+    with a baked fallback carrying the real means/stds for `--selftest`/no-file.
+  - **Faults**: injection still writes `eth1` netem, read back and added to latency/loss;
+    a calibrated overlay (shared `faults/signatures.py`) suppresses that readback while
+    ramping so there is no double-count — see below.
+- **Rekey events**: an **inert** running counter, seeded once per tunnel from the
+  baseline range then bumped spontaneously at the generator's rate (rescaled to the
+  tick) — matches the dataset (whose fault ramp never touches rekeys), so **not**
+  loss-coupled. Emitted as JSON events + a cumulative counter metric.
 - **Path selection**: per `(site, vrf)`, score = `loss%*10 + latency_ms`; pick the
   best hub. Preference (`VRF_PREFERRED_HUB`: CORP/VOICE→hub1, GUEST→hub2) is sticky
   with hysteresis — only fail over when the active path is **degraded**
@@ -52,12 +54,11 @@ JSON event lines (stdout) for Loki/Fluentd: `{"event":"rekey",...}`,
 
 ## Environment
 
-- `DIURNAL_PERIOD` (s): 24h cycle compression. Default `3600` (1 real hour = 1 day).
+- `DIURNAL_PERIOD` (s): compresses the offered-LOAD cycle (trafficgen). Default `3600`.
+  Does NOT affect the 4 tunnel signals — their diurnal is real UTC wall-clock.
 - `TOPO_SPEC`: path to the spec. Default `../topology-spec.yaml`.
-- `MEASURE_RTT` (`0`/`1`): enable live ping measurement. Set to `1` on the `controller`
-  service in `telemetry/docker-compose.yml`. Requires `/var/run/docker.sock` mounted
-  (already done). Unset or `0` → graceful fallback (no pings; congestion model only).
-  `--selftest` always runs with measurement off.
+- The 4 tunnel signals read `../synthetic/profile.json` (shipped into the image) for
+  baselines + `step_s`; absent → the baked fallback keeps the distribution correct.
 
 ## Metric + label schema (STABLE — Phase 2 depends on this)
 
@@ -69,16 +70,17 @@ SNMP `device`, log `device`, and flow `device` labels), enabling cross-signal jo
 `interface_ifHCInOctets * on(device) sdwan_path_active`.
 
 All four `sdwan_tunnel_*` metrics are marked **SIMULATED** in their own Prometheus
-`# HELP` text (`controller.py` `render_prometheus()`) — the netem-readback term is a
-config value read back off the qdisc, not a dataplane measurement. Any doc/consumer
-calling them "measured telemetry" is wrong; only the wg0-ping component is a real measurement.
+`# HELP` text (`controller.py` `render_prometheus()`) — they are analytic draws around
+the calibrated baseline (copied from the dataset generator), NOT dataplane measurements.
+The netem-readback fault term is a config value read back off the qdisc. Any doc/consumer
+calling them "measured telemetry" is wrong.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: measured wg0 RTT + modelled congestion + netem delay read back from the site uplink qdisc config (ms) |
-| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: measured wg0 ping max-min + modelled congestion walk (ms) |
-| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: measured wg0 loss + modelled floor/bursts + netem loss read back from the site uplink qdisc config (%) |
-| `sdwan_tunnel_rekeys_total` | counter | **device**, tunnel, site, site_type, hub | Cumulative WG rekeys |
+| `sdwan_tunnel_latency_ms` | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: calibrated baseline + diurnal bump + netem delay read back from the site uplink qdisc config (ms) |
+| `sdwan_tunnel_jitter_ms`  | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: calibrated baseline + diurnal bump (ms) |
+| `sdwan_tunnel_loss_pct`   | gauge | **device**, tunnel, site, site_type, hub | SIMULATED: calibrated baseline + diurnal bump + netem loss read back from the site uplink qdisc config (%) |
+| `sdwan_tunnel_rekeys_total` | counter | **device**, tunnel, site, site_type, hub | SIMULATED: baseline-seeded running counter + spontaneous rate; inert (not loss-coupled) |
 | `sdwan_path_active`       | gauge | **device**, site, site_type, vrf, hub | `1` on the active hub for that site/vrf |
 | `sdwan_path_changes_total` | counter | (none) | Cumulative path-selection changes, fabric-wide; unlabelled and RNG-driven (moves from the modelled loss micro-bursts even with no fault injected) — not usable as fault-impact evidence |
 | `sdwan_overlay_active` | gauge | site, fault_type | `1` while a calibrated fault overlay is ramping this site's tunnel series (see below) |
@@ -103,8 +105,8 @@ its real-derived peaks — so live == training by construction. If the profile i
 **Authoritative:** while an overlay is active the netem readback for **that whole site** is
 forced to zero, so a simultaneous real `tc` action does **not** double-count (the real netem
 still installs at impact — genuine packet effect — but is not added to the metric). On clear
-the series glide back to baseline through the existing exponential smoothing (no
-discontinuity). Expired overlays (past `t_end = t_impact + duration`) are pruned in the
+the overlay is dropped and the next tick's analytic draw is back at baseline. Expired
+overlays (past `t_end = t_impact + duration`) are pruned in the
 per-tick GC, in place so a concurrent POST/clear is never dropped.
 
 Endpoints (mirroring `/fault/drift[/clear]`):
@@ -144,6 +146,6 @@ counters climb. See `trafficgen/README.md` for backend details.
 
 ## Shortcuts (`# ponytail:` in code)
 
-- RTT now measured via `docker exec ping` over wg0 (MEASURE_RTT=1). Congestion/jitter/loss
-  model is kept as an additive layer on top of measured baseline.
+- The 4 tunnel signals are analytic draws copied from the dataset generator
+  (`synthetic/generate.py`) so sim == training distribution; no ping/measurement path.
 - Netem read via `docker exec ... tc` over docker.sock (was broken `ip netns exec`).

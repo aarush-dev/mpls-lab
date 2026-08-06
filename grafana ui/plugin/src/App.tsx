@@ -7,7 +7,6 @@ import { AppRootProps } from '@grafana/data';
 import { OverviewPage } from './pages/OverviewPage';
 import { TopologyPage } from './pages/TopologyPage';
 import { NodeDetailPage } from './pages/NodeDetailPage';
-import { TelemetryPage } from './pages/TelemetryPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { CopilotPage } from './pages/CopilotPage';
 import { StatusPage } from './pages/StatusPage';
@@ -51,7 +50,6 @@ function AppInner(_props: AppRootProps) {
         <Route exact path={path} component={OverviewPage} />
         <Route path={`${path}/topology`} component={TopologyPage} />
         <Route path={`${path}/node/:id`} component={NodeDetailPage} />
-        <Route path={`${path}/telemetry`} component={TelemetryPage} />
         <Route path={`${path}/incidents`} component={IncidentsPage} />
         <Route path={`${path}/copilot`} component={CopilotPage} />
         <Route path={`${path}/inject`} component={FaultInjectionPage} />

@@ -18,7 +18,9 @@ from copilot.window import WindowContext
 # ponytail: hard cap lives here as a constant, not in config -- ADR-0015 wants a
 # *low* ceiling by design and copilot/config.py is another lane's file (F0). Lift
 # it to config only if an operator ever needs to tune it.
-MAX_LIMIT = 50
+MAX_LIMIT = 100      # was 50 -- kept low-ish on purpose (ADR-0015 context-size guard, not a
+                     # runaway backstop), raised because 50 forced a wasted retry turn whenever
+                     # the model's first guess (e.g. ranged=true's natural batch) exceeded it
 
 # untrusted-data delimiters (ADR-0016): evidence content is wrapped so the model
 # reads it as data, not instructions.
@@ -114,6 +116,16 @@ def row_text(row: dict) -> str:
     return " ".join(f"{k}={v}" for k, v in row.items())
 
 
+def payload_matches(row: dict, pattern: str) -> bool:
+    """`pattern` substring-narrow, case-insensitive, over the PAYLOAD fields only -- `ts` is
+    excluded so a numeric pattern ('443') can't spuriously match an epoch/byte count. Shared
+    by both adapters (#119) so the stub's canned rows behave like the real one: `pattern` is a
+    literal substring, never a regex/alternation -- 'error|fault|down' matches none of those
+    words, it matches the LITERAL string 'error|fault|down'."""
+    p = pattern.lower()
+    return p in row_text({k: v for k, v in row.items() if k != "ts"}).lower()
+
+
 def serve_rows(source: str, filters: Filters, rows, max_limit: int = MAX_LIMIT) -> Result:
     """F2's shared read pipeline: validate -> ts-window filter -> page -> provenance -> frame.
     Both adapters ride it so the mandatory-filter/cap/framing guarantees are byte-identical on
@@ -145,7 +157,10 @@ def serve_rows(source: str, filters: Filters, rows, max_limit: int = MAX_LIMIT) 
         for i, row in enumerate(window, start=filters.offset)
     )
     end = filters.offset + filters.limit
-    next_page = str(end) if end < len(rows) else None
+    # #125: landing exactly at the hard cap is indistinguishable from "there were exactly
+    # max_limit rows, no more" -- flag it as potentially truncated too (paging in gets a
+    # clean "no rows" if there really was nothing more).
+    next_page = str(end) if end < len(rows) or len(evidence) == max_limit else None
     return Result(evidence=evidence, next_page=next_page)
 
 
@@ -176,6 +191,14 @@ def hops_within_links(links, focus: str, n: int) -> set[str]:
     return set(bfs_hops(links, focus, n))
 
 
+def known_nodes(nodes, links) -> frozenset[str]:
+    """#119: every device id the topology actually knows -- same set walk_topology already
+    computes inline to tell a real focus from a fabricated one. Shared here so the read
+    tools (query_metrics/search_logs/flows) can give the same 'unknown device' signal
+    instead of an ambiguous 'no rows' when a misspelled/nonexistent device is queried."""
+    return frozenset({n["id"] for n in nodes} | {x for lk in links for x in (lk["source"], lk["target"])})
+
+
 @dataclass(frozen=True)
 class NodeState:
     """One node in a topology walk (I3): its BFS hop-distance from the focus + a compact
@@ -197,6 +220,9 @@ class ToolAdapter(Protocol):
     # The adapter owns the /topology shape (ADR-0006: only this layer knows endpoint
     # shapes) so callers never touch raw link dicts. I2b's incident hop-filter uses it.
     def hops_within(self, focus: str, n: int) -> set[str]: ...
+    # #119: every device id the topology knows, so a read tool can tell "unknown device"
+    # apart from "device exists, no data this window" instead of both reading as "no rows".
+    def known_devices(self) -> frozenset[str]: ...
     # Topology walk (I3, ADR-0007): deterministic BFS on real edges from `focus` within `n`
     # hops, each node enriched with live status from /metrics in `window`. The adapter owns
     # the topology+metrics join (a batched /metrics query per frontier for the HTTP adapter).

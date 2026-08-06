@@ -19,12 +19,14 @@ Live smoke (opt-in, needs a running endpoint):  COPILOT_LLM_SMOKE=1 python3 -m c
 import json
 import os
 import re
+import time
 
 from copilot.config import Config
 from copilot.llm.client import Reply, ToolCall
 
-_TIMEOUT = 120.0     # a real multi-round investigation turn on a 20B model is slow; generous so a
-                     # healthy-but-slow completion is not cut off client-side as a false outage.
+_TIMEOUT = 300.0     # a reasoning model (e.g. nemotron with reasoning_budget set) can take well
+                     # over a minute per call; generous so a healthy-but-slow completion is not
+                     # cut off client-side as a false outage.
 
 
 # profile -> (base-url env, base-url default, model env, model default). Both the endpoint AND
@@ -36,6 +38,12 @@ _PROFILES = {
             "COPILOT_LLM_MODEL_NIM", "gpt-oss-20b"),
     "unsloth-local": ("COPILOT_LLM_BASE_URL_LOCAL", "http://127.0.0.1:8001/v1",
                       "COPILOT_LLM_MODEL_LOCAL", "unsloth/gpt-oss-20b"),
+    # gemma: on-prem gemma-4 (OpenAI-compatible, keyless). Its OWN base-url env, NOT nim's
+    # COPILOT_LLM_BASE_URL -- a hosted-NIM .env sets that to the nvidia URL, which would otherwise
+    # hijack this profile. Model id is server-mangled (mtp-...-Q8_0) and has changed once already;
+    # pin it here, override via COPILOT_LLM_MODEL_GEMMA when the served model renames.
+    "gemma": ("COPILOT_LLM_BASE_URL_GEMMA", "http://10.0.0.5:8888/v1",
+              "COPILOT_LLM_MODEL_GEMMA", "mtp-gemma-4-26B-A4B-it-Q8_0"),
 }
 
 
@@ -70,13 +78,27 @@ class OpenAIClient:
             body["tools"] = [_as_function(t) for t in tools]
         if self._effort:                  # gpt-oss burns tokens on reasoning -> tier it explicitly;
             body["reasoning_effort"] = self._effort   # unset (default) keeps the plain OpenAI body.
-        r = httpx.post(
-            f"{self._url}/chat/completions",
-            json=body,
-            headers={"Authorization": f"Bearer {self._key}"} if self._key else {},
-            timeout=_TIMEOUT,
-        )
-        r.raise_for_status()
+        elif "nemotron" in self._model:   # nvidia default recipe: thinking on, budgeted
+            body["chat_template_kwargs"] = {"enable_thinking": True}
+            body["reasoning_budget"] = 16384
+        headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
+        # a hosted backend's 429/502/503/504, or a read timeout under momentary load, is
+        # transient -- not a hard failure. Retry with a short backoff instead of crashing /chat
+        # straight to a 500. Bounded (3 tries total) so a persistently-down backend still surfaces.
+        for attempt in range(3):
+            try:
+                r = httpx.post(f"{self._url}/chat/completions", json=body,
+                               headers=headers, timeout=_TIMEOUT)
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                raise
+            if r.status_code in (429, 502, 503, 504) and attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            r.raise_for_status()
+            break
         return _to_reply(r.json()["choices"][0]["message"])
 
 

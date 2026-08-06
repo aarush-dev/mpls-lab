@@ -7,21 +7,21 @@ path selection with failover, and exposes everything as Prometheus text on HTTP
 so Telegraf (Phase 2) scrapes it directly — no extra dependency.
 
 WHAT IS AND IS NOT MEASURED (the emitted series are SIMULATED, see
-render_prometheus HELP text): the wg0 RTT/loss is measured; the congestion,
-jitter and loss-burst terms are modelled; and the FAULT term is neither — it is
-the netem impairment read back out of the site uplink's qdisc *config*, because
-the wg0 ping does not traverse that uplink. Fault scenarios that threshold on
-these series are thresholding a modelled value.
+render_prometheus HELP text): the 4 tunnel signals (latency, jitter, loss,
+rekeys) are drawn ANALYTICALLY per tick — a per-site_type calibrated baseline
+(synthetic/profile.json) + a diurnal bump — COPIED from the dataset generator
+(synthetic/generate.py:_gen_tunnels) so live telemetry sits in the training
+distribution. Nothing here is a dataplane measurement. The FAULT term is the
+netem impairment read back out of the site uplink's qdisc *config* (_read_netem),
+suppressed while a calibrated overlay is active (no double-count). Fault scenarios
+that threshold on these series are thresholding a modelled value.
 
-# ponytail: tunnel latency is MEASURED — a background pool pings the hub's wg0 IP
-#   from inside each spoke (`docker exec ... ping -I wg0`) on a ~45s cadence and
-#   caches min/avg/max/loss; update() reads the cache each tick and layers the
-#   tuned congestion/jitter/loss model on top. Propagation comes from the per-site
-#   eth0 netem the generator emits (geography formula lives there, ONE source).
-#   Faults still inject on eth1 (wg0 ping won't see them), so _read_netem(eth1)
-#   stays as the fault term. Gated behind MEASURE_RTT (off in --selftest/no-lab →
-#   graceful fallback to a 1ms floor + the existing layers).
-#   Ceiling: modelled jitter/loss are statistical, not the exact dataplane behaviour.
+# ponytail: the 4 tunnel signals mirror the generator's formulas exactly (same
+#   baselines, same diurnal, no EMA) so sim == training distribution. SOURCE OF
+#   TRUTH: synthetic/generate.py:326-334 + :71-82; guarded by
+#   controller/test_tunnel_model.py. The old wg0-ping RTT path is gone.
+#   Ceiling: the draw is statistical, not real dataplane behaviour; that is the
+#   deliberate trade to match the (also-analytic) training data.
 
 Run:
   python3 controller.py                 # serve Prometheus metrics on :9362, also log JSON events to stdout
@@ -38,13 +38,30 @@ import subprocess
 import sys
 import time
 import zlib
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "trafficgen"))
+import numpy as np  # already in the image (signatures.py is pure-numpy)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "faults"))
-import diurnal  # noqa: E402  (shared utilization model)
 import signatures  # noqa: E402  -- ONE ramp table, shared with the dataset generator
 from topo import build_model  # noqa: E402
+
+
+def _diurnal(epoch):
+    """0.15..1.0 business-hours load multiplier (peak ~15:00 UTC, trough ~03:00).
+
+    COPIED byte-for-byte from the dataset generator so the live tunnel series sit in
+    the same distribution as training. SOURCE OF TRUTH: synthetic/generate.py:_diurnal
+    (71-82). Uses np.cos (not math.cos) so it matches the generator to the last bit --
+    controller/test_tunnel_model.py cross-checks the two. Real UTC wall-clock (per the
+    build decision): a full cycle spans 24h, NOT the compressed DIURNAL_PERIOD.
+    """
+    dt = datetime.fromtimestamp(epoch, timezone.utc)
+    h = dt.hour + dt.minute / 60.0
+    day = 0.5 - 0.5 * np.cos((h - 3) / 24.0 * 2 * np.pi)  # 0 at 03:00, 1 at 15:00
+    weekend = 0.7 if dt.weekday() >= 5 else 1.0
+    return float(0.15 + 0.85 * day * weekend)  # never fully idle
 
 OVERLAY_STEP = 5.0  # prog() dur-floor; matches the default tick interval
 OVERLAY_SEVMUL = {"low": 0.5, "medium": 0.8, "high": 1.0}
@@ -94,125 +111,117 @@ def _load_fault_signatures():
     return signatures.default_signatures(
         OVERLAY_BASE_LAT, OVERLAY_BASE_LOSS, OVERLAY_BASE_JIT)
 
+
+# Healthy tunnel baselines the analytic per-bucket draw samples around. SOURCE OF
+# TRUTH: synthetic/generate.py:_gen_tunnels (326-334) + these numbers from
+# synthetic/profile.json. The fallback below is LOAD-BEARING: the deployed image now
+# ships profile.json, but --selftest / any image without it must still emit the real
+# distribution, so the calibrated means/stds are baked here (verbatim from the profile).
+_FALLBACK_STEP_S = 30
+_FALLBACK_BASELINES = {
+    "tunnel_baseline": {
+        "tunnel_latency_ms": {"mean": 29.0625, "std": 4.6911, "p50": 28.7545, "min": 16.3218, "max": 58.3231},
+        "tunnel_jitter_ms":  {"mean": 2.9498, "std": 0.4007, "p50": 2.9267, "min": 2.1014, "max": 6.9712},
+        "tunnel_loss_pct":   {"mean": 0.4382, "std": 0.5420, "p50": 0.0801, "min": 0.0003, "max": 5.6996},
+        "tunnel_rekeys":     {"mean": 8.3193, "std": 4.2892, "p50": 8.0, "min": 1.0, "max": 17.0},
+    },
+    "tunnel_baseline_by_site": {
+        "branch": {
+            "tunnel_latency_ms": {"mean": 29.0070, "std": 4.7451, "p50": 28.6633, "min": 16.3218, "max": 58.3231},
+            "tunnel_jitter_ms":  {"mean": 2.9423, "std": 0.4121, "p50": 2.9244, "min": 2.1014, "max": 6.9712},
+            "tunnel_loss_pct":   {"mean": 0.4419, "std": 0.5482, "p50": 0.0828, "min": 0.0003, "max": 5.6996},
+            "tunnel_rekeys":     {"mean": 8.3492, "std": 4.3017, "p50": 8.0, "min": 1.0, "max": 17.0},
+        },
+        "dc": {
+            "tunnel_latency_ms": {"mean": 29.3905, "std": 4.3465, "p50": 29.1070, "min": 17.8530, "max": 37.9685},
+            "tunnel_jitter_ms":  {"mean": 2.9944, "std": 0.3217, "p50": 2.9420, "min": 2.3156, "max": 3.7178},
+            "tunnel_loss_pct":   {"mean": 0.4165, "std": 0.5032, "p50": 0.0709, "min": 0.0005, "max": 1.5108},
+            "tunnel_rekeys":     {"mean": 8.1433, "std": 4.2116, "p50": 8.0, "min": 1.0, "max": 15.0},
+        },
+    },
+}
+
+
+def _load_tunnel_baselines():
+    """(step_s, baselines) from synthetic/profile.json, falling back to the baked
+    calibration. Same file the generator reads; one extra key read, no new dep."""
+    try:
+        with open(_PROFILE) as fh:
+            prof = json.load(fh)
+        gb = prof["tunnel_baseline"]  # KeyError -> fallback
+        return int(prof.get("step_s", _FALLBACK_STEP_S)), {
+            "tunnel_baseline": gb,
+            "tunnel_baseline_by_site": prof.get("tunnel_baseline_by_site", {}),
+        }
+    except Exception:
+        return _FALLBACK_STEP_S, _FALLBACK_BASELINES
+
+
+STEP_S, _BASELINES = _load_tunnel_baselines()
+
+
+def _baseline_for(site_type):
+    """Per-site_type tunnel baseline, each field falling back to the global baseline
+    (matches synthetic/generate.py:320-324)."""
+    gb = _BASELINES["tunnel_baseline"]
+    tb = _BASELINES["tunnel_baseline_by_site"].get(site_type, gb)
+    return {sig: tb.get(sig, gb[sig]) for sig in
+            ("tunnel_latency_ms", "tunnel_jitter_ms", "tunnel_loss_pct", "tunnel_rekeys")}
+
+
 # --- Policy: per-VRF preferred hub. VOICE/CORP prefer hub1 (primary), GUEST hub2.
 # Path selection may override this on degradation (failover).
 VRF_PREFERRED_HUB = {"CORP": "ce_hub1", "VOICE": "ce_hub1", "GUEST": "ce_hub2"}
 
 # ----------------------------------------------------------------------------
-# Per-tunnel propagation latency is now MEASURED (ping over wg0), not modelled —
-# the geography formula lives once in the generator (site_netem(), emitted as a
-# per-site eth0 root netem). The controller measures the real RTT and layers the
-# tuned congestion/jitter/loss model on top. See _measure_rtt() + update().
+# The 4 tunnel signals are now drawn ANALYTICALLY per tick from the calibrated
+# per-site_type baselines + the diurnal bump, copied from the dataset generator
+# (synthetic/generate.py:_gen_tunnels) so live telemetry sits in the training
+# distribution. No ping, no M/M/1 queue, no AR(1) walk — see update().
 # ----------------------------------------------------------------------------
-# Per-site-type queue sensitivity multiplier (branches have thinner uplinks, so
-# congestion bites harder -> steeper queue climb).
-SITE_QUEUE_MULT = {"dc": 0.6, "hub": 0.8, "branch": 1.3}
-
-# VOICE-class paths are policed tighter and are more loss/jitter sensitive; this
-# scales the modelled jitter/loss on a tunnel that carries VOICE.
-VOICE_SENSITIVITY = 1.4
-
-# Minimal latency floor (ms) used until the measured-RTT cache is populated (or
-# when MEASURE_RTT is off / a ping fails). NOT the old geography model — just a
-# small positive seed so series start plausible.
-MEASURE_FLOOR_MS = 1.0
-
 
 # Degradation thresholds for failover (loss% or latency ms over baseline).
 FAILOVER_LOSS_PCT = 5.0
 FAILOVER_LATENCY_MULT = 3.0
 
-PERIOD_SECONDS = float(os.environ.get("DIURNAL_PERIOD", "3600"))  # 24h compressed to 1h
-
 
 class TunnelState:
-    """Holds per-tunnel modelled metrics + smoothing so values evolve, not jump."""
+    """Per-tunnel analytic telemetry: each tick draws the 4 signals around the
+    calibrated baseline + diurnal bump (copied from the dataset generator)."""
 
-    def __init__(self, spec):
+    def __init__(self, spec, baseline):
         self.tunnel = spec["tunnel"]
         self.site = spec["site"]
         self.site_type = spec["site_type"]
         self.hub = spec["hub"]
-        self.hub_wg = spec["hub_wg"]
         self.vrfs = spec["vrfs"]
-        # Propagation reference (ms): seeded at a minimal floor, refreshed to the
-        # MEASURED avg RTT once the ping cache fills. Used for series seeding and as
-        # the failover-latency baseline. NO geography model here — it's measured.
-        self.base_ms = MEASURE_FLOOR_MS
-        # Per-site-type queue sensitivity (thin branch uplinks congest harder).
-        self.queue_mult = SITE_QUEUE_MULT.get(self.site_type, 1.0)
-        # VOICE-carrying tunnels are more loss/jitter sensitive.
-        self.voice = "VOICE" in self.vrfs
-        # smoothed metrics, seeded at baseline so series start plausible
-        self.latency_ms = self.base_ms
-        self.jitter_ms = 0.5 + self.base_ms * 0.04
-        self.loss_pct = 0.0
-        self.rekeys = 0  # cumulative WireGuard rekey counter
+        # Calibrated per-site_type baselines the analytic draw samples around
+        # (synthetic/generate.py:320-334). lat/jit/loss use mean+std; rekeys min/max.
+        self._lat = baseline["tunnel_latency_ms"]
+        self._jit = baseline["tunnel_jitter_ms"]
+        self._loss = baseline["tunnel_loss_pct"]
+        rk = baseline["tunnel_rekeys"]
         # Deterministic per-tunnel RNG so the noise realization is stable per
         # tunnel AND across restarts. NOT hash(): CPython randomises str hashing
         # per process unless PYTHONHASHSEED is set, which reseeded every tunnel
         # on every controller restart. crc32 is stable by definition.
         self._rng = random.Random(zlib.crc32(self.tunnel.encode()))
-        # Correlated-jitter state: an AR(1) random walk (not white noise) so jitter
-        # wanders the way real path jitter does, with brief excursions.
-        self._jit_walk = 0.0
-        # Micro-burst loss state: a countdown of remaining "burst" ticks; when >0
-        # the tunnel is in a transient loss event (brief, occasional).
-        self._burst_ticks = 0
-        self._burst_loss = 0.0
-        self._last_rekey = time.time()
-        self._rekey_debt = 0  # queued clustered rekeys (handshake retries under stress)
-        # Measured-RTT cache: (avg_ms, jitter_ms, loss_pct) or None. Written by the
-        # Controller's background ping pool (~45s cadence); read each 5s tick. None
-        # until the first refresh / when MEASURE_RTT off → falls back to floor.
-        self._measured = None
+        # Failover-latency baseline = the healthy mean (was the measured RTT).
+        self.base_ms = self._lat["mean"]
+        # Emitted metrics, seeded plausibly at baseline.
+        self.latency_ms = self._lat["mean"]
+        self.jitter_ms = self._jit["mean"]
+        self.loss_pct = 0.0
+        # rekeys: a per-tunnel running counter seeded ONCE from the baseline range
+        # (generate.py:326), then bumped spontaneously (generate.py:333) — inert,
+        # NOT loss-coupled (the fault ramp never touches rekeys, so neither do we).
+        self.rekeys = float(self._rng.randint(int(rk["min"]), int(rk["max"])))
+        self._last_tick = None  # previous update() `now`, for the rekey rate
 
     # Set True by --selftest so the model is exercised hermetically (no docker
     # exec round-trips, which are slow and environment-dependent). Live runs leave
     # it False so injected netem still folds into the telemetry.
     _SKIP_NETEM = False
-
-    # Measured-RTT gate: on (env MEASURE_RTT) only in the deployed container; off
-    # in --selftest/--once/no-lab so the controller still runs without pinging.
-    _MEASURE_RTT = os.environ.get("MEASURE_RTT", "") not in ("", "0", "false")
-
-    def _measure_rtt(self):
-        """Ping the hub's wg0 overlay IP from inside this spoke over wg0.
-
-        Returns (avg_ms, jitter_ms, loss_pct), or None when the ping could not be
-        run/parsed at all (graceful fallback). busybox ping: `round-trip
-        min/avg/max = a/b/c ms` + `N% packet loss`; no mdev, so jitter = max-min.
-
-        At 100% loss there is NO round-trip line, so avg_ms is None — that is a
-        REAL result (the tunnel is dead) and must not be discarded, otherwise the
-        cache freezes at the last healthy values and the telemetry keeps
-        reporting a pre-outage RTT through a total outage.
-        """
-        cname = f"clab-sdwan_mpls_noc-{self.site}"
-        try:
-            out = subprocess.run(
-                ["docker", "exec", cname, "ping", "-c2", "-q", "-W1",
-                 "-I", "wg0", self.hub_wg],
-                capture_output=True, text=True, timeout=5,
-            ).stdout
-        except Exception:
-            return None
-        avg = mn = mx = None
-        loss = 0.0
-        for ln in out.splitlines():
-            if "packet loss" in ln:
-                for tok in ln.split(","):
-                    if "packet loss" in tok:
-                        loss = _parse_pct(tok.strip().split()[0])
-            if "min/avg/max" in ln and "=" in ln:
-                nums = ln.split("=", 1)[1].strip().split()[0].split("/")
-                if len(nums) >= 3:
-                    mn, avg, mx = (float(nums[0]), float(nums[1]), float(nums[2]))
-        if avg is None:
-            # Unreachable (total loss) vs unparseable output: only the former is
-            # a measurement worth caching.
-            return (None, 0.0, loss) if loss >= 100.0 else None
-        return avg, max(0.0, mx - mn), loss
 
     def _read_netem(self):
         """Read injected netem delay/loss on the spoke's uplink, if present.
@@ -247,36 +256,28 @@ class TunnelState:
                     loss_pct = _parse_pct(toks[i + 1])
         return delay_ms, loss_pct
 
-    def update(self, now, netem=None, overlay=None):
-        """Recompute modelled metrics for this tick, coupled to the diurnal curve.
+    def update(self, now, netem=None, overlay=None, d=None):
+        """Recompute the tunnel series for this tick.
 
-        `netem` is the (delay_ms, loss_pct) readback for this tunnel's SITE,
-        hoisted by Controller.tick() so it costs one docker exec per site per
-        tick instead of one per tunnel (6 tunnels share every spoke's uplink).
-        Passing None falls back to reading it here.
+        The 4 signals are drawn ANALYTICALLY around the calibrated per-site_type
+        baseline + a diurnal bump, COPIED from the dataset generator
+        (synthetic/generate.py:_gen_tunnels 326-334) so live telemetry sits in the
+        training distribution. `d` is _diurnal(now); hoisted by Controller.tick()
+        (identical across all tunnels at a given `now`), computed here if None.
+
+        `netem` is the (delay_ms, loss_pct) eth1 readback for this tunnel's SITE
+        (the FAULT term), hoisted by tick(); None falls back to reading it here.
 
         `overlay` is the active fault-overlay record for this tunnel's SITE (or
-        None). When present it is AUTHORITATIVE: the tunnel series ramp toward the
-        calibrated signature peak on `signatures.prog(elapsed vs the drawn lead)`,
-        and the netem readback addend is suppressed so a simultaneous real netem
-        does NOT double-count. On clear the overlay is dropped and the series glide
-        back to baseline through the existing exponential smoothing.
-
-        The same curve that drives offered load (diurnal.util) drives congestion
-        here, so telemetry and traffic move together. A nonlinear M/M/1-style
-        queue term makes latency/jitter climb sharply as utilization -> 1, and a
-        weekly envelope makes weekends visibly calmer.
+        None). When present it is AUTHORITATIVE: the series ramp toward the
+        calibrated signature peak on `signatures.prog`, and the netem readback is
+        suppressed so a simultaneous real netem does NOT double-count.
         """
-        hod = diurnal.hour_of_cycle(now, PERIOD_SECONDS)
-        wk = diurnal.week_scale(now, PERIOD_SECONDS)
-        # Congestion proxy: max VRF utilization on this tunnel drives queueing,
-        # scaled by the weekly envelope (weekend tunnels sit less congested).
-        cong = max((diurnal.util(hod, v) for v in self.vrfs), default=0.3) * wk
-        cong = max(0.0, min(0.985, cong))  # cap below 1 so the queue term stays finite
+        if d is None:
+            d = _diurnal(now)
 
-        # eth1 readback = the FAULT term. NOT a measurement: it is the impairment
-        # someone CONFIGURED on the uplink, read back out of the qdisc, because
-        # the wg0 ping does not traverse eth1. See render_prometheus() HELP text.
+        # eth1 readback = the FAULT term (a configured impairment, NOT a measurement;
+        # the wg0 ping path is gone). See render_prometheus() HELP text.
         netem_delay, netem_loss = netem if netem is not None else self._read_netem()
 
         # Overlay is authoritative: while active, the calibrated ramp is the ONLY
@@ -289,61 +290,15 @@ class TunnelState:
                 overlay["dur"], overlay["sevmul"], OVERLAY_STEP, overlay["p_cross"]))
             netem_delay = netem_loss = 0.0
 
-        # --- Measured propagation (ping over wg0, cached) -------------------------
-        # The per-site eth0 netem the generator emits is what the ping actually sees.
-        # Cache is refreshed by the Controller's background pool; here we just read
-        # it. Empty/None → minimal floor (NOT the deleted geography model).
-        if self._measured is not None:
-            meas_avg, meas_jit, meas_loss = self._measured
-            if meas_avg is None:
-                # Tunnel unreachable (100% loss): no RTT to report. Hold the last
-                # latency baseline and let the measured 100% loss dominate, so a
-                # total outage is visible instead of looking pre-outage healthy.
-                meas_avg = self.base_ms
-            else:
-                self.base_ms = meas_avg      # keep the failover baseline on real RTT
-        else:
-            meas_avg, meas_jit, meas_loss = MEASURE_FLOOR_MS, 0.0, 0.0
-
-        # --- Nonlinear queueing delay (M/M/1: wait ~ rho/(1-rho)) -----------------
-        # As utilization (rho) approaches 1 the queue blows up; multiplied by the
-        # per-site-type sensitivity (thin branch uplinks feel it more). Capped so a
-        # near-saturation tick can't emit absurd RTT.
-        rho = cong
-        queue_ms = min(60.0, self.queue_mult * 9.0 * rho / (1.0 - rho))
-
-        # --- Correlated jitter: AR(1) walk, not white noise -----------------------
-        # Jitter is the short-term variance of the queue. We drive an AR(1) process
-        # (memory 0.85) so it wanders smoothly with occasional excursions, and its
-        # amplitude grows with congestion + injected delay variance.
-        amp = 0.25 + 1.6 * rho + netem_delay * 0.12
-        self._jit_walk = 0.85 * self._jit_walk + 0.15 * self._rng.gauss(0, amp)
-        voice_k = VOICE_SENSITIVITY if self.voice else 1.0
-        # jitter = measured (max-min) + AR(1) congestion walk.
-        target_jit = max(0.0, meas_jit + (0.4 + abs(self._jit_walk) + 0.4 * rho) * voice_k)
-
-        # --- Loss: mostly 0-0.3%, congestion-driven tail, plus micro-bursts -------
-        # Baseline loss is a small noisy floor (link is healthy ~0-0.3%). A gentle
-        # congestion tail kicks in only when the queue is deep. On top, rare brief
-        # micro-bursts (buffer overrun / transient reroute) spike loss for a few
-        # ticks then clear — the kind of transient the ML team needs to see.
-        floor_loss = max(0.0, self._rng.gauss(0.08, 0.06))      # ~0-0.3% healthy floor
-        cong_tail = max(0.0, (rho - 0.80)) ** 2 * 22.0          # only deep queues lose
-        if self._burst_ticks > 0:
-            self._burst_ticks -= 1
-        else:
-            # Micro-burst probability rises with congestion; small even when calm.
-            p_burst = 0.004 + rho * 0.05
-            if self._rng.random() < p_burst:
-                self._burst_ticks = self._rng.randint(1, 4)
-                self._burst_loss = self._rng.uniform(0.6, 3.5) * voice_k
-        burst_loss = self._burst_loss if self._burst_ticks > 0 else 0.0
-        # loss = max(measured, modelled floor) + congestion tail + bursts + fault.
-        modelled_loss = (floor_loss + cong_tail) * voice_k
-        target_loss = max(meas_loss, modelled_loss) + burst_loss + netem_loss
-
-        # latency = measured avg + modelled congestion queue + fault (eth1) + noise.
-        target_lat = meas_avg + queue_ms + netem_delay + self._rng.gauss(0, 0.4)
+        # --- Analytic healthy draw (copied from generate.py:330-332) --------------
+        # per-site baseline normal + diurnal bump; the eth1 fault term rides on top
+        # of latency/loss (0 when healthy).
+        lat, jit, loss = self._lat, self._jit, self._loss
+        target_lat = max(1.0, self._rng.gauss(lat["mean"], lat["std"] * 0.4) + d * 8.0) \
+            + netem_delay
+        target_jit = max(0.1, self._rng.gauss(jit["mean"], jit["std"] * 0.5) + d * 0.5)
+        target_loss = max(0.0, self._rng.gauss(loss["mean"], max(loss["std"], 0.05) * 0.5)) \
+            + d * 0.02 + netem_loss
 
         # --- Calibrated overlay ramp (authoritative fault term) -------------------
         # Move each target toward the signature peak by the ramp fraction, exactly
@@ -356,29 +311,21 @@ class TunnelState:
             target_jit = target_jit + ov_p * (float(jit_t) - target_jit)
             target_loss = target_loss + ov_p * sig["loss_peak"]
 
-        # Exponential smoothing so the series looks like a real time-series. Loss is
-        # smoothed lightly so micro-bursts stay visibly spiky rather than averaged out.
-        a = 0.3
-        self.latency_ms = max(0.1, (1 - a) * self.latency_ms + a * target_lat)
-        self.jitter_ms = max(0.0, (1 - a) * self.jitter_ms + a * target_jit)
-        self.loss_pct = max(0.0, 0.45 * self.loss_pct + 0.55 * target_loss)
+        # NO smoothing: the generator draws each bucket independently, so an EMA
+        # would shrink the marginal variance below the training distribution.
+        self.latency_ms = max(0.1, target_lat)
+        self.jitter_ms = max(0.0, target_jit)
+        self.loss_pct = max(0.0, target_loss)
 
-        # --- Rekey cadence + clustering (flap precursor) --------------------------
-        # WireGuard rekeys ~every 2 min of real time. Under stress (high loss),
-        # handshakes retry and rekeys CLUSTER: we accrue "debt" that drains as a
-        # burst of rekeys over the next few ticks — a precursor the ML can learn.
-        rekey_interval = 120.0 / (1.0 + self.loss_pct * 0.5)
+        # --- Rekeys: inert running counter (generate.py:326,333) -------------------
+        # Seeded once in __init__; bumped spontaneously at the generator's per-bucket
+        # 0.002 rate, RESCALED to the actual tick elapsed / STEP_S (dataset buckets
+        # are STEP_S apart; the live tick is shorter). No loss coupling.
+        elapsed = 0.0 if self._last_tick is None else max(0.0, now - self._last_tick)
+        self._last_tick = now
         fired = False
-        if self.loss_pct > 2.0 and self._rng.random() < (self.loss_pct - 2.0) * 0.04:
-            self._rekey_debt += self._rng.randint(1, 3)  # stress-induced retry cluster
-        if self._rekey_debt > 0:
+        if self._rng.random() < 0.002 * (elapsed / STEP_S):
             self.rekeys += 1
-            self._rekey_debt -= 1
-            self._last_rekey = now
-            fired = True
-        elif now - self._last_rekey >= rekey_interval:
-            self.rekeys += 1
-            self._last_rekey = now
             fired = True
         return fired  # signals a rekey event this tick
 
@@ -407,7 +354,8 @@ def _parse_pct(s):
 class Controller:
     def __init__(self, spec=None):
         model = build_model(spec)
-        self.tunnels = [TunnelState(t) for t in model["tunnels"]]
+        self.tunnels = [TunnelState(t, _baseline_for(t["site_type"]))
+                        for t in model["tunnels"]]
         # active path per (site, vrf) -> hub node. Seeded from policy.
         self.active = {}
         self.path_changes = 0
@@ -446,30 +394,6 @@ class Controller:
 
     def clear_overlay(self, site):
         self._overlay.pop(site, None)
-
-    def refresh_measured(self, workers=16):
-        """Refresh every tunnel's measured-RTT cache via a stdlib thread pool.
-
-        Propagation is ~constant, so this runs on a slow (~45s) cadence — NOT every
-        5s tick. Called once at startup (warm the cache) then by a background thread.
-        Best-effort: a tunnel whose ping fails keeps its previous cache (or None).
-        """
-        if not TunnelState._MEASURE_RTT:
-            return
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = pool.map(lambda t: (t, t._measure_rtt()), self.tunnels)
-            for t, r in results:
-                if r is not None:
-                    t._measured = r
-
-    def _measure_loop(self, period=45.0):
-        while True:
-            time.sleep(period)
-            try:
-                self.refresh_measured()
-            except Exception:
-                pass  # never let the ping pool kill the controller
 
     def _tunnels_for(self, site, hub):
         for t in self.tunnels:
@@ -549,12 +473,14 @@ class Controller:
         # One netem readback per SITE per tick (all of a site's tunnels share the
         # uplink), not one per tunnel: 28 docker execs instead of 168.
         netem_by_site = {}
+        # Diurnal load is identical across every tunnel at a given `now` — compute once.
+        d = _diurnal(now)
         rekeys = []
         for t in self.tunnels:
             if t.site not in netem_by_site:
                 netem_by_site[t.site] = t._read_netem()
             if t.update(now, netem=netem_by_site[t.site],
-                        overlay=self._overlay.get(t.site)):
+                        overlay=self._overlay.get(t.site), d=d):
                 rekeys.append({"event": "rekey", "tunnel": t.tunnel,
                                "site": t.site, "hub": t.hub, "count": t.rekeys})
         path_events = self.select_paths()
@@ -572,30 +498,30 @@ class Controller:
             lines.append(f"# HELP {name} {help_}")
             lines.append(f"# TYPE {name} {typ}")
 
-        # HONESTY (do not soften): these are SIMULATED series. Each is
-        #   measured wg0 RTT/loss + a modelled congestion term + the netem
-        #   impairment READ BACK OUT OF THE QDISC CONFIG on the site's eth1.
-        # That last term is a configured value, not an observation: the wg0 ping
-        # does not traverse eth1, so nothing here measures the injected fault.
-        # It is also per-SITE, so every tunnel and every VRF of a site carries
-        # the identical addend. A fault label whose t_impact is a threshold
-        # crossing of these series is a crossing of a MODELLED series.
+        # HONESTY (do not soften): these are SIMULATED series, drawn ANALYTICALLY
+        #   from the calibrated per-site_type baseline + diurnal bump (copied from
+        #   the dataset generator so sim == training distribution). Nothing here is
+        #   a dataplane measurement. The FAULT term is the netem impairment READ
+        #   BACK OUT OF THE QDISC CONFIG on the site's eth1 (per-SITE, so every
+        #   tunnel/VRF of a site carries the identical addend), suppressed while a
+        #   calibrated overlay ramps. A fault label whose t_impact is a threshold
+        #   crossing of these series is a crossing of a MODELLED series.
         metric("sdwan_tunnel_latency_ms",
-               "SIMULATED per-tunnel RTT (ms): measured wg0 RTT + modelled congestion "
+               "SIMULATED per-tunnel latency (ms): calibrated baseline + diurnal bump "
                "+ netem delay read back from the site uplink qdisc config", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_latency_ms", t, t.latency_ms))
         metric("sdwan_tunnel_jitter_ms",
-               "SIMULATED per-tunnel jitter (ms): measured wg0 max-min + modelled "
-               "congestion walk", "gauge")
+               "SIMULATED per-tunnel jitter (ms): calibrated baseline + diurnal bump", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_jitter_ms", t, t.jitter_ms))
         metric("sdwan_tunnel_loss_pct",
-               "SIMULATED per-tunnel loss percent: measured wg0 loss + modelled floor/"
-               "bursts + netem loss read back from the site uplink qdisc config", "gauge")
+               "SIMULATED per-tunnel loss percent: calibrated baseline + diurnal bump "
+               "+ netem loss read back from the site uplink qdisc config", "gauge")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_loss_pct", t, t.loss_pct))
-        metric("sdwan_tunnel_rekeys_total", "Cumulative WireGuard rekey events", "counter")
+        metric("sdwan_tunnel_rekeys_total", "SIMULATED cumulative WireGuard rekey counter "
+               "(baseline seed + spontaneous rate; inert, not loss-coupled)", "counter")
         for t in self.tunnels:
             lines.append(_m("sdwan_tunnel_rekeys_total", t, t.rekeys))
 
@@ -727,10 +653,6 @@ def serve(ctrl, port, interval):
     httpd = ThreadingHTTPServer(("0.0.0.0", port), _handler_factory(ctrl))
     import threading
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    # Warm the measured-RTT cache, then refresh it in the background (~45s). No-op
-    # when MEASURE_RTT is off (refresh_measured returns immediately).
-    ctrl.refresh_measured()
-    threading.Thread(target=ctrl._measure_loop, daemon=True).start()
     print(json.dumps({"event": "controller_up", "port": port,
                       "tunnels": len(ctrl.tunnels), "interval_s": interval}),
           flush=True)
@@ -743,50 +665,47 @@ def serve(ctrl, port, interval):
 
 # ----------------------------------------------------------------------------- selftest
 def _selftest():
+    import statistics
     TunnelState._SKIP_NETEM = True   # hermetic: model-only, no docker exec
-    TunnelState._MEASURE_RTT = False  # no pinging in selftest (mirror _SKIP_NETEM)
     ctrl = Controller()
     n = len(ctrl.tunnels)
     # ponytail: dynamic — accept any positive count so selftest survives rescaling.
     assert n > 0, f"unexpected tunnel count {n}"
 
-    # --- Measured-RTT cache: fallback (no measurement) seeds the floor, and an
-    # injected measurement flows into latency. Geography is now MEASURED (the
-    # formula lives in the generator's eth0 netem), so no tier check here.
-    assert all(t.base_ms == MEASURE_FLOOR_MS for t in ctrl.tunnels), \
-        "base_ms should seed at the measure floor when cache empty"
-    probe = ctrl.tunnels[0]
-    probe._measured = (42.0, 1.5, 0.2)  # simulate a cached ping result
-    for j in range(40):
-        probe.update(time.time() + j * 5.0)
-    assert probe.base_ms == 42.0, "measured avg did not become the latency baseline"
-    assert probe.latency_ms > 30.0, f"measured RTT not reflected: {probe.latency_ms}"
-    probe._measured = None  # reset so it doesn't skew the bulk ticks below
+    # base_ms is the healthy latency mean (the failover baseline), not a ping.
+    gb = _BASELINES["tunnel_baseline"]["tunnel_latency_ms"]
+    assert all(t.base_ms == t._lat["mean"] for t in ctrl.tunnels), \
+        "base_ms should seed at the analytic latency mean"
 
-    # Drive several ticks at a BUSY hour so congestion/queueing is exercised.
-    busy = PERIOD_SECONDS * (14.0 / 24.0)
-    for i in range(60):
-        ctrl.tick(now=busy + i * 5.0)
-    lat = [t.latency_ms for t in ctrl.tunnels]
-    assert all(math.isfinite(x) and x > 0 for x in lat), "latency not finite/positive"
-    assert all(t.loss_pct >= 0 for t in ctrl.tunnels), "negative loss"
-    # Loss bounded: healthy fabric, no tunnel should be catastrophically lossy here.
-    assert all(t.loss_pct < 40.0 for t in ctrl.tunnels), "loss unbounded"
-    # Jitter present and positive somewhere (not a flat zero series).
-    assert any(t.jitter_ms > 0.1 for t in ctrl.tunnels), "no jitter present"
+    # --- Distribution match: pool the 4 signals across a simulated DAY and hold them
+    # to the SAME bar synthetic/check.py:80-89 holds the dataset to. This IS the
+    # "closely match the dataset" proof.
+    lat_all, jit_all, loss_all = [], [], []
+    day_start = datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc).timestamp()  # Monday
+    for i in range(480):                       # 480 * 180s = 24h
+        ctrl.tick(now=day_start + i * 180.0)
+        for t in ctrl.tunnels:
+            lat_all.append(t.latency_ms); jit_all.append(t.jitter_ms)
+            loss_all.append(t.loss_pct)
+    assert all(math.isfinite(x) and x > 0 for x in lat_all), "latency not finite/positive"
+    for name, vals in (("jitter", jit_all), ("loss", loss_all)):
+        assert min(vals) >= 0.0, f"{name} went negative"
+    assert all(t.rekeys >= 0 and math.isfinite(t.rekeys) for t in ctrl.tunnels), "bad rekeys"
+    # latency median within +/-2 sigma of the calibrated p50, and non-constant.
+    lat_med = statistics.median(lat_all)
+    assert abs(lat_med - gb["p50"]) <= 2.0 * gb["std"], \
+        f"latency median {lat_med:.2f} off calibrated p50 {gb['p50']:.2f} (+/-{2*gb['std']:.2f})"
+    assert statistics.pstdev(lat_all) > 0.15 * gb["std"], "latency series too flat"
 
-    # --- Diurnal coupling: a sample tunnel is more congested at peak than trough -
+    # --- Diurnal coupling: latency higher at 15:00 UTC peak than 03:00 trough.
+    # No EMA now -> each update() is an independent draw, so AVERAGE many draws.
     sample = ctrl.tunnels[0]
-    peak_t = PERIOD_SECONDS * (14.0 / 24.0)
-    trough_t = PERIOD_SECONDS * (3.0 / 24.0)
-    # Re-derive latency cleanly at each hour (reset smoothing toward each target).
-    def settle(t0):
-        sample.latency_ms = sample.base_ms
-        for j in range(40):
-            sample.update(t0 + j * 5.0)
-        return sample.latency_ms
-    peak_lat = settle(peak_t)
-    trough_lat = settle(trough_t)
+    def _mean_lat_at(hour, k=300):
+        ep = datetime(2026, 6, 15, hour, 0, tzinfo=timezone.utc).timestamp()
+        return sum((sample.update(ep) or True) and sample.latency_ms
+                   for _ in range(k)) / k
+    peak_lat = _mean_lat_at(15)
+    trough_lat = _mean_lat_at(3)
     assert peak_lat > trough_lat, \
         f"no diurnal latency coupling: peak {peak_lat:.1f} !> trough {trough_lat:.1f}"
 
@@ -832,7 +751,7 @@ def _selftest():
     print("selftest: drift OK")
 
     print(f"controller selftest OK  tunnels={n} series={n_series} "
-          f"measured_fallback_floor={MEASURE_FLOOR_MS} "
+          f"lat_median={lat_med:.2f} (p50 {gb['p50']:.2f}) "
           f"peak_lat={peak_lat:.1f} trough_lat={trough_lat:.1f} "
           f"path_changes={ctrl.path_changes}")
 

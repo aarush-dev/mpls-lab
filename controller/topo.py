@@ -48,8 +48,8 @@ def build_model(spec=None):
     k = spec["knobs"]
     vrfs = spec.get("vrfs", {})
 
-    # Hubs: ce_hub{i} -> wg 172.16.0.{i}. Only the HUB wg IP is used downstream
-    # (controller._measure_rtt pings it); spoke wg IPs and WG endpoints are the
+    # Hubs: ce_hub{i} -> wg 172.16.0.{i}. The hub wg IP rides in the tunnel spec
+    # (hub_wg) for downstream consumers; spoke wg IPs and WG endpoints are the
     # generator's business — a second copy here just went stale (it had the
     # pre-collision DC formula and non-routable CE loopbacks as endpoints).
     hubs = []

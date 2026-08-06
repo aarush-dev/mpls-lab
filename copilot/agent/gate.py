@@ -24,13 +24,22 @@ from copilot.tools import Cite
 # (ADR-0007) -- both legitimately concern devices the question never named, so both are exempt.
 WINDOWED_SOURCES = frozenset({"metrics", "events", "flows"})
 
-# a device/entity token in lab naming (r1, rr1, pe3, p1, ce2, asbr1). ponytail: a role-prefix
-# whitelist, not a device registry -- it must NOT over-match, or a protocol/interface token
-# (as65001, ge0, v4, pop3) becomes a "required entity" the gate can never see evidence for,
-# wedging every such question. Upgrade to intersecting the adapter's topology node set if
-# device naming outgrows these prefixes.
-ENTITY_RE = re.compile(r"\b(?:rr|r|pe|p|ce|asbr)\d+\b", re.IGNORECASE)
-CITE_RE = re.compile(r"\[([^\[\]]+)\]")
+# a device/entity token in lab naming (r1, rr1, pe3, p1, ce2, asbr1, ce_branch24, ce_hub3,
+# h_branch24_corp). ponytail: a role-prefix whitelist, not a device registry -- it must NOT
+# over-match, or a protocol/interface token (as65001, ge0, v4, pop3) becomes a "required
+# entity" the gate can never see evidence for, wedging every such question. Upgrade to
+# intersecting the adapter's topology node set if device naming outgrows these prefixes.
+ENTITY_RE = re.compile(
+    r"\b(?:rr|r|pe|p|ce_branch|ce_hub|ce|asbr)\d+\b|\bh_\w+\b", re.IGNORECASE)
+# #118: anchored to the real id grammar (source:token, or a hyphenated slug like
+# incident-mpls-underlay-failure) -- a bare `[^\[\]]+` also matched JSON array/Mermaid-label
+# syntax and misreported it as a fabricated citation.
+CITE_RE = re.compile(
+    r"\[([a-z][a-z0-9_](?:[a-z0-9_.:@\u2010-\u2013-]*[a-z0-9_])?)\]", re.IGNORECASE)
+
+# #118: strip zero-width/format characters before matching -- run 89 injected U+200B between
+# every letter (including inside citation brackets), which desynced real ids from CITE_RE.
+_ZERO_WIDTH_RE = re.compile("[\u200b-\u200f\u202a-\u202e\ufeff]")
 
 # #43: gpt-oss compresses cites into ranges, often with a unicode hyphen. Normalize unicode
 # hyphens (U+2010..U+2013) to ASCII, then expand `src:lo-hi` -> {src:lo .. src:hi} before the
@@ -108,6 +117,7 @@ def pre_gate(cites, *, window, entities, min_evidence, soft=False) -> GateResult
 
 def citation_check(answer: str, valid_ids) -> GateResult:
     """Cheap deterministic citation check (ADR-0008): every claim maps to a real evidence id."""
+    answer = _ZERO_WIDTH_RE.sub("", answer)
     cited = set(CITE_RE.findall(answer))
     missing = []
     expanded = {eid for tok in cited for eid in _expand_cite(tok)}

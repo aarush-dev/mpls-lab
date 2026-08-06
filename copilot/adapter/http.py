@@ -32,7 +32,7 @@ import httpx
 
 from copilot.adapter.contract import (
     AdapterError, Filters, MAX_LIMIT, NodeState, Result, bfs_hops, hops_within_links,
-    row_text, sanitize, serve_rows,
+    known_nodes, payload_matches, row_text, sanitize, serve_rows,
 )
 from copilot.window import WindowContext
 
@@ -48,8 +48,23 @@ _FETCH_CAP = 1000
 # #56 ranged-mode caps: a trend read returns many samples per series, so it's bounded twice --
 # at most _RANGED_MAX_SERIES series, each decimated to <= _RANGED_MAX_SAMPLES samples -- so a
 # wide selector can't flood the agent's context. serve_rows' `limit` still caps total rows after.
-_RANGED_MAX_SERIES = 5
+_RANGED_MAX_SERIES = 15     # was 5 -- too tight even with network-priority sorting (only room
+                            # for the priority group + a sliver of the rest)
 _RANGED_MAX_SAMPLES = 20
+# dataapi returns series alphabetically by __name__ -- for a bare device selector (no `pattern`)
+# that puts device_*/xcvr_*/node_* hardware telemetry entirely before sdwan_*/interface_* network
+# telemetry, so the _RANGED_MAX_SERIES cap below silently drops every network metric on a broad
+# "summarize this device" query (a real wrong-diagnosis bug: jitter fault, answer talks fan RPM).
+# Two tiers, not one flat "network" bucket: interface_ifHCInOctets alone is 9 series (one per
+# physical + sub-interface) and sorts ahead of sdwan_ alphabetically -- a flat network/hardware
+# split still starves the actual tunnel fault signal behind interface byte counters. sdwan_ (the
+# per-tunnel fault telemetry) ranks first; other interface counters second; hardware last.
+_TUNNEL_PREFIX = "sdwan_"
+_NETWORK_PREFIXES = ("interface_", "iface_")
+
+
+def _series_rank(name: str) -> int:
+    return 0 if name.startswith(_TUNNEL_PREFIX) else 1 if name.startswith(_NETWORK_PREFIXES) else 2
 
 
 def _iso_to_epoch(s) -> int | None:
@@ -102,15 +117,6 @@ def _decimate(samples: list, cap: int) -> list:
     return [samples[round(i * (n - 1) / (cap - 1))] for i in range(cap)]
 
 
-def _matches(row: dict, pattern: str) -> bool:
-    """`pattern` substring-narrow for endpoints that lack a server-side one (/events, /flows).
-    Searched over the PAYLOAD fields only -- `ts` is excluded so a numeric pattern ('443')
-    can't spuriously match an epoch/byte count; both endpoints search the same set so one tool
-    arg has one contract (device/app/severity/line for events, the flow tuple for flows)."""
-    p = pattern.lower()
-    return p in row_text({k: v for k, v in row.items() if k != "ts"}).lower()
-
-
 class HttpAdapter:
     """ToolAdapter over a live dataapi. `fetch` is the injectable transport seam (path, params)
     -> parsed JSON; the default hits dataapi with httpx and maps any HTTP fault to AdapterError.
@@ -157,6 +163,10 @@ class HttpAdapter:
                                         "end": filters.end, "step": _STEP})
         result = data.get("result", ())
         if filters.ranged:                                   # #56: trend evidence, not one point
+            # tunnel fault signal first, then other network counters, hardware last (stable sort
+            # keeps each tier's original alphabetical order, so e.g. tunnels still list by hub id)
+            result = sorted(result, key=lambda s: _series_rank(
+                s.get("metric", {}).get("__name__", "")))
             result = result[:_RANGED_MAX_SERIES]
         rows = []
         for series in result:
@@ -182,7 +192,7 @@ class HttpAdapter:
                                        "device": filters.device, "limit": _FETCH_CAP})
         rows = [{**r, "ts": _iso_to_epoch(r.get("ts"))} for r in data.get("rows", ())]
         if filters.pattern:
-            rows = [r for r in rows if _matches(r, filters.pattern)]
+            rows = [r for r in rows if payload_matches(r, filters.pattern)]
         return rows
 
     def _flows_rows(self, filters: Filters) -> list[dict]:
@@ -193,13 +203,17 @@ class HttpAdapter:
                                       "start": filters.start, "end": filters.end})
         rows = [{**r, "ts": _iso_to_epoch(r.get("ts"))} for r in data.get("rows", ())]
         if filters.pattern:
-            rows = [r for r in rows if _matches(r, filters.pattern)]
+            rows = [r for r in rows if payload_matches(r, filters.pattern)]
         return rows
 
     # -- topology ------------------------------------------------------------
     def hops_within(self, focus: str, n: int) -> set[str]:
         graph = self._fetch("/topology", {})
         return hops_within_links(graph.get("links", ()), focus, n)
+
+    def known_devices(self) -> frozenset[str]:
+        graph = self._fetch("/topology", {})
+        return known_nodes(graph.get("nodes", ()), graph.get("links", ()))
 
     def walk_topology(self, focus: str, n: int, window: WindowContext) -> tuple[NodeState, ...]:
         # I3 (ADR-0007): /topology -> bfs_hops (shared, real link shape) -> ONE batched PromQL
@@ -208,8 +222,7 @@ class HttpAdapter:
         # that, so an outage is an observation, not a false 'unknown device' (A1 acceptance).
         graph = self._fetch("/topology", {})
         links = graph.get("links", ())
-        known = ({node["id"] for node in graph.get("nodes", ())}
-                 | {x for lk in links for x in (lk["source"], lk["target"])})
+        known = known_nodes(graph.get("nodes", ()), links)
         if focus not in known:
             return ()
         hops = bfs_hops(links, focus, n)
@@ -234,6 +247,11 @@ class HttpAdapter:
             sample = _latest_sample(series)
             if not dev or sample is None:
                 continue
-            latest.setdefault(dev, {})[name] = sample[1]
+            # #123: per-interface/tunnel series share one metric name -- keying on name alone
+            # collided them (last-series-wins, silent data loss). Extra labels (tunnel,
+            # interface, ...) disambiguate, same as _metrics_rows' `base`.
+            extra = {k: v for k, v in labels.items() if k not in ("__name__", "device")}
+            key = f"{name}{{{','.join(f'{k}={v}' for k, v in sorted(extra.items()))}}}" if extra else name
+            latest.setdefault(dev, {})[key] = sample[1]
         return {dev: sanitize(" ".join(f"{k}={v}" for k, v in sorted(metrics.items())))
                 for dev, metrics in latest.items()}

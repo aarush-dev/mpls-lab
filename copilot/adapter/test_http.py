@@ -210,6 +210,23 @@ def test_walk_topology_bfs_enriched_and_unknown_focus():
     assert a.walk_topology("ghost", 2, win) == (), "unknown focus -> no fabricated node"
 
 
+def test_walk_topology_status_keeps_multiple_series_of_the_same_metric():
+    # #123: per-interface/tunnel series share one metric name -- collapsing on name alone
+    # (last-series-wins) silently discarded all but one. Distinguish by the extra label.
+    topo = {"nodes": [{"id": "pe1"}], "links": []}
+    metrics = {"result": [
+        {"metric": {"__name__": "sdwan_tunnel_latency_ms", "device": "pe1", "tunnel": "t1"},
+         "values": [[W_START, "5"]]},
+        {"metric": {"__name__": "sdwan_tunnel_latency_ms", "device": "pe1", "tunnel": "t2"},
+         "values": [[W_START, "50"]]},
+    ]}
+    a = _adapter({"/topology": topo, "/metrics": metrics})
+    states = a.walk_topology("pe1", 0, WindowContext(W_START, W_END))
+    status = states[0].status
+    assert "5" in status and "50" in status, status
+    assert "t1" in status and "t2" in status, status
+
+
 def test_transport_fault_raises_adaptererror_not_bare_exception():
     boom = AdapterError("dataapi /metrics unavailable: connect refused")
     for call in (

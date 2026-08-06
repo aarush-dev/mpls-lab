@@ -18,11 +18,14 @@ the `handle(record, window)` seam it fires. R5b supplies the production `handle`
 Self-check:  python3 -m copilot.forensic.test_trigger
 """
 import json
+import logging
 import os
 import time
 from datetime import datetime
 
 from copilot.window import WindowContext
+
+log = logging.getLogger(__name__)
 
 _HIGH = "9999-12-31T23:59:59Z"   # lexical upper bound for the open-ended ledger range query
 
@@ -90,9 +93,21 @@ def poll_once(cfg, ledger, cursor: Cursor, handle) -> int:
     whatever the caller injects. Returns the number of records fired this tick."""
     n = 0
     for rec in list(_new_alerts(ledger, cursor)):
+        alert_id = rec["explanation_ref"]["alert_id"]
         win = WindowContext.forensic(_epoch(rec["window_end_ts"]), cfg)
-        handle(rec, win)
-        cursor.advance(rec["window_end_ts"], rec["explanation_ref"]["alert_id"])
+        log.info("firing alert_id=%s device=%s", alert_id, rec.get("device"))
+        t0 = time.monotonic()
+        # keep-alive (mirrors predictor #55): one bad/slow investigation must not kill the daemon.
+        # cursor is NOT advanced on failure, so the same alert is retried next poll instead of
+        # silently dropped -- an ops-visible retry, not a swallowed case.
+        try:
+            handle(rec, win)
+        except Exception:  # noqa: BLE001
+            log.exception("alert_id=%s FAILED after %.1fs (will retry next poll)",
+                          alert_id, time.monotonic() - t0)
+            continue
+        log.info("alert_id=%s case created in %.1fs", alert_id, time.monotonic() - t0)
+        cursor.advance(rec["window_end_ts"], alert_id)
         n += 1
     return n
 
@@ -105,8 +120,10 @@ def run_forensic(cfg, ledger, cursor: Cursor, handle, *, stop_fn, sleep=time.sle
     persisted Cursor, not loop state, so a crash mid-run resumes cleanly."""
     tick = 0
     while not stop_fn():
-        poll_once(cfg, ledger, cursor, handle)
+        n = poll_once(cfg, ledger, cursor, handle)
         tick += 1
+        if n or tick % 20 == 0:   # heartbeat every ~20 ticks so "alive+idle" is visible in the log,
+            log.info("tick %s: %s case(s) fired, cursor@%s", tick, n, cursor.ts or "-")
         sleep(cfg.predict_interval_s)
     return tick
 
@@ -126,6 +143,7 @@ def _main():  # pragma: no cover -- #55 process entrypoint, exercised by copilot
     from copilot.forensic.case import make_handler
     from copilot.memory import Ledger
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     cfg = load()
     ledger = Ledger(os.environ.get("COPILOT_LEDGER_PATH", "ledger.db"))
     cursor = Cursor(os.environ.get("COPILOT_CURSOR_PATH", "forensic-cursor.json"))

@@ -19,7 +19,8 @@ from fastapi.testclient import TestClient
 from copilot.adapter import StubAdapter
 from copilot.agent import EVENT_TYPES, Event
 from copilot.api.app import (
-    app, get_adapter, get_config, get_kg, get_llm, get_retriever, get_skills,
+    _parse_relative_start, app, get_adapter, get_config, get_kg, get_llm, get_retriever,
+    get_skills,
 )
 from copilot.config import Config
 from copilot.llm import Reply, ScriptedLLM, ToolCall, final, tool_call
@@ -29,6 +30,19 @@ from copilot.workspace.executor import _nonet_ok
 
 # the bash-over-http test needs a real no-net sandbox (unshare -n); skip honestly without it.
 needs_nonet = pytest.mark.skipif(not _nonet_ok(), reason="unshare -n unavailable on this host")
+
+
+def test_relative_window_parses_day_week_month_units():
+    # #116: _RELATIVE_RE only covered hour/minute -- "last 7 days"/"last month" fell through and
+    # silently clamped to the 10-minute rolling default. Cover day/week/month too.
+    now = 1_000_000
+    assert _parse_relative_start("faults in the last 3 days", now) == now - 3 * 86400
+    assert _parse_relative_start("last 2 weeks on ce_branch3", now) == now - 2 * 7 * 86400
+    assert _parse_relative_start("last 1 month", now) == now - 30 * 86400
+    assert _parse_relative_start("last 2 hours", now) == now - 2 * 3600, "existing units unaffected"
+    assert _parse_relative_start("last month on ce_branch3", now) == now - 30 * 86400, \
+        "a bare unit with no number (run 21) defaults to 1"
+    assert _parse_relative_start("no period named here", now) is None
 
 ROWS = [{"device": "r1", "ts": 100 + i, "cpu": 90 + i} for i in range(3)]
 
@@ -278,6 +292,19 @@ def test_manual_skill_invoke_over_http():
     assert "chase a bgp flap" in system, "catalog description in the base prompt"
     assert "STEP: pull the session logs" in system, "invoked skill body preloaded over HTTP"
     assert any(t["name"] == "load_skill" for t in tools), "load_skill advertised over HTTP"
+
+
+def test_chat_states_this_calls_actual_session_workspace_skills_over_http():
+    # #120: a refusal must be about THIS call ("no session_id"), never an invented claim that
+    # sessions/workspace/skills don't exist in the system at all.
+    app.dependency_overrides.clear()
+    llm = ScriptedLLM([final("which device?")])
+    app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_adapter] = lambda: StubAdapter()
+    resp = TestClient(app).post("/chat", json={"question": "q", "start": 100, "end": 200})
+    assert resp.status_code == 200
+    system = llm.calls[0][0][0]["content"]
+    assert "session=none" in system and "workspace=off" in system and "skills=none" in system
 
 
 def test_session_persists_and_resumes_over_http():

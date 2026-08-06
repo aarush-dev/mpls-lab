@@ -48,8 +48,10 @@ _TOPO_HOPS = (1, 2)   # blast-radius depths captured for the fault focus (ADR-00
 
 # ---------------------------------------------------------------- ids + io
 def case_id(record: dict) -> str:
-    """One id per episode (ADR-0014 one-case-per-episode): the alert_id, which is deterministic
-    from the scenario_id and idempotent in the ledger -- so an episode maps to ONE case dir.
+    """One case dir per alert_id (ADR-0014). The alert_id is deterministic from the scenario_id +
+    reported cause (emulate._alert_id, #48), idempotent in the ledger: an episode's same-cause ticks
+    share one id -> ONE frozen case; a cause refinement mints a fresh id -> a NEW case (freshness is
+    a new investigation, not a mutated case).
     Filesystem-sanitised (a hostile scenario_id can't escape cases_root)."""
     alert_id = (record.get("explanation_ref") or {}).get("alert_id") or "unknown"
     return re.sub(r"[^A-Za-z0-9._-]", "_", alert_id)
@@ -175,6 +177,12 @@ class ReplayAdapter:
 
     def hops_within(self, focus: str, n: int) -> set[str]:
         return set(self._topo.get("hops", {}).get(f"{focus}:{n}", ()))
+
+    def known_devices(self) -> frozenset[str]:
+        # #119/protocol: the frozen snapshot only ever captured a partial hops/walk view (the
+        # live run's own tool calls), never the full topology -- an empty set here (never
+        # asserting "unknown") is the only honest answer, same as StubAdapter with no topology.
+        return frozenset()
 
     def walk_topology(self, focus: str, n: int, window: WindowContext) -> tuple[NodeState, ...]:
         canned = self._topo.get("walk", {}).get(f"{focus}:{n}")

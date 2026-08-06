@@ -14,6 +14,9 @@ WORKDIR /app
 COPY controller/topo.py controller/controller.py /app/controller/
 COPY trafficgen/diurnal.py /app/trafficgen/
 COPY faults/signatures.py /app/faults/
+# Calibrated baselines (tunnel_baseline*, fault_signatures, step_s). Without this the
+# controller falls back to defaults and its tunnel series match nothing in training.
+COPY synthetic/profile.json /app/synthetic/profile.json
 COPY topology-spec.yaml /app/topology-spec.yaml
 ENV TOPO_SPEC=/app/topology-spec.yaml
 EXPOSE 9362

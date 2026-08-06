@@ -270,8 +270,12 @@ export class HttpDataClient implements DataClient {
     ]);
     const nowS = Date.now() / 1000;
 
-    // device -> live health from the ground-truth timeline.
-    const state = new Map<string, 'red' | 'amber' | 'yellow'>();
+    // device -> ground-truth health from the fault-label timeline. Red is authoritative
+    // (confirmed impact); amber is only a CANDIDATE here — a fault's t_start fires the instant
+    // it's injected, before any live metric has actually moved, so it must not preempt yellow
+    // below (which reflects what the metrics are doing right now, not what we know is coming).
+    const red = new Set<string>();
+    const amberCandidate = new Set<string>();
     for (const l of labels) {
       const dev = HttpDataClient.deviceOf(l);
       if (!dev) {
@@ -281,22 +285,25 @@ export class HttpDataClient implements DataClient {
       const i = toEpochS(l.t_impact);
       const e = toEpochS(l.t_end);
       if (nowS >= i && nowS <= e) {
-        state.set(dev, 'red');
-      } else if (nowS >= s && nowS < i && state.get(dev) !== 'red') {
-        state.set(dev, 'amber');
+        red.add(dev);
+      } else if (nowS >= s && nowS < i) {
+        amberCandidate.add(dev);
       }
     }
 
-    // No red/amber ground-truth state: check live tunnel metrics for stress. Thresholds scale
-    // with a node's connection count — a well-connected node has more redundancy, so it takes a
-    // bigger metric excursion to call it "stressed" than a node with a single link.
+    // Live tunnel metrics for stress. Thresholds scale with a node's connection count — a
+    // well-connected node has more redundancy, so it takes a bigger metric excursion to call it
+    // "stressed" than a node with a single link. Precedence: red > yellow (live-stressed) > amber
+    // (ground-truth precursor, metrics not yet elevated) > green.
     const degree = new Map<string, number>();
     for (const l of topo.links) {
       degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
       degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
     }
+    const state = new Map<string, 'red' | 'amber' | 'yellow'>();
     for (const n of topo.nodes) {
-      if (state.has(n.id)) {
+      if (red.has(n.id)) {
+        state.set(n.id, 'red');
         continue;
       }
       const mult = 1 + (degree.get(n.id) ?? 0) / 5;
@@ -305,6 +312,8 @@ export class HttpDataClient implements DataClient {
       const p = loss.get(n.id) ?? 0;
       if (l > STRESS_LATENCY_MS * mult || j > STRESS_JITTER_MS * mult || p > STRESS_LOSS_PCT * mult) {
         state.set(n.id, 'yellow');
+      } else if (amberCandidate.has(n.id)) {
+        state.set(n.id, 'amber');
       }
     }
 

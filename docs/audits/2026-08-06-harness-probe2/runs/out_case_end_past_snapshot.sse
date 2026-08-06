@@ -1,0 +1,1 @@
+{"detail":"forensic window frozen at T_snapshot=1785963793: end=9999999999 would read live data; pass end <= 1785963793"}

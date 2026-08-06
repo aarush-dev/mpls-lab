@@ -228,6 +228,31 @@ def test_record_persists_to_the_event_ledger():
     assert got[0]["record"]["risk"]["fault_types"][0]["cause"] == "congestion"
 
 
+def test_alert_id_keys_on_cause_only_not_every_tick_or_concurrency():
+    # #48: freshness = a NEW investigation, never in-place mutation. The alert_id keys on
+    # scenario_id + reported CAUSE only. A tick that drifts confidence/TTI OR grows n_concurrent
+    # keeps the episode's id (ledger no-op, case frozen). ONLY a cause refinement mints a fresh id,
+    # so it lands and the trigger opens a NEW case at its own frozen window (ADR-0014/#48).
+    # Deliberately NOT keyed on n_concurrent: opening a case drains the live adapter + runs an agent,
+    # so re-casing on the churning concurrency count (1->2->3) would hammer dataapi/the LLM.
+    base = emulate_record(LABEL, error_profile="oracle", n_concurrent=1)["explanation_ref"]["alert_id"]
+    # immaterial drift (later tick, same cause) -> SAME id -> re-emit is a ledger no-op.
+    later = emulate_record(LABEL, error_profile="oracle", n_concurrent=1,
+                           now="2026-06-21T14:56:10Z", drift_tick=3)["explanation_ref"]["alert_id"]
+    assert later == base, "confidence/TTI/drift alone must not re-case"
+    # a second fault joins -> n_concurrent grows -> SAME id -> no new case (no server-hammer churn).
+    grew = emulate_record(LABEL, error_profile="oracle", n_concurrent=2)["explanation_ref"]["alert_id"]
+    assert grew == base, "n_concurrent growth must NOT auto-open a case (adapter drain + agent run)"
+    # reported cause refines (oracle => cause == type) -> fresh id -> new case.
+    refined = emulate_record(dict(LABEL, type="core_congestion"), error_profile="oracle",
+                             n_concurrent=1)["explanation_ref"]["alert_id"]
+    assert refined != base, "cause refinement is the one material signal -> new case"
+    # distinct ids => distinct case dirs: freshness rides the existing multi-case model.
+    from copilot.forensic.case import case_id
+    assert case_id({"explanation_ref": {"alert_id": base}}) != \
+           case_id({"explanation_ref": {"alert_id": refined}})
+
+
 def test_to_wire_does_not_collide_with_record_keys():
     w = to_wire(emulate_record(LABEL, error_profile="oracle"))
     assert w["type"] == "prediction" and "record" in w
@@ -252,6 +277,7 @@ def _run():
     test_prediction_seam_emulate_pa_false_takes_the_real_pa_path()
     test_fetch_labels_reads_the_ground_truth_rows()
     test_record_persists_to_the_event_ledger()
+    test_alert_id_keys_on_cause_only_not_every_tick_or_concurrency()
     test_to_wire_does_not_collide_with_record_keys()
     print("copilot.emulator.test_emulate OK")
 

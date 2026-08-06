@@ -17,55 +17,68 @@ from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import controller as C  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 
 C.TunnelState._SKIP_NETEM = True     # hermetic: no docker exec
-C.TunnelState._MEASURE_RTT = False   # no pinging
 
-QUIET = C.PERIOD_SECONDS * (3.0 / 24.0)  # trough hour: low healthy latency
+# A real weekday 03:00 UTC epoch: diurnal trough, low healthy latency. The tunnel
+# series are now drawn off REAL wall-clock (not the compressed period), so the test
+# epochs must be real datetimes.
+QUIET = datetime(2026, 6, 15, 3, 0, tzinfo=timezone.utc).timestamp()
 
 
 def _sweep(ctrl, site, t_from, t_to, netem=None, ticks=40):
-    """Tick the site with `now` sweeping t_from->t_to; return mean tunnel latency
-    at the END (so exponential smoothing has converged on the final instant)."""
+    """Tick the site with `now` sweeping t_from->t_to; return (mean latency, mean
+    loss) across the site's tunnels at the final instant. No EMA now, so each tick
+    is an independent draw and the final instant is the current healthy/ramped level."""
     site_tuns = [t for t in ctrl.tunnels if t.site == site]
     for i in range(ticks):
         now = t_from + (t_to - t_from) * i / (ticks - 1)
         for t in site_tuns:
             t.update(now, netem=netem, overlay=ctrl._overlay.get(t.site))
-    return sum(t.latency_ms for t in site_tuns) / len(site_tuns)
+    lat = sum(t.latency_ms for t in site_tuns) / len(site_tuns)
+    loss = sum(t.loss_pct for t in site_tuns) / len(site_tuns)
+    return lat, loss
 
 
-def _ramp_case(fault):
-    """Ramp `fault` to its peak knot, then clear; assert reach-peak + return."""
+def _ramp_case(fault, channel):
+    """Ramp `fault` to its peak knot, then clear; assert reach-peak + return on the
+    channel that actually carries the signal (congestion -> latency; gray_failure's
+    latency peak ~= baseline, so its signal is LOSS, mirroring the dataset)."""
     ctrl = C.Controller()
     site = ctrl.tunnels[0].site
-    peak_expect = max(ctrl._sigs[fault]["lat_peak"], 0.0)
+    sig = ctrl._sigs[fault]
 
-    base = _sweep(ctrl, site, QUIET, QUIET + 200.0)
-    assert base < 25.0, f"[{fault}] baseline already high: {base:.1f}"
+    base_lat, base_loss = _sweep(ctrl, site, QUIET, QUIET + 200.0)
+    assert base_lat < 40.0, f"[{fault}] baseline latency already high: {base_lat:.1f}"
 
     t0 = QUIET + 300.0
     lead, dur = 50.0, 60.0
     ctrl.set_overlay(site, fault, lead_s=lead, duration=dur, t_start=t0)
     peak_now = t0 + lead + 0.3 * dur
-    peak = _sweep(ctrl, site, t0, peak_now)
-    # The floored target is max(lat_peak, healthy*1.15); baseline is tiny here, so
-    # the peak should approach lat_peak. Require it to clear well past baseline.
-    assert peak > max(base * 2, 0.6 * peak_expect), \
-        f"[{fault}] did not ramp toward peak {peak_expect:.1f}: {peak:.1f}"
-    assert peak <= peak_expect * 1.3 + 2.0, \
-        f"[{fault}] overshot calibrated peak {peak_expect:.1f}: {peak:.1f}"
+    peak_lat, peak_loss = _sweep(ctrl, site, t0, peak_now)
+
+    if channel == "lat":
+        peak_expect = sig["lat_peak"]
+        assert peak_lat > base_lat + 10.0, \
+            f"[{fault}] latency did not ramp: base {base_lat:.1f} peak {peak_lat:.1f}"
+        assert peak_lat <= peak_expect * 1.3 + 2.0, \
+            f"[{fault}] overshot calibrated lat_peak {peak_expect:.1f}: {peak_lat:.1f}"
+    else:
+        peak_expect = sig["loss_peak"]
+        assert peak_loss > base_loss + 0.5 * peak_expect, \
+            f"[{fault}] loss did not ramp: base {base_loss:.2f} peak {peak_loss:.2f}"
 
     ctrl.clear_overlay(site)
-    back = _sweep(ctrl, site, peak_now, peak_now + 200.0)
-    assert back < base + 5.0, f"[{fault}] no return to baseline: {back:.1f}"
-    print(f"ramp[{fault}]: base={base:.1f} peak={peak:.1f} "
-          f"(cal {peak_expect:.1f}) back={back:.1f} OK")
+    back_lat, _ = _sweep(ctrl, site, peak_now, peak_now + 200.0)
+    assert back_lat < base_lat + 5.0, f"[{fault}] no return to baseline: {back_lat:.1f}"
+    print(f"ramp[{fault}/{channel}]: base_lat={base_lat:.1f} peak_lat={peak_lat:.1f} "
+          f"peak_loss={peak_loss:.2f} back_lat={back_lat:.1f} OK")
 
 
 def test_ramp_absolute_and_relative_peaks():
-    _ramp_case("congestion")     # real-derived absolute peak
-    _ramp_case("gray_failure")   # peak scales off base_lat -> exercises the bases
+    _ramp_case("congestion", "lat")     # absolute latency peak
+    _ramp_case("gray_failure", "loss")  # weak latency, signal is in loss
 
 
 def test_no_double_count_with_netem():
@@ -77,11 +90,11 @@ def test_no_double_count_with_netem():
     peak_now = t0 + 50.0 + 0.3 * 60.0
 
     ctrl.set_overlay(site, "congestion", lead_s=50.0, duration=60.0, t_start=t0)
-    with_netem = _sweep(ctrl, site, t0, peak_now, netem=(40.0, 5.0))
+    with_netem, _ = _sweep(ctrl, site, t0, peak_now, netem=(40.0, 5.0))
 
     ctrl.clear_overlay(site)
     ctrl.set_overlay(site, "congestion", lead_s=50.0, duration=60.0, t_start=t0)
-    no_netem = _sweep(ctrl, site, t0, peak_now, netem=(0.0, 0.0))
+    no_netem, _ = _sweep(ctrl, site, t0, peak_now, netem=(0.0, 0.0))
 
     # Suppressed: a 40ms netem must not shift the emitted latency by ~40ms.
     assert abs(with_netem - no_netem) < 5.0, \

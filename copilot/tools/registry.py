@@ -11,6 +11,7 @@ which adapter method they hit and share one arg shape. Upgrade to per-tool arg
 schemas only when a tool needs args beyond the shared narrowing (device/pattern/
 limit/offset).
 """
+import dataclasses
 from dataclasses import dataclass
 
 from copilot.adapter import (
@@ -39,8 +40,13 @@ class Cite:
 # name -> (adapter method, description advertised to the model). The adapter method
 # is the seam: swapping stub<->HTTP never touches this table (ADR-0006).
 TOOLS: dict[str, tuple[str, str]] = {
-    "query_metrics": ("metrics", "Read device metrics within the investigation window. "
-                      "Pass ranged=true for a multi-sample trend series (cited evidence for "
+    "query_metrics": ("metrics", "Read device metrics within the investigation window. A bare "
+                      "`device` with no `pattern` returns BOTH hardware telemetry (fan/power/psu/"
+                      "temp) and network telemetry (sdwan_tunnel_latency_ms/jitter_ms/loss_pct, "
+                      "interface counters) interleaved -- hardware rows can fill the row cap before "
+                      "any network metric appears. For a network-health question, pass `pattern` "
+                      "(e.g. 'latency', 'jitter', 'loss', 'tunnel') to target it directly. Pass "
+                      "ranged=true for a multi-sample trend series (cited evidence for "
                       "'ramped/climbed over N min' claims), not just the latest point. Charting "
                       "is out of scope -- Grafana owns charts (#56)."),
     "search_logs": ("events", "Search device logs/events within the investigation window."),
@@ -59,6 +65,10 @@ RETRIEVAL_TOOLS: dict[str, tuple[str, str]] = {
 # ponytail: hop radius default lives here as a constant (like adapter.MAX_LIMIT) -- ADR-0007
 # wants a small proximity, and config.py is another lane's file. Lift to config if tuned.
 DEFAULT_HOPS = 2
+# #125: hops had no ceiling -- hops=1000 on the real 148-node topology dumped every node in
+# one ~44.7KB observation (79s response). 10 hops comfortably covers any real blast-radius
+# question on this lab's topology while still bounding a pathological request.
+MAX_HOPS = 10
 
 # schema advertised to a native function-calling backend. Read tools share one narrowing
 # shape (start/end NOT exposed -- the loop owns the window, ADR-0002/0015); the two
@@ -69,7 +79,9 @@ TOOL_SPECS = [{
     "description": desc,
     "parameters": {"type": "object", "properties": {
         "device": {"type": "string"},
-        "pattern": {"type": "string"},
+        "pattern": {"type": "string", "description": "Case-insensitive literal substring match "
+                   "(not a regex) -- 'error|fault|down' matches only that literal string, never "
+                   "an alternation of the three words."},
         "limit": {"type": "integer"},
         "offset": {"type": "integer"},
         # ranged is metrics-only trend evidence (#56) -- advertising it on events/flows, which
@@ -77,13 +89,6 @@ TOOL_SPECS = [{
         **({"ranged": {"type": "boolean"}} if name == "query_metrics" else {}),
     }},
 } for name, (_, desc) in TOOLS.items()] + [
-    {"name": "search_runbooks", "description": RETRIEVAL_TOOLS["search_runbooks"][1],
-     "parameters": {"type": "object", "required": ["query"], "properties": {
-         "query": {"type": "string"}, "k": {"type": "integer"}}}},
-    {"name": "search_incidents", "description": RETRIEVAL_TOOLS["search_incidents"][1],
-     "parameters": {"type": "object", "required": ["query"], "properties": {
-         "query": {"type": "string"}, "k": {"type": "integer"},
-         "device": {"type": "string"}, "hops": {"type": "integer"}}}},
     {"name": "walk_topology_graph",
      "description": "Blast-radius / downstream: BFS the real topology from a focus `device` "
                     "(within `hops`) and enrich each node with its live status.",
@@ -91,14 +96,33 @@ TOOL_SPECS = [{
          "device": {"type": "string"}, "hops": {"type": "integer"}}}},
 ]
 
+# #122: separated from TOOL_SPECS so the loop advertises these only when a retriever is
+# wired (mirrors BASH_SPEC/PRESENT_SPEC) -- with no retriever, dispatch always answered
+# "error: retrieval backend not available" and the model kept re-probing a dead backend.
+RETRIEVAL_SPECS = [
+    {"name": "search_runbooks", "description": RETRIEVAL_TOOLS["search_runbooks"][1],
+     "parameters": {"type": "object", "required": ["query"], "properties": {
+         "query": {"type": "string"}, "k": {"type": "integer"}}}},
+    {"name": "search_incidents", "description": RETRIEVAL_TOOLS["search_incidents"][1],
+     "parameters": {"type": "object", "required": ["query"], "properties": {
+         "query": {"type": "string"}, "k": {"type": "integer"},
+         "device": {"type": "string"}, "hops": {"type": "integer"}}}},
+]
+
 
 def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
              window: WindowContext, retriever: Retriever | None = None,
-             kg: dict[str, str] | None = None) -> tuple[str, tuple[Cite, ...]]:
+             kg: dict[str, str] | None = None,
+             call_index: int | None = None) -> tuple[str, tuple[Cite, ...]]:
     """Run one tool call: narrow -> validate -> read -> render. Returns
     (observation_text, cites) -- the structured `Cite`s feed the I4a quality gate
     (n_rows = len(cites)). An unknown tool or a FilterError comes back AS the observation
     with no cites (ADR-0015 guidance) so the model can correct and retry, never as a raise.
+
+    `call_index` (#124, the loop's per-call counter) namespaces read-tool ids ("metrics:0"
+    restarts at 0 every call, so two query_metrics calls in one investigation both cite
+    "metrics:0" -- ambiguous which call's row is meant). None (default) leaves ids unchanged;
+    retrieval/topology ids are already globally stable (doc id / device name) and untouched.
     """
     if name == "walk_topology_graph":                    # I3: topology walk, not a windowed read
         return _walk(arguments, adapter, window, kg)
@@ -137,13 +161,32 @@ def dispatch(name: str, arguments: dict, adapter: ToolAdapter,
         return f"error: {e}", ()
     except AdapterError as e:                            # dataapi transport fault (A1) -> observation
         return f"error: {e}", ()
+    if call_index is not None:                            # #124: namespace ids by call
+        result = dataclasses.replace(result, evidence=tuple(
+            dataclasses.replace(ev, id=f"{ev.source}@{call_index}:{ev.id.split(':', 1)[1]}")
+            for ev in result.evidence))
+    # #119: "no rows" alone doesn't say WHY -- unknown device, a real device with genuinely no
+    # data this window, or a malformed pattern all looked identical, so a misspelled device
+    # burned 2-6 wasted reads before the model happened to call walk_topology_graph (the only
+    # tool that gave this signal). Same topology data that tool already uses. An empty/unreach-
+    # able topology can't prove absence, so it never asserts "unknown" in that case.
+    if not result.evidence and narrow.get("device"):
+        try:
+            known = adapter.known_devices()
+        except AdapterError:
+            known = frozenset()
+        if known and narrow["device"] not in known:
+            return f"error: unknown device {narrow['device']!r}: not in the topology", ()
     cites = tuple(Cite(ev.id, ev.source, ev.device, ev.ts) for ev in result.evidence)
-    return _render(result), cites
+    return _render(result, narrow), cites
 
 
-def _render(res: Result) -> str:
+def _render(res: Result, narrow: dict | None = None) -> str:
     if not res.evidence:
-        return "no rows"
+        # echo the effective filters so a malformed pattern (or the wrong device) is visible
+        # instead of silently indistinguishable from a clean negative result.
+        filt = " ".join(f"{k}={narrow[k]!r}" for k in ("device", "pattern") if narrow and narrow.get(k))
+        return f"no rows for {filt}" if filt else "no rows"
     lines = [f"[{ev.id}] {ev.content}" for ev in res.evidence]
     if res.next_page:
         lines.append(f"(more: offset={res.next_page})")
@@ -208,7 +251,14 @@ def _walk(args: dict, adapter: ToolAdapter, window: WindowContext,
         return f"error: {e}", ()                         # false 'unknown device' from an empty walk
     if not states:                                       # unknown focus -> no fabricated subgraph
         return f"error: unknown device {focus!r}: not in the topology", ()
-    lines = []
+    # #117: a total the model can mechanically compare its own count claim against, instead of
+    # trusting it to tally a one-per-line enumeration itself (audit runs invented totals).
+    hop_counts: dict[int, int] = {}
+    for s in states:
+        hop_counts[s.hop] = hop_counts.get(s.hop, 0) + 1
+    header = "total={} ({})".format(
+        len(states), " ".join(f"hop{h}={hop_counts[h]}" for h in sorted(hop_counts)))
+    lines = [header]
     for s in states:
         # [topo:node] is the citable id (the gate checks citations, I4a); status is already
         # sanitized at the adapter (ADR-0016). KG hint (if enabled) is appended, additive-only.
@@ -225,9 +275,10 @@ def _hops(args: dict) -> int | None:
     """Coerce the optional `hops` arg (default DEFAULT_HOPS); None if it's junk (a weak model
     may emit null/list/string) so the caller returns guidance, never a raise (ADR-0015)."""
     try:
-        return int(args["hops"]) if "hops" in args else DEFAULT_HOPS
+        hops = int(args["hops"]) if "hops" in args else DEFAULT_HOPS
     except (TypeError, ValueError):
         return None
+    return min(hops, MAX_HOPS)
 
 
 def _render_hits(hits: list[Hit]) -> str:

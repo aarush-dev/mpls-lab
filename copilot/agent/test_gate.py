@@ -27,6 +27,31 @@ def test_extract_entities_pulls_device_names():
     assert extract_entities("bgp as65001 flapping on ge0 for v4?") == frozenset()
 
 
+def test_extract_entities_covers_ce_branch_and_hub_naming():
+    # #118: ENTITY_RE was blind to the CE/branch/hub fleet -- pre_gate's "named entity has
+    # supporting evidence" check was a structural no-op for most of the topology.
+    got = extract_entities("... ce_branch24 ... ce_hub3 ... h_branch24_corp ... pe12")
+    assert got == frozenset({"ce_branch24", "ce_hub3", "h_branch24_corp", "pe12"})
+
+
+def test_citation_check_ignores_zero_width_characters():
+    # #118: run 89 injected U+200B between every letter, including inside citation brackets --
+    # citation_check must normalize those away, not report real citations as fabricated.
+    zw = "​"
+    injected = zw.join("r1 cpu pegged [metrics:0]")
+    r = citation_check(injected, {"metrics:0"})
+    assert r.ok, r.missing
+
+
+def test_citation_check_does_not_mistake_json_arrays_or_mermaid_labels_for_citations():
+    # #118: CITE_RE's bare `[...]` matched JSON array/Mermaid-label syntax and misreported it
+    # as a fabricated citation id, even though the answer cited nothing at all.
+    r = citation_check('{"devices": ["r1", "r2"], "count": 2}', set())
+    assert not any("fabricated" in m for m in r.missing)
+    r2 = citation_check("graph TD\nA[Router One] --> B[Router Two]", set())
+    assert not any("fabricated" in m for m in r2.missing)
+
+
 def test_tool_calls_ok_flags_failed_calls():
     assert tool_calls_ok(()).ok
     r = tool_calls_ok(("error: over-broad: specify a device",))

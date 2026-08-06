@@ -717,9 +717,8 @@ def run_scenario(name, target, severity="medium", duration=90,
                  dry_run=False, cancel=None, status=None):
     """buildup -> impact -> hold -> revert state machine for one live injection.
 
-    Every scenario draws a precursor lead from the shared prior, floored to a
-    demo-visible [30,60]s (out-of-distribution for the naturally-fast faults, per
-    docs/SPEC-NOTES.md). Overlay-flagged scenarios also post a calibrated
+    The precursor lead (buildup span) = the caller-selected `duration`, so the UI
+    duration knob controls how long buildup runs. Overlay-flagged scenarios also post a calibrated
     tunnel-ramp overlay so the precursor is VISIBLE during buildup. Then: wait the
     lead (cancellable) -> fire the real injector at IMPACT -> hold `duration`
     (cancellable) -> guaranteed finally reverts the physical action AND clears the
@@ -749,7 +748,10 @@ def run_scenario(name, target, severity="medium", duration=90,
     overlay_active = is_overlay  # cleared below if the controller post fails
     # Every overlay scenario injects on its target (a spoke CE), which is the site
     # the tunnel metric folds into — so the overlay is keyed on `target`.
-    lead = min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0]))
+    # Live buildup spans the caller-selected duration (the UI "duration" knob). The
+    # prior-drawn [30,60]s lead was for synthetic label distribution, not live demos --
+    # it pinned every live buildup to <=60s regardless of the chosen duration.
+    lead = float(duration)
     overlay = (_OverlayInjector(target, spec["type"], lead, duration, severity)
                if is_overlay and not dry_run else None)
     t_start = now_utc()

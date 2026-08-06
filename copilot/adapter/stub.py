@@ -7,7 +7,8 @@ VictoriaMetrics/Loki running (spec §Testing).
 from collections.abc import Sequence
 
 from copilot.adapter.contract import (
-    Filters, MAX_LIMIT, NodeState, Result, bfs_hops, hops_within_links, sanitize, serve_rows,
+    Filters, MAX_LIMIT, NodeState, Result, bfs_hops, hops_within_links, known_nodes,
+    payload_matches, sanitize, serve_rows,
 )
 from copilot.window import WindowContext
 
@@ -44,6 +45,9 @@ class StubAdapter:
     def hops_within(self, focus: str, n: int) -> set[str]:
         return hops_within_links(self._topology.get("links", ()), focus, n)
 
+    def known_devices(self) -> frozenset[str]:
+        return known_nodes(self._topology.get("nodes", ()), self._topology.get("links", ()))
+
     def walk_topology(self, focus: str, n: int, window: WindowContext) -> tuple[NodeState, ...]:
         # BFS the real edges, then enrich each node with its latest metric row. Ordered by
         # (hop, node) so the walk is deterministic (ADR-0007). Unknown focus -> () (never
@@ -51,9 +55,7 @@ class StubAdapter:
         # (canned rows carry no live clock); the HTTP adapter batches a PromQL over it per
         # frontier. Status = raw latest metric summary -- health thresholds are a later ticket.
         links = self._topology.get("links", ())
-        known = ({node["id"] for node in self._topology.get("nodes", ())}
-                 | {x for lk in links for x in (lk["source"], lk["target"])})
-        if focus not in known:
+        if focus not in self.known_devices():
             return ()
         hops = bfs_hops(links, focus, n)
         return tuple(
@@ -70,5 +72,13 @@ class StubAdapter:
         return sanitize(" ".join(f"{k}={v}" for k, v in latest.items() if k not in ("device", "ts")))
 
     def _serve(self, source: str, filters: Filters) -> Result:
+        # #119: filter by device/pattern like the real HttpAdapter does (server-side there,
+        # here adapter-side over the canned rows) -- else the stub can't exercise "known
+        # device, no data" vs "unknown device" vs a real device/pattern-scoped read.
+        rows = self._rows[source]
+        if filters.device:
+            rows = [r for r in rows if r.get("device") == filters.device]
+        if filters.pattern:
+            rows = [r for r in rows if payload_matches(r, filters.pattern)]
         # F2's shared pipeline (validate -> window-filter -> page -> frame); canned rows in.
-        return serve_rows(source, filters, self._rows[source], self._max_limit)
+        return serve_rows(source, filters, rows, self._max_limit)

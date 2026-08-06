@@ -365,7 +365,7 @@ Bounds enforced: delay ≤ 60 ms, jitter ≤ 0.3 × delay, loss ≤ 1%. Within e
 
 **Why eth0:** this is the host-facing transport veth. Applying netem here delays both the WireGuard tunnels (overlay data plane) AND the site's telemetry transport (SNMP polls, IPFIX flows, syslog) — realistic, since NOC telemetry rides the same WAN access link. Verified at ≤1% loss: SNMP, IPFIX, and syslog all remain intact.
 
-**Single source of truth:** `site_netem()` in `generate.py` sets the physical impairment. The controller **measures** it (ping over wg0) but does not define it. The previously-duplicated geography baseline model inside the controller has been removed.
+**Single source of truth:** `site_netem()` in `generate.py` sets the physical impairment on the real dataplane. The controller no longer measures it — the 4 tunnel signals are now analytic draws copied from the generator's `_gen_tunnels` (calibrated baseline + diurnal), so live telemetry matches the training distribution rather than the live dataplane. The wg0-ping measurement path was removed.
 
 ## MPLS depth additions
 
@@ -580,15 +580,17 @@ After generation, verify manually or via script:
 
 ## Decisions from the 2026-07-26 repair pass (105 audit findings)
 
-**Tunnel telemetry is labelled SIMULATED, not faked as measured.** The old HELP
-text implied `sdwan_tunnel_latency_ms`/`_jitter_ms`/`_loss_pct` were straight
-measurements. They aren't: only the wg0 ping layer is real, the congestion term
-is an M/M/1 model, and the fault term is a netem *qdisc-config* readback, not
-something the ping actually traversed (`controller/controller.py:150-181`). A
-consumer trusting these as ground-truth measurements would draw the wrong
-conclusion about what the model can learn from them, so the HELP strings now
-say SIMULATED outright (`controller.py:8-13`) instead of leaving the gap
-implicit. Honesty about provenance beats a nicer-sounding metric name.
+**Tunnel telemetry is labelled SIMULATED, not faked as measured.** The
+`sdwan_tunnel_latency_ms`/`_jitter_ms`/`_loss_pct`/`_rekeys_total` series are
+analytic draws — a calibrated per-site_type baseline + diurnal bump, COPIED from
+the dataset generator (`synthetic/generate.py:_gen_tunnels`) so live telemetry
+sits in the training distribution. Nothing here is a dataplane measurement; the
+earlier wg0-ping/M/M/1 model was replaced for exactly this reason (a consumer
+must not trust these as ground-truth measurements). The fault term is still a
+netem *qdisc-config* readback (suppressed under a calibrated overlay). HELP
+strings say SIMULATED outright (`controller.py` `render_prometheus()`). See the
+"port analytic tunnel signals into the sim" change; guarded by
+`controller/test_tunnel_model.py`.
 
 **Three scenarios (`hub_spoke_congest`, `bgp_cascade`, `brownout`) dropped their
 `vm_threshold` probes and became `impact_method: modelled`.** Their probes
@@ -1575,3 +1577,26 @@ render (CopilotTrace): raster (png/jpg/gif/webp/bmp) inline via a CLIENT-typed i
 Blob (the UI, never the server mime string, picks the type), svg/html a download chip
 only (never inlined) -- the endpoint hardening (#54: octet-stream+nosniff+attachment)
 guards agent-authored stored XSS. See ADR-0011 Amendment.
+
+#128 follow-up probe (2026-08-06): 4 live `/chat` requests actually setting
+`session_id`/`case_id`/`workspace`/`skills` (the 100-run harness audit never did --
+bare `{"question": ...}` only). Findings, against the live stack:
+- Unknown `session_id`: 200, silently creates a new persisted session under the
+  typo'd id (`sessions/<sid>/`) -- confirmed the asymmetry vs `case_id`'s hard 404.
+  No code change made; flagged as a decision still open (accept the asymmetry, or
+  404 an unknown session_id too -- breaks "session_id is just a client-chosen key"
+  semantics either way you go).
+- `case_id` follow-up with `end` past the case's frozen `T_snapshot`: **400**, as
+  designed -- `FilterError` -> `HTTPException(400)` (app.py's `follow_up` catch),
+  the ADR-0002 freeze guard works over HTTP, not just in the adapter unit tests.
+- `workspace: true` with no `session_id`: 200, no `bash` tool call anywhere in the
+  trace -- confirmed silently unavailable (`ws = None`), the model fell back to
+  read tools without complaint or explanation.
+- Unknown `skills` name: confirmed by unit test (`test_unknown_manual_invoke_name_
+  silently_no_ops`, copilot/agent/test_agent.py) rather than a live run -- the live
+  NIM endpoint was 503-flaking during this probe (unrelated to copilot). The code
+  path is deterministic (`loop.py`'s `invoke` loop: unknown name -> `skills.get`
+  returns None -> skipped, no event), so the unit test is equivalent evidence.
+
+Driver: `scratchpad/harness_probe2/driver.sh` + raw requests/responses under
+`scratchpad/harness_probe2/runs/`.

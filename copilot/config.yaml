@@ -11,7 +11,7 @@ embed_profile: nim          # nim | unsloth-local
 emulate_pa: true            # ADR-0003: PA-emulator feeds records until the real PA ships
 kg_enabled: true            # ADR-0007: curated KG -- additive, never critical-path
 ledger_to_kb: true          # ADR-0009: finalized case verdicts feed the Knowledge Base
-gate_enabled: false         # ADR-0008: I4a/I4b quality gate. See COPILOT_GATE_DISABLE env (app.py)
+gate_enabled: true          # ADR-0008: I4a/I4b quality gate. See COPILOT_GATE_DISABLE env (app.py)
 history_compaction: false   # ADR-0015: summarize old chat turns (off by default)
 
 # -- knobs --------------------------------------------------------------------

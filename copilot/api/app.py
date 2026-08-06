@@ -15,8 +15,11 @@ The LLM client + tool adapter are FastAPI dependencies: tests override them via
 OpenAI client (R1) and the HTTP dataapi adapter (A1); a dead endpoint surfaces per-request,
 not as a startup 503. The live end-to-end run on a real model + seeded corpora is E1/#42.
 """
+import dataclasses
 import json
+import logging
 import os
+import re
 import time
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -34,6 +37,8 @@ from copilot.retrieval import LanceRetriever, Retriever, make_embedder
 from copilot.skills import Skill, load_skills
 from copilot.window import WindowContext
 from copilot.workspace import Executor, PathPolicyError, artifact_path, for_session
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 app = FastAPI(title="NOC Copilot", version="1.0")
 
@@ -60,7 +65,12 @@ class ChatRequest(BaseModel):
 
 
 def get_config() -> Config:
-    return load()
+    cfg = load()
+    # debug escape hatch: COPILOT_GATE_DISABLE=1 skips the I4a/I4b gate for live requests without
+    # touching Config's own default (config.py's self-check + the gate test suite assume gate-on).
+    if os.environ.get("COPILOT_GATE_DISABLE") == "1":
+        cfg = dataclasses.replace(cfg, gate_enabled=False)
+    return cfg
 
 
 def get_llm(cfg: Config = Depends(get_config)) -> LLMClient:
@@ -151,10 +161,33 @@ def get_ledger() -> Ledger:
     return Ledger(os.environ.get("COPILOT_LEDGER_PATH", "ledger.db"))
 
 
+# "last/past N hour(s)/minute(s)/min" in free text -> seconds. Covers the common phrasing a user
+# actually types ("summary of the last hour"); anything fancier still needs explicit start/end.
+# ponytail: a handful of regexes, not an NLP library -- upgrade only if real questions miss this.
+_RELATIVE_RE = re.compile(
+    r"\b(?:last|past)\s+(?:(\d+)\s*)?(hour|hr|minute|min|day|week|month)s?\b", re.IGNORECASE)
+_UNIT_SECONDS = {"hour": 3600, "hr": 3600, "minute": 60, "min": 60,
+                  "day": 86400, "week": 7 * 86400, "month": 30 * 86400}  # ponytail: 30d, no calendar lib
+
+
+def _parse_relative_start(question: str, now: int) -> int | None:
+    m = _RELATIVE_RE.search(question)
+    if not m:
+        return None
+    n, unit = int(m.group(1) or 1), m.group(2).lower()
+    return now - n * _UNIT_SECONDS[unit]
+
+
 def _window(req: ChatRequest, cfg: Config) -> WindowContext:
     # R3 (ADR-0002): Query when the request names a period, else rolling Live (now-X..now).
     # Forensic (frozen) windows are built by the case layer (R5b), not from a chat request.
-    return WindowContext.query(req.start, req.end, cfg, int(time.time()))
+    now = int(time.time())
+    start, end = req.start, req.end
+    if start is None and end is None:           # explicit params always win over parsed text
+        start = _parse_relative_start(req.question, now)
+        if start is not None:
+            end = now   # query() needs BOTH bounds set, else it falls back to live() (window/__init__.py)
+    return WindowContext.query(start, end, cfg, now)
 
 
 def _sse(outcome: Outcome):
@@ -250,10 +283,15 @@ def chat(req: ChatRequest, cfg: Config = Depends(get_config),
     ws = for_session(sessions.root, sid) if (sid and req.workspace) else None
     executor = (Executor(ws, timeout_s=cfg.exec_timeout_s, max_timeout_s=cfg.exec_max_timeout_s,
                          output_cap=cfg.exec_output_cap) if ws else None)
+    # #120: state what THIS request actually carried -- a refusal ("no session_id on this call")
+    # must be about the call, not an invented claim that the feature doesn't exist in the system.
+    request_context = (
+        f"This call: session={'resumed' if history else ('new' if sid else 'none')}; "
+        f"workspace={'on' if ws else 'off'}; skills={', '.join(req.skills) if req.skills else 'none'}.")
     outcome = investigate(req.question, _window(req, cfg),
                           llm=llm, adapter=adapter, cfg=cfg, retriever=retriever, kg=kg,
                           skills=skills, executor=executor, workspace=ws, invoke=req.skills,
-                          history=history)
+                          history=history, request_context=request_context)
     if sid:
         sessions.append(sid, outcome.events)
         # R2b (ADR-0009): route this turn's gate outcomes (pass and fail) into the Event Ledger
