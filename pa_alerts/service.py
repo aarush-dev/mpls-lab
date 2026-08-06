@@ -42,8 +42,9 @@ MODE = os.environ.get("PA_ALERT_MODE", "rank")
 INTERVAL = int(os.environ.get("PA_ALERT_INTERVAL_S", "15"))
 TARGET_FPR = float(os.environ.get("PA_TARGET_FPR", "0.01"))
 EWMA_ALPHA = float(os.environ.get("PA_EWMA_ALPHA", "0.2"))     # baseline responsiveness
-RISE_MARGIN = float(os.environ.get("PA_RISE_MARGIN", "0.15"))  # p_any rise to alert (rank mode)
-MIN_RISK = float(os.environ.get("PA_MIN_RISK", "0.30"))        # floor so tiny rises don't fire
+RISE_MARGIN = float(os.environ.get("PA_RISE_MARGIN", "0.25"))  # p_any rise to alert (rank mode)
+MIN_RISK = float(os.environ.get("PA_MIN_RISK", "0.45"))        # floor so tiny rises don't fire
+TOP_K = int(os.environ.get("PA_TOP_K_ALERTS", "6"))            # cap alerts shown (readable banner)
 CALIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration.json")
 
 app = FastAPI(title="PA live alerts")
@@ -93,20 +94,32 @@ def _row(rec: dict) -> dict:
 
 
 def _alerts_rank(rows: list[dict]) -> list[dict]:
-    """A: flag entities whose p_any rose sharply above their own EWMA baseline."""
+    """A: flag entities whose p_any rose sharply above their own EWMA baseline.
+
+    Two demo-critical properties:
+      - baseline of an ALERTING entity is FROZEN (not updated), so a sustained fault
+        stays flagged instead of the EWMA chasing the fault and clearing the alert.
+      - only the top TOP_K rises are returned, so the banner stays readable.
+    """
+    alerting_ids = set()
     out = []
     for r in rows:
         e = r["entity_id"]; risk = r["p_any"]
         base = _BASELINE.get(e)
         if base is not None and risk >= MIN_RISK and (risk - base) >= RISE_MARGIN:
             out.append({**r, "baseline": round(base, 4), "rise": round(risk - base, 4)})
-    # update EWMA AFTER computing rise, so a fault's own spike doesn't hide itself
+            alerting_ids.add(e)
+    # update EWMA only for NON-alerting entities (a fault's own spike must not erode
+    # its baseline, or the alert self-clears while the fault is still live)
     for r in rows:
         e = r["entity_id"]
+        if e in alerting_ids:
+            _BASELINE.setdefault(e, r["p_any"])   # seed once if unseen; never chase up
+            continue
         _BASELINE[e] = r["p_any"] if e not in _BASELINE else \
             (1 - EWMA_ALPHA) * _BASELINE[e] + EWMA_ALPHA * r["p_any"]
     out.sort(key=lambda a: -a["rise"])
-    return out
+    return out[:TOP_K]
 
 
 def _alerts_threshold(rows: list[dict]) -> list[dict]:

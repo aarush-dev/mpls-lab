@@ -238,7 +238,7 @@ export function FaultInjectionPage() {
           width={16}
         />
         <Select<number>
-          options={[30, 60, 90, 180].map((d) => ({ label: `${d}s`, value: d }))}
+          options={[15, 30, 60, 90, 180, 300, 600].map((d) => ({ label: `${d}s`, value: d }))}
           value={{ label: `${duration}s`, value: duration }}
           onChange={(v) => v?.value && setDuration(v.value)}
           allowCustomValue
