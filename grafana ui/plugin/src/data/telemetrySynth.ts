@@ -8,6 +8,7 @@
 import metaJson from '../fixtures/meta.json';
 import type { MetricSeries, MetricPoint, DataSourceKind } from './types';
 import { BucketMeta, bucketToTsMs } from '../utils/time';
+import { STRESS_LATENCY_MS, STRESS_JITTER_MS, STRESS_LOSS_PCT } from './topologyStyles';
 
 // Local BucketMeta (mirrors MockDataClient.MOCK_BUCKET_META) — imported here instead of from
 // MockDataClient to avoid a circular import. tMs is overwritten by getTelemetry's monotonic
@@ -122,8 +123,12 @@ function buildSeries(deviceId: string, entity: string, key: string, t: Tmpl, buc
  *  - spoke (ce_branch/ce_dc): full interface set + one tunnel entity
  * points.length === bucketCount for every series.
  */
-/** True if a spoke device's synthetic tunnel telemetry is over the stress threshold at `bucket`. */
-export function tunnelStressAt(deviceId: string, role: string, bucket: number): boolean {
+/**
+ * True if a spoke device's synthetic tunnel telemetry is over the stress threshold at `bucket`.
+ * Threshold scales with `degree` (node connection count) — more-connected nodes have more
+ * redundancy, so it takes a bigger excursion per link to call them stressed.
+ */
+export function tunnelStressAt(deviceId: string, role: string, bucket: number, degree = 1): boolean {
   if (!SPOKE_ROLES.has(role)) {
     return false;
   }
@@ -131,7 +136,8 @@ export function tunnelStressAt(deviceId: string, role: string, bucket: number): 
   const jitter = TUNNEL_METRICS.find((t) => t.kind === 'tunnel_jitter_ms')!;
   const loss = TUNNEL_METRICS.find((t) => t.kind === 'tunnel_loss_pct')!;
   const v = (t: Tmpl) => valueFor(t, saltOf(deviceId) + saltOf(t.kind), bucket);
-  return v(latency) > 5 || v(jitter) > 3 || v(loss) > 1;
+  const d = Math.max(1, degree);
+  return v(latency) > STRESS_LATENCY_MS * d || v(jitter) > STRESS_JITTER_MS * d || v(loss) > STRESS_LOSS_PCT * d;
 }
 
 export function synthSeries(deviceId: string, role: string, bucketCount: number): MetricSeries[] {

@@ -105,6 +105,9 @@ export function TopologyPage() {
             <span className={styles.swatch} style={{ background: stateColors.amber }} /> Precursor
           </span>
           <span className={styles.legendItem}>
+            <span className={styles.swatch} style={{ background: stateColors.yellow }} /> Stressed
+          </span>
+          <span className={styles.legendItem}>
             <span className={styles.swatch} style={{ background: stateColors.red }} /> Down
           </span>
         </div>
@@ -159,8 +162,16 @@ function NodeHoverCard({ node, snapshot, x, y }: HoverCardProps) {
   if (!node) {
     return null;
   }
-  const status = node.state === 'red' ? 'Down' : node.state === 'amber' ? 'Precursor' : 'Healthy';
-  const color = node.state === 'red' ? stateColors.red : node.state === 'amber' ? stateColors.amber : stateColors.green;
+  const status =
+    node.state === 'red' ? 'Down' : node.state === 'amber' ? 'Precursor' : node.state === 'yellow' ? 'Stressed' : 'Healthy';
+  const color =
+    node.state === 'red'
+      ? stateColors.red
+      : node.state === 'amber'
+      ? stateColors.amber
+      : node.state === 'yellow'
+      ? stateColors.yellow
+      : stateColors.green;
   const rows: Array<[string, string]> = [
     ['Role', node.role],
     ['POP', node.pop ?? '—'],

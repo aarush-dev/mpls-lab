@@ -34,6 +34,7 @@ import type {
 import { normalizeError } from './errors';
 import { METRIC_CATALOG } from './metricCatalog';
 import { parseSseFrames, mapEventsToTurn } from './copilotChat';
+import { STRESS_LATENCY_MS, STRESS_JITTER_MS, STRESS_LOSS_PCT } from './topologyStyles';
 
 // --- Raw backend DTOs -------------------------------------------------------------------------
 
@@ -286,15 +287,23 @@ export class HttpDataClient implements DataClient {
       }
     }
 
-    // No red/amber ground-truth state: check live tunnel metrics for stress.
+    // No red/amber ground-truth state: check live tunnel metrics for stress. Thresholds scale
+    // with a node's connection count — a well-connected node has more redundancy, so it takes a
+    // bigger metric excursion to call it "stressed" than a node with a single link.
+    const degree = new Map<string, number>();
+    for (const l of topo.links) {
+      degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
+      degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
+    }
     for (const n of topo.nodes) {
       if (state.has(n.id)) {
         continue;
       }
+      const d = degree.get(n.id) ?? 1;
       const l = latency.get(n.id) ?? 0;
       const j = jitter.get(n.id) ?? 0;
       const p = loss.get(n.id) ?? 0;
-      if (l > 5 || j > 3 || p > 1) {
+      if (l > STRESS_LATENCY_MS * d || j > STRESS_JITTER_MS * d || p > STRESS_LOSS_PCT * d) {
         state.set(n.id, 'yellow');
       }
     }
