@@ -34,8 +34,15 @@ def _epoch(now_iso: str) -> int:
 
 def _export_df(start: int, end: int, step: int):
     """Default live source: dataapi's export_df. Imported lazily so a test that
-    injects `export_df=` never needs dataapi/VM importable."""
+    injects `export_df=` never needs dataapi/VM importable. The dataapi dir is put
+    on sys.path first: export.py imports its sibling `sources` by bare name."""
     import importlib
+    import os
+    import sys
+    dataapi_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "dataapi")
+    if dataapi_dir not in sys.path:
+        sys.path.insert(0, dataapi_dir)
     return importlib.import_module("dataapi.export").export_df(start, end, step)
 
 
@@ -58,7 +65,9 @@ def build_windows(now_iso: str, channels: list[str], *, L: int = 168, step: int 
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     out: dict[str, dict] = {}
     for (device, entity, etype), g in df.groupby(["device", "entity", "entity_type"]):
-        g = g.set_index("ts").reindex(grid)
+        g = g.set_index("ts").sort_index()
+        g = g[~g.index.duplicated(keep="last")]      # one row per bucket before reindex
+        g = g.reindex(grid)
         # missing channels aren't in a device row's frame at all -> add as NaN col
         mat = np.full((L, len(channels)), np.nan, dtype=np.float32)
         for j, ch in enumerate(channels):
