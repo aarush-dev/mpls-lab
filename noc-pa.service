@@ -1,0 +1,19 @@
+[Unit]
+Description=NOC Predictive-Analysis inference service (graph v2, /v1/predict/snapshot)
+After=network.target
+# telemetry must be flowing for the copilot to build live windows, but the PA
+# service itself only needs the weights + topology edges on disk.
+
+[Service]
+Type=simple
+WorkingDirectory=/root/LAB/bah_predictive_analysis/training
+Environment=RUN_DIR=runs_backup/reduced_graph_v2_test0.859
+Environment=GRAPH_DATA_ROOT=/root/LAB/dataapi/graph_data
+Environment=PYTHONPATH=/root/LAB/bah_predictive_analysis/training
+ExecStartPre=/root/pa-venv/bin/python /root/LAB/dataapi/topology_edges.py
+ExecStart=/root/pa-venv/bin/uvicorn src.serve.app:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
