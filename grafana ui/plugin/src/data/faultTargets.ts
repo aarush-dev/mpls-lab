@@ -47,7 +47,7 @@ export function isValidTarget(target: string, validRoles: string[]): boolean {
 
 /**
  * Target options for a scenario, given its valid_roles + live topology nodes.
- * - device roles (ce_*/pe/p) -> the nodes carrying that role.
+ * - device roles (ce_x, pe, p) -> the nodes carrying that role.
  * - 'pop' -> synthesized from the distinct derived node POPs (pop1, pop2, …).
  * - 'srlg' contributes no concrete option (custom-value long-tail; caller's allowCustomValue).
  * Sorted by value for a stable list.
