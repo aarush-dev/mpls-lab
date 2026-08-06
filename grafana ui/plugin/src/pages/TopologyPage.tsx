@@ -11,37 +11,13 @@ import { ErrorState } from '../components/ErrorState';
 import { useAppState } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { MetricSeries, TopologyLink, TopologyNodeLive } from '../data/types';
-import { InjectedFault } from '../state/reducer';
 import { nodeDetailPath } from '../constants';
 import { stateColors } from '../data/topologyStyles';
-
-// Overlay manually-injected faults (Fault Injection page) onto the real /labels-derived node
-// state, so a fresh injection colors the node instantly instead of waiting on the next real signal.
-function applyInjectedFaults(nodes: TopologyNodeLive[], injectedFaults: InjectedFault[]): TopologyNodeLive[] {
-  if (injectedFaults.length === 0) {
-    return nodes;
-  }
-  const byNode = new Map(injectedFaults.map((f) => [f.node, f]));
-  return nodes.map((n) => {
-    const fault = byNode.get(n.id);
-    if (!fault) {
-      return n;
-    }
-    if (fault.phase === 'down') {
-      return { ...n, state: 'red' };
-    }
-    if (fault.phase === 'predicted') {
-      return { ...n, state: 'amber' };
-    }
-    // 'pending' — leave the real state as-is.
-    return n;
-  });
-}
 
 export function TopologyPage() {
   const styles = useStyles2(getStyles);
   const history = useHistory();
-  const { refreshTick, range, filters, injectedFaults } = useAppState();
+  const { refreshTick, range, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [nodes, setNodes] = useState<TopologyNodeLive[]>([]);
@@ -81,7 +57,7 @@ export function TopologyPage() {
         if (cancelled) {
           return;
         }
-        setNodes(applyInjectedFaults(graph.nodes as TopologyNodeLive[], injectedFaults));
+        setNodes(graph.nodes as TopologyNodeLive[]);
         setLinks(graph.links);
         setStatus('ready');
       })
@@ -95,7 +71,7 @@ export function TopologyPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, refreshTick, filters, reloadToken, injectedFaults]);
+  }, [dataClient, refreshTick, filters, reloadToken]);
 
   const filteredNodes = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -149,7 +125,6 @@ export function TopologyPage() {
           {hover && (
             <NodeHoverCard
               node={nodes.find((n) => n.id === hover.id)}
-              phase={injectedFaults.find((f) => f.node === hover.id)?.phase}
               snapshot={snapshot}
               x={hover.x}
               y={hover.y}
@@ -174,26 +149,18 @@ function latest(snapshot: MetricSeries[] | null, suffix: string): string {
 
 interface HoverCardProps {
   node?: TopologyNodeLive;
-  phase?: string;
   snapshot: MetricSeries[] | null;
   x: number;
   y: number;
 }
 
 /** Compact "inspect without clicking" card: node identity, live state, and a few headline metrics. */
-function NodeHoverCard({ node, phase, snapshot, x, y }: HoverCardProps) {
+function NodeHoverCard({ node, snapshot, x, y }: HoverCardProps) {
   const styles = useStyles2(getStyles);
   if (!node) {
     return null;
   }
-  const status =
-    phase === 'down' || node.state === 'red'
-      ? 'Down'
-      : phase === 'predicted' || node.state === 'amber'
-      ? phase === 'predicted'
-        ? 'Predicted fault'
-        : 'Precursor'
-      : 'Healthy';
+  const status = node.state === 'red' ? 'Down' : node.state === 'amber' ? 'Precursor' : 'Healthy';
   const color = node.state === 'red' ? stateColors.red : node.state === 'amber' ? stateColors.amber : stateColors.green;
   const rows: Array<[string, string]> = [
     ['Role', node.role],

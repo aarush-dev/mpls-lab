@@ -21,7 +21,7 @@ export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const history = useHistory();
   const styles = useStyles2(getStyles);
-  const { mode, refreshTick, range, injectedFaults } = useAppState();
+  const { mode, refreshTick, range } = useAppState();
   const dataClient = useDataClient();
 
   const [telemetry, setTelemetry] = useState<MetricSeries[] | null>(null);
@@ -77,8 +77,7 @@ export function NodeDetailPage() {
     return () => {
       cancelled = true;
     };
-    // injectedFaults: re-fetch when a fault escalates so charts + status update live.
-  }, [dataClient, refreshTick, range.fromMs, range.toMs, mode, id, attempt, injectedFaults]);
+  }, [dataClient, refreshTick, range.fromMs, range.toMs, mode, id, attempt]);
 
   const node = topology?.nodes.find((n) => n.id === id);
   const neighborIds = useMemo(() => {
@@ -98,7 +97,6 @@ export function NodeDetailPage() {
 
   const activeIncident = incidents.find((i) => i.status === 'open' || i.status === 'active');
   const activePrediction = predictions[0];
-  const injected = injectedFaults.find((f) => f.node === id);
   const panels = telemetry ? groupSeries(telemetry) : [];
 
   // Live search: filter metric panels + fixed sections by case-insensitive title substring.
@@ -140,22 +138,8 @@ export function NodeDetailPage() {
         <>
           <div className={styles.header}>
             <span>{node ? `${node.role}${node.pop ? ` · ${node.pop}` : ''}${node.siteType ? ` · ${node.siteType}` : ''}` : 'Unknown device'}</span>
-            <span
-              className={
-                injected?.phase === 'down'
-                  ? styles.down
-                  : injected || activeIncident || activePrediction
-                  ? styles.unhealthy
-                  : styles.healthy
-              }
-            >
-              {injected?.phase === 'down'
-                ? `Down — ${injected.faultType} (injected)`
-                : injected?.phase === 'predicted'
-                ? `Predicted ${injected.faultType} in ${injected.leadSec}s`
-                : injected?.phase === 'pending'
-                ? `Fault arming — ${injected.faultType}`
-                : activeIncident
+            <span className={activeIncident || activePrediction ? styles.unhealthy : styles.healthy}>
+              {activeIncident
                 ? activeIncident.summary
                 : activePrediction
                 ? `Predicted ${activePrediction.faultType} (${(activePrediction.confidence * 100).toFixed(0)}%)`
@@ -252,9 +236,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   unhealthy: css`
     color: ${theme.colors.warning.text};
-  `,
-  down: css`
-    color: ${theme.colors.error.text};
   `,
   search: css`
     max-width: 420px;

@@ -12,7 +12,7 @@ import { count, secondsToEta } from '../utils/format';
 
 export function OverviewPage() {
   const styles = useStyles2(getStyles);
-  const { refreshTick, filters, injectedFaults } = useAppState();
+  const { refreshTick, filters } = useAppState();
   const dataClient = useDataClient();
 
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -37,7 +37,7 @@ export function OverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [dataClient, refreshTick, filters, injectedFaults]);
+  }, [dataClient, refreshTick, filters]);
 
   return (
     <PluginPage>
