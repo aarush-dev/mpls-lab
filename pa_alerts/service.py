@@ -140,6 +140,8 @@ def _alerts_threshold(rows: list[dict]) -> list[dict]:
     per = _CALIB.get("threshold_per_entity", {})
     out = []
     for r in rows:
+        if r.get("entity_type") != "device":   # tunnels/interfaces: noisy, non-stationary — scope out (same as rank)
+            continue
         cal = r.get("calibrated_probability") or 0.0
         thr = per.get(r["entity_id"], thr_global)
         if cal >= thr:
