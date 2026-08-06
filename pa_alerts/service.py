@@ -42,9 +42,10 @@ MODE = os.environ.get("PA_ALERT_MODE", "rank")
 INTERVAL = int(os.environ.get("PA_ALERT_INTERVAL_S", "15"))
 TARGET_FPR = float(os.environ.get("PA_TARGET_FPR", "0.01"))
 EWMA_ALPHA = float(os.environ.get("PA_EWMA_ALPHA", "0.2"))     # baseline responsiveness
-RISE_MARGIN = float(os.environ.get("PA_RISE_MARGIN", "0.25"))  # p_any rise to alert (rank mode)
-MIN_RISK = float(os.environ.get("PA_MIN_RISK", "0.45"))        # floor so tiny rises don't fire
+RISE_MARGIN = float(os.environ.get("PA_RISE_MARGIN", "0.15"))  # p_any rise to alert (rank mode)
+MIN_RISK = float(os.environ.get("PA_MIN_RISK", "0.6"))         # floor so tiny rises don't fire
 TOP_K = int(os.environ.get("PA_TOP_K_ALERTS", "6"))            # cap alerts shown (readable banner)
+CONSEC = int(os.environ.get("PA_CONSEC_TICKS", "2"))           # over-margin ticks to confirm (kills noise)
 CALIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration.json")
 
 app = FastAPI(title="PA live alerts")
@@ -53,6 +54,7 @@ app = FastAPI(title="PA live alerts")
 _STATE: dict = {"ts": None, "predictions": [], "alerts": [], "mode": MODE,
                 "n_scored": 0, "error": None, "warm": False}
 _BASELINE: dict[str, float] = {}      # entity -> EWMA of p_any (rank mode)
+_OVER: dict[str, int] = {}            # entity -> consecutive ticks over the rise margin
 _CALIB: dict = {}
 
 
@@ -86,7 +88,8 @@ def _score_once() -> list[dict]:
 
 def _row(rec: dict) -> dict:
     ft = (rec.get("risk") or {}).get("fault_types") or []
-    return {"entity_id": rec.get("entity_id"), "device": rec.get("device") or rec.get("entity_id"),
+    return {"entity_id": rec.get("entity_id"), "entity_type": rec.get("entity_type"),
+            "device": rec.get("device") or rec.get("entity_id"),
             "cause": ft[0]["cause"] if ft else None,
             "p_any": round(rec["risk"]["p_any_fault_in_horizon"], 4),
             "calibrated_probability": rec["decision"].get("calibrated_probability"),
@@ -104,17 +107,26 @@ def _alerts_rank(rows: list[dict]) -> list[dict]:
     alerting_ids = set()
     out = []
     for r in rows:
+        # tunnel/interface entities have noisy p_any (swings ~0.3 tick-to-tick) and are the
+        # false-positive engine on live data; device entities give a clean, stable, well-
+        # separated signal — the injected CE device lights up alone. Scope alerting to devices.
+        if r.get("entity_type") != "device":
+            continue
         e = r["entity_id"]; risk = r["p_any"]
         base = _BASELINE.get(e)
-        if base is not None and risk >= MIN_RISK and (risk - base) >= RISE_MARGIN:
+        over = base is not None and risk >= MIN_RISK and (risk - base) >= RISE_MARGIN
+        _OVER[e] = _OVER.get(e, 0) + 1 if over else 0   # count consecutive over-margin ticks
+        # confirm only when the rise SUSTAINS for CONSEC ticks — a single noisy p_any spike
+        # (ce_branch1 swings ~0.15 tick-to-tick on the live model) does not fire.
+        if over and _OVER[e] >= CONSEC:
             out.append({**r, "baseline": round(base, 4), "rise": round(risk - base, 4)})
             alerting_ids.add(e)
     # update EWMA only for NON-alerting entities (a fault's own spike must not erode
     # its baseline, or the alert self-clears while the fault is still live)
     for r in rows:
         e = r["entity_id"]
-        if e in alerting_ids:
-            _BASELINE.setdefault(e, r["p_any"])   # seed once if unseen; never chase up
+        if _OVER.get(e, 0) > 0:                   # over-margin (confirming OR firing): don't chase up
+            _BASELINE.setdefault(e, r["p_any"])
             continue
         _BASELINE[e] = r["p_any"] if e not in _BASELINE else \
             (1 - EWMA_ALPHA) * _BASELINE[e] + EWMA_ALPHA * r["p_any"]

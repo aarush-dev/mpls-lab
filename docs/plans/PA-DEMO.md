@@ -52,9 +52,24 @@ curl :8000/pa/alerts         # {alerts:[], predictions:[...], n_scored: ~256}
 3. Within a few ticks the target's PA risk rises → banner turns red: **"PA PREDICTION — <device> <cause> <p%> ETA"**, and a toast pops.
 
 ### Reliable demo faults (strong, model-visible)
-Inject **high** severity on a CE (`congestion`, `tunnel_degrade`) and let it run to
-impact. Rank mode fires on the *rise*, so the target stands out even against live
-noise. If it under-fires, lower the bar: `PA_RISE_MARGIN=0.10` (env on noc-pa-alerts).
+Inject **high** severity on a CE **device** (`congestion`, `tunnel_degrade`) and let it
+run. The injected CE's device p_any climbs from ~0.3 baseline to ~0.85 by impact and
+fires cleanly, alone.
+
+Key facts learned from live runs:
+- **Alerting is scoped to `device` entities.** Tunnel/interface entities have very noisy
+  live p_any (swings ~0.3 tick-to-tick) and were the false-positive engine; devices are
+  stable and well-separated. Not a ground-truth echo — a class scope.
+- **Fire happens near/after impact, not at inject.** `build_windows` uses a 168×30s (84 min)
+  window; a fresh fault only fills a few slots during buildup, so the device p_any ramps
+  with the fault and crosses the bar around the fault's **impact** time (`t_impact` in
+  `/faults/active`), typically 3–5 min after inject for a 300s buildup. Let it run.
+- **A recently-faulted entity stays hot ~84 min** (its fault sits in the window). For a
+  clean re-demo pick a *different* CE, or wait for the window to flush.
+
+Rank params (env on noc-pa-alerts): `PA_RISE_MARGIN=0.15`, `PA_MIN_RISK=0.6`,
+`PA_CONSEC_TICKS=2` (sustained-rise confirm kills single-tick spikes). If it under-fires,
+lower `PA_MIN_RISK=0.5` or `PA_RISE_MARGIN=0.10`.
 
 ## Path A vs B (switch, no code change)
 
