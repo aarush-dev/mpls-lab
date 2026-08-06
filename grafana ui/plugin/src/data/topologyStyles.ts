@@ -37,9 +37,10 @@ export function colorForState(state?: 'red' | 'amber' | 'yellow' | 'green'): str
   return state ? stateColors[state] : neutralColor;
 }
 
-// "Stressed" (yellow) thresholds for live sdwan_tunnel_latency_ms/jitter_ms/loss_pct, per unit of
-// node degree (connection count) — a node with more links has more redundancy, so it takes a
-// bigger excursion per link to call it stressed. Effective threshold = BASE * max(1, degree).
-export const STRESS_LATENCY_MS = 7;
-export const STRESS_JITTER_MS = 4;
-export const STRESS_LOSS_PCT = 1.5;
+// "Stressed" (yellow) thresholds for live sdwan_tunnel_latency_ms/jitter_ms/loss_pct — real
+// backend only (baseline ~1-2ms per controller.py, congestion-scenario impact fires at 8ms).
+// Scaled by node degree (connection count): a node with more links has more redundancy, so it
+// takes a bigger excursion to call it stressed. Effective threshold = BASE * (1 + degree / 5).
+export const STRESS_LATENCY_MS = 10;
+export const STRESS_JITTER_MS = 5;
+export const STRESS_LOSS_PCT = 2;

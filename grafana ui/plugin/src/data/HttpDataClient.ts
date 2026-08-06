@@ -299,11 +299,11 @@ export class HttpDataClient implements DataClient {
       if (state.has(n.id)) {
         continue;
       }
-      const d = degree.get(n.id) ?? 1;
+      const mult = 1 + (degree.get(n.id) ?? 0) / 5;
       const l = latency.get(n.id) ?? 0;
       const j = jitter.get(n.id) ?? 0;
       const p = loss.get(n.id) ?? 0;
-      if (l > STRESS_LATENCY_MS * d || j > STRESS_JITTER_MS * d || p > STRESS_LOSS_PCT * d) {
+      if (l > STRESS_LATENCY_MS * mult || j > STRESS_JITTER_MS * mult || p > STRESS_LOSS_PCT * mult) {
         state.set(n.id, 'yellow');
       }
     }

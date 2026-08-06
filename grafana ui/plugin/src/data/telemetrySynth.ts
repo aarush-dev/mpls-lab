@@ -8,7 +8,13 @@
 import metaJson from '../fixtures/meta.json';
 import type { MetricSeries, MetricPoint, DataSourceKind } from './types';
 import { BucketMeta, bucketToTsMs } from '../utils/time';
-import { STRESS_LATENCY_MS, STRESS_JITTER_MS, STRESS_LOSS_PCT } from './topologyStyles';
+
+// Mock-only stress thresholds, tuned to TUNNEL_METRICS' own synthetic ranges below (latency
+// 20-60ms, jitter 1-8ms, loss 0-2%) — NOT the same scale as the real backend's
+// topologyStyles.STRESS_* (baseline ~1-2ms), so kept separate rather than shared.
+const MOCK_STRESS_LATENCY_MS = 22;
+const MOCK_STRESS_JITTER_MS = 3;
+const MOCK_STRESS_LOSS_PCT = 0.7;
 
 // Local BucketMeta (mirrors MockDataClient.MOCK_BUCKET_META) — imported here instead of from
 // MockDataClient to avoid a circular import. tMs is overwritten by getTelemetry's monotonic
@@ -136,8 +142,12 @@ export function tunnelStressAt(deviceId: string, role: string, bucket: number, d
   const jitter = TUNNEL_METRICS.find((t) => t.kind === 'tunnel_jitter_ms')!;
   const loss = TUNNEL_METRICS.find((t) => t.kind === 'tunnel_loss_pct')!;
   const v = (t: Tmpl) => valueFor(t, saltOf(deviceId) + saltOf(t.kind), bucket);
-  const d = Math.max(1, degree);
-  return v(latency) > STRESS_LATENCY_MS * d || v(jitter) > STRESS_JITTER_MS * d || v(loss) > STRESS_LOSS_PCT * d;
+  const mult = 1 + Math.max(0, degree) / 5;
+  return (
+    v(latency) > MOCK_STRESS_LATENCY_MS * mult ||
+    v(jitter) > MOCK_STRESS_JITTER_MS * mult ||
+    v(loss) > MOCK_STRESS_LOSS_PCT * mult
+  );
 }
 
 export function synthSeries(deviceId: string, role: string, bucketCount: number): MetricSeries[] {
