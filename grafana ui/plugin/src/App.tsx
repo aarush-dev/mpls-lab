@@ -14,6 +14,7 @@ import { StatusPage } from './pages/StatusPage';
 
 import { FaultInjectionPage } from './pages/FaultInjectionPage';
 import { AppShell } from './components/AppShell';
+import { PaAlertsBanner } from './components/PaAlertsBanner';
 import { CopilotPanel } from './components/CopilotPanel';
 import { CopilotChatProvider } from './hooks/CopilotChatContext';
 import { AlertToasterProvider } from './components/AlertToaster';
@@ -45,6 +46,7 @@ function AppInner(_props: AppRootProps) {
   return (
     <AppShell onToggleCopilot={() => setCopilotOpen((v) => !v)}>
       <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      <PaAlertsBanner />
       <Switch>
         <Route exact path={path} component={OverviewPage} />
         <Route path={`${path}/topology`} component={TopologyPage} />
