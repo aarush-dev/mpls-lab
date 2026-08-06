@@ -14,7 +14,8 @@ Field provenance (see docs/adr/):
   kg_enabled                    ADR-0007             (default-on, never critical-path)
   ledger_to_kb                  ADR-0009             (case verdict -> KB, default on)
   history_compaction            ADR-0015             (default off)
-  window_x_min (X)              ADR-0002             (rolling/forensic window minutes)
+  window_x_min (X) /            ADR-0002             (rolling/forensic minutes; salvage cap)
+  window_x_max (X_max)
   gate_min_evidence (N) /       ADR-0008             (pre-gate evidence floor + retry cap)
   gate_max_retries
   step_cap / tool_call_cap      ADR-0005             (agent-loop runaway guards)
@@ -63,6 +64,7 @@ class Config:
 
     # -- knobs ----------------------------------------------------------------
     window_x_min: int = 10            # ADR-0002: X, rolling/forensic window minutes
+    window_x_max: int = 60            # ADR-0002: X_max, salvage lookback cap (minutes)
     gate_min_evidence: int = 2        # ADR-0008: N, pre-gate evidence floor
     gate_max_retries: int = 2         # ADR-0008: agentic retries on gate fail
     step_cap: int = 8                 # ADR-0005: max loop turns per investigation
@@ -70,7 +72,9 @@ class Config:
     error_profile: str = "light"      # ADR-0003: oracle | light | heavy
     drift_distrust_at: str = "R3"     # ADR-0003/story 14 (T1): trust gate flags the answer at/above
                                       # this R0-R5 model-health rung; "R5" = only the worst rung flags
-    predict_interval_s: int = 10      # ADR-0014: predict-loop cadence (seconds)
+    predict_interval_s: int = 3       # ADR-0014: predict-loop cadence (seconds). #48: safe at 3s --
+                                      # case creation is cause-gated + idempotent by alert_id, so the
+                                      # expensive adapter-drain+agent run is decoupled from tick rate.
     dataapi_url: str = "http://127.0.0.1:8000"  # A1/ADR-0006: base URL the HttpAdapter reads
                                                 # (env COPILOT_DATAAPI_URL overrides, app.py)
     exec_timeout_s: int = 30          # ADR-0013/B2: default wall-clock cap on an exec run
@@ -91,6 +95,7 @@ class Config:
         assert self.drift_distrust_at in _DRIFT_RUNGS, \
             f"drift_distrust_at={self.drift_distrust_at!r} not a rung in {sorted(_DRIFT_RUNGS)}"
         assert self.window_x_min > 0, "window_x_min must be > 0"
+        assert self.window_x_max > 0, "window_x_max must be > 0"
         assert self.predict_interval_s > 0, "predict_interval_s must be > 0"
         assert self.gate_min_evidence >= 1, "gate_min_evidence must be >= 1"
         assert self.gate_max_retries >= 0, "gate_max_retries must be >= 0"
@@ -151,10 +156,10 @@ def _selfcheck():
     assert d.llm_profile == "nim" and d.embed_profile == "nim"
     assert d.emulate_pa is True and d.kg_enabled is True and d.ledger_to_kb is True
     assert d.history_compaction is False
-    assert d.window_x_min == 10 and d.gate_min_evidence == 2
+    assert d.window_x_min == 10 and d.window_x_max == 60 and d.gate_min_evidence == 2
     assert d.gate_max_retries == 2 and d.error_profile == "light"
     assert d.step_cap == 8 and d.tool_call_cap == 6
-    assert d.predict_interval_s == 10
+    assert d.predict_interval_s == 3
     assert d.drift_distrust_at == "R3"
     assert d.exec_timeout_s == 30 and d.exec_max_timeout_s == 300
     assert d.exec_output_cap == 65536
@@ -182,7 +187,7 @@ def _selfcheck():
 
     # 4. validation bites on a bad enum / range
     for bad in (dict(llm_profile="gpt4"), dict(error_profile="perfect"),
-                dict(window_x_min=0), dict(gate_max_retries=-1), dict(step_cap=0),
+                dict(window_x_min=0), dict(window_x_max=0), dict(gate_max_retries=-1), dict(step_cap=0),
                 dict(tool_call_cap=0), dict(drift_distrust_at="R9"),
                 dict(exec_timeout_s=0), dict(exec_timeout_s=301), dict(exec_output_cap=0)):
         try:

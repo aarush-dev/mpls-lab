@@ -7,7 +7,7 @@
 Windowing is a **copilot-owned `WindowContext {start, end, frozen}`** threaded into every tool call.
 Not a shared service.
 
-Three cases (one struct, different `start`/`end`/`frozen`):
+Four cases (one struct, different `start`/`end`/`frozen`):
 
 - **Live monitoring** — rolling: `end=now`, `start=now−X`, recomputed each tool call.
 - **Query** — the window is **whatever time period the human's question names** — an arbitrary,
@@ -16,9 +16,17 @@ Three cases (one struct, different `start`/`end`/`frozen`):
   frozen — a Query can span past *and* live. This is a **distinct case, not Live-rolling.**
 - **Forensic** — frozen: `end=T_snapshot`, `start=T−X`, pinned once. The agent is **forbidden to
   pass any `end > T_snapshot`** — that's what "no live data leaks in" means, enforced at the adapter.
+- **Salvage (anchored-live)** — `end=now`, `start=max(buildup_start, now−X_max)`, **not frozen**.
+  For real-time fault salvage (prefactor, #90): the lower bound is **pinned at the fault's
+  buildup-start** so the earliest precursor evidence never scrolls out as the fault runs long
+  (unlike Live's rolling `now−X`), yet the end tracks `now` (unlike frozen Forensic). `X_max`
+  (`window_x_max`) caps the lookback so a pathological long episode can't grow the window unbounded
+  and blow up query cost. **Live-window trust rule:** no reverse/freeze guard is needed — salvage
+  just never freezes, so there is no `T_snapshot` for the adapter to enforce.
 
-`X` configurable (default ~10 min; tune to cascade timescale). Single `X` for both to start; split
-into `live_X` / `forensic_X` only if one proves wrong.
+`X` configurable (default ~10 min; tune to cascade timescale). `X_max` (default ~60 min) is the
+salvage lookback ceiling. Single `X` for live/forensic to start; split into `live_X` / `forensic_X`
+only if one proves wrong.
 
 ## Context
 

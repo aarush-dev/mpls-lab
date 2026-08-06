@@ -15,10 +15,14 @@ history_compaction: false   # ADR-0015: summarize old chat turns (off by default
 
 # -- knobs --------------------------------------------------------------------
 window_x_min: 10            # ADR-0002: X, rolling/forensic window length (minutes)
+window_x_max: 60            # ADR-0002: X_max, salvage anchored-live lookback cap (minutes)
 gate_min_evidence: 2       # ADR-0008: N, deterministic pre-gate evidence floor
 gate_max_retries: 2        # ADR-0008: agentic retries when the gate fails
 step_cap: 8                # ADR-0005: max agent-loop turns per investigation
 tool_call_cap: 6           # ADR-0005: max tool invocations per investigation
 error_profile: light       # ADR-0003: oracle | light | heavy
-predict_interval_s: 10     # ADR-0014: PA/emulator predict-loop cadence (seconds)
+predict_interval_s: 3      # ADR-0014: PA/emulator predict-loop cadence (seconds). #48: safe at 3s --
+                           # case creation is cause-gated (idempotent by alert_id), so the expensive
+                           # adapter-drain+agent run is decoupled from tick rate; only the cheap
+                           # predict/persist-noop/poll scale. Faster fault->case detection latency.
 dataapi_url: http://127.0.0.1:8000  # A1/ADR-0006: HttpAdapter base URL (COPILOT_DATAAPI_URL overrides)
