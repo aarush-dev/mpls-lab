@@ -13,7 +13,6 @@ const NAV_LINKS = [
   { to: '', label: 'Overview', exact: true },
   { to: 'topology', label: 'Topology' },
   { to: 'node/pe1', label: 'Node Detail' },
-  { to: 'telemetry', label: 'Telemetry' },
   { to: 'incidents', label: 'Incidents' },
   { to: 'copilot', label: 'Copilot' },
   { to: 'inject', label: 'Fault Injection' },

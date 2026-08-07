@@ -33,18 +33,26 @@ export const stateColors: Record<'red' | 'amber' | 'yellow' | 'green', string> =
 
 export const neutralColor = '#8e9297';
 
+// PA-precursor blink: a node the live PA pipeline flags (dataapi /pa/alerts) fades between these two
+// blue shades so it reads as "blue and pulsing" regardless of its underlying health state.
+export const BLINK_BLUE_A = '#8ab8ff';
+export const BLINK_BLUE_B = '#2a5fd0';
+
 export function colorForState(state?: 'red' | 'amber' | 'yellow' | 'green'): string {
   return state ? stateColors[state] : neutralColor;
 }
 
 // "Stressed" (yellow) thresholds for live sdwan_tunnel_latency_ms/jitter_ms/loss_pct — real
-// backend only. Sized from the actual running lab (no fault injected): sampled max across all
-// 168 tunnels over ~30s was ~145ms latency / ~119ms jitter / ~50% loss (this sim's tunnels run
-// noisier than controller.py's on-paper baseline), and real spoke degree is 4-6 (checked
-// /topology). BASE * (1 + min_degree/5) clears the observed max with margin, so nothing reads
-// stressed at idle — only once an injected fault pushes a tunnel past this.
+// backend only. This lab's baseline is noisy and drifts up with test history (heavily-tested
+// devices' measured-RTT baseline stays elevated), so a single "max at idle" sample is unreliable
+// — sized instead from the live fleet-wide distribution (168 tunnels) plus one observed real
+// `congestion` injection: idle p95 was ~123ms latency / ~69ms jitter / ~1.6% loss; the injected
+// fault only reached ~132ms / ~47ms / ~3.5% loss. Latency and jitter barely separate from idle
+// here (jitter didn't even rise) — loss is the reliable signal, so its threshold sits between the
+// idle p95 and the observed fault value; latency/jitter are kept conservative (won't false-fire)
+// rather than tuned to catch this specific fault. Real spoke degree is 4-6 (checked /topology).
 // Scaled by node degree (connection count): a node with more links has more redundancy, so it
 // takes a bigger excursion to call it stressed. Effective threshold = BASE * (1 + degree / 5).
-export const STRESS_LATENCY_MS = 110;
-export const STRESS_JITTER_MS = 85;
-export const STRESS_LOSS_PCT = 35;
+export const STRESS_LATENCY_MS = 80;
+export const STRESS_JITTER_MS = 50;
+export const STRESS_LOSS_PCT = 1.2;

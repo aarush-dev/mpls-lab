@@ -172,6 +172,10 @@ integrated into the canonical lab:
   coverage grew from 52 to **70 agents** (all FRR nodes). Grafana NOC Overview grew
   from 7 to **11 panels**.
 
+- **Router log view (Phase 2 extension):** active plugin Grafana provisions a one-panel
+  Loki dashboard at `/d/router-logs/router-logs`, with a `device` dropdown and 5-second
+  near-live polling. FRR continues to log only through syslog; local file logging stays disabled.
+
 - **Kafka streaming fan-out (Phase 2 extension):** `streaming/bridge.py` publishes the
   existing four telemetry sources to four topics (`noc.metrics`, `noc.events`,
   `noc.faults`, `noc.topology`), every record keyed by `device`. Two consumer groups in

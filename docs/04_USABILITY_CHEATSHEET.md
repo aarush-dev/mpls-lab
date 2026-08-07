@@ -70,16 +70,16 @@ cd /root/LAB/dataapi && ./start.sh &
 
 ### Step 5: Verify everything is healthy
 ```bash
-# Containers running
-docker ps | grep -E "tele-|clab-sdwan" | wc -l
-# Expected: ~159 (148 network + 11 telemetry)
+# Containers running in the normal sim-up deployment
+docker ps --format '{{.Names}}' | grep -E '^(clab-sdwan_mpls_noc-|tele-|noc-)' | wc -l
+# Expected: 160 (148 lab + 10 telemetry + plugin Grafana + Alertmanager)
 
 # Telemetry stack responsive
 curl -s http://172.20.20.50:8428/api/v1/status/tsdb | jq '.status'
 # Expected: "ok"
 
-# Grafana reachable
-curl -s http://172.20.20.51:3000/api/health | jq '.database'
+# Active plugin Grafana reachable
+curl -s http://localhost:3000/api/health | jq '.database'
 # Expected: "ok"
 
 # At least one metric from the network
@@ -102,14 +102,14 @@ cd /root/LAB && ./copilot-up.sh
 
 ### Grafana (the main UI)
 ```bash
-# Open in browser
-firefox http://172.20.20.51:3000 &
+# Active sim UI
+firefox http://localhost:3000 &
 
 # Login (anonymous, auto-logged in as Admin)
 # No password required (GF_AUTH_ANONYMOUS_ENABLED: true)
 ```
 
-**Panels in the NOC Dashboard (11 total, from `telemetry/grafana/dashboards/noc-overview.json`):**
+**Panels in the NOC Dashboard (11 total, from `grafana ui/grafana/dashboards/noc-overview.json`):**
 
 | Panel | PromQL | Best For |
 |-------|--------|----------|
@@ -145,7 +145,13 @@ increase(interface_ifOutErrors[5m])
 ```
 
 ### Loki (log aggregation via Grafana)
-In Grafana, click "Explore" → select "Loki" datasource.
+Open the near-live router log dashboard, then choose one or more devices from the **Device** dropdown:
+
+```bash
+firefox http://localhost:3000/d/router-logs/router-logs &
+```
+
+The dashboard polls Loki every 5 seconds. For a true live tail, use **Explore → Loki → Live**.
 
 **Example queries:**
 ```
@@ -156,8 +162,10 @@ In Grafana, click "Explore" → select "Loki" datasource.
 {device=~"ce_hub.*"}
 
 # Severity filtering
-{severity="ERR"}
+{severity="error"}
 ```
+
+FRR file logging is intentionally disabled. Router shells have no local FRR log file; use this dashboard or `/events` below.
 
 ---
 
@@ -396,8 +404,8 @@ curl 'http://127.0.0.1:8000/metrics?query=increase(interface_ifOutErrors%5B5m%5D
 curl 'http://127.0.0.1:8000/events?device=ce_branch1' | jq '.rows | length'
 # Returns up to 1000 rows (adjustable with ?limit=500)
 
-# Get all CRITICAL events
-curl 'http://127.0.0.1:8000/events?limit=100' | jq '.rows[] | select(.severity == "CRIT")'
+# Get all error events
+curl 'http://127.0.0.1:8000/events?limit=100' | jq '.rows[] | select(.severity == "error")'
 ```
 All 70 FRR routers now stream real syslog to Loki (`frr-node/rsyslog.conf` fix — was silently dead, `/events` used to return 0 rows always).
 
@@ -831,8 +839,8 @@ containerlab inspect --topo /root/LAB/topology/clab.yml
 docker exec clab-sdwan_mpls_noc-ce_branch1 ps aux | grep -E "bgpd|ospfd"
 # Expected: bgpd and ospfd running, plus watchfrr
 
-# Check node console logs
-docker logs clab-sdwan_mpls_noc-ce_branch1 | tail -20
+# Check centralized FRR logs
+curl -s 'http://127.0.0.1:8000/events?device=ce_branch1&limit=20' | jq '.rows'
 
 # Get FRR status (routing daemons)
 docker exec clab-sdwan_mpls_noc-ce_branch1 vtysh -c "show version"
@@ -854,11 +862,11 @@ docker logs tele-telegraf 2>&1 | grep -i "metric" | tail -5
 
 ### Get logs for a specific router
 ```bash
-# Syslog (Loki)
+# Near-live Grafana view: http://localhost:3000/d/router-logs/router-logs
+# Loki through Data API
 curl -s 'http://127.0.0.1:8000/events?device=ce_branch1&limit=10' | jq '.rows[0]'
 
-# Container logs
-docker logs clab-sdwan_mpls_noc-ce_branch1 | tail -50
+# Local FRR file logging is intentionally disabled; an empty router shell is expected.
 
 # FRR config validation (check if applied)
 docker exec clab-sdwan_mpls_noc-ce_branch1 vtysh -c "show bgp vrf vrf_CORP summary"
@@ -866,14 +874,14 @@ docker exec clab-sdwan_mpls_noc-ce_branch1 vtysh -c "show bgp vrf vrf_CORP summa
 
 ### Check telemetry stack health
 ```bash
-# All services up
-docker compose -f /root/LAB/telemetry/docker-compose.yml ps
+# Normal telemetry services up (tele-grafana is intentionally excluded by sim-up.sh)
+docker compose -f /root/LAB/telemetry/docker-compose.yml ps --status running
 
 # VictoriaMetrics status
 docker logs tele-victoriametrics 2>&1 | tail -10 | grep -i "started\|error"
 
-# Grafana status
-curl -s http://172.20.20.51:3000/api/health | jq .
+# Active plugin Grafana status
+curl -s http://localhost:3000/api/health | jq .
 
 # Loki ingest
 curl -s http://172.20.20.54:3100/ready
@@ -982,7 +990,7 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_lsp_count%7Bdevice%3D%
 
 | Service | Container | Port | URL | Purpose |
 |---------|-----------|------|-----|---------|
-| **Grafana** | tele-grafana | 3000 | http://172.20.20.51:3000 | NOC dashboards, log explorer |
+| **Grafana** | noc-plugin-grafana-1 | 3000 | http://localhost:3000 | NOC app, dashboards, log explorer |
 | **VictoriaMetrics** | tele-victoriametrics | 8428 | http://172.20.20.50:8428 | Metrics time-series DB, PromQL |
 | **Loki** | tele-loki | 3100 | http://172.20.20.54:3100 | Log aggregation (Syslog sink) |
 | **Telegraf** | tele-telegraf | — | 172.20.20.52 (internal) | SNMP collector (push to VM) |
@@ -990,7 +998,6 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_lsp_count%7Bdevice%3D%
 | **Controller** | noc-controller | 9362 | http://172.20.20.56:9362 | SD-WAN path selection (Prometheus metrics) |
 | **Traffic Gen** | noc-trafficgen | — | (internal) | Diurnal traffic simulator (drives flows) |
 | **Data API** | (host) | 8000 | http://127.0.0.1:8000 | ML-ready endpoints: /metrics, /flows, /labels, /datasets, /faults/* (live inject) |
-| **Grafana app plugin** | (host, separate Grafana) | 3000 | http://localhost:3000/a/mplslab-noccopilot-app | Live topology map, per-node metrics/logs, real fault injection UI |
 | **Alertmanager** (plugin stack) | (host) | 9093 | http://127.0.0.1:9093 | Alerting UI, same host as the plugin Grafana |
 | **Kafka** | noc-kafka | 9092 / 29092 | 172.20.20.60:9092 (in-lab), 127.0.0.1:29092 (host) | Streaming fan-out to the predictive + copilot pipelines |
 | **Kafka bridge** | (host) | — | — | Producer: VM/Loki/labels/topology → 4 topics (`streaming/start.sh`) |
@@ -1001,7 +1008,7 @@ curl -s "http://172.20.20.50:8428/api/v1/query?query=mpls_lsp_count%7Bdevice%3D%
 # Inspect/status
 containerlab inspect --topo /root/LAB/topology/clab.yml
 docker ps | grep -E "tele-|clab-sdwan" | wc -l
-docker logs clab-sdwan_mpls_noc-ce_branch1 | tail -20
+curl -s 'http://127.0.0.1:8000/events?device=ce_branch1&limit=20' | jq '.rows'
 
 # Start/stop
 cd /root/LAB/topology && sudo containerlab deploy --topo clab.yml --reconfigure
@@ -1048,7 +1055,7 @@ cd /root/LAB/airgap && ./verify-airgap.sh
 | `/root/LAB/telemetry/docker-compose.yml` | Telemetry stack config | Add new collectors or change image tags |
 | `/root/LAB/telemetry/envmodel.py` | Modelled chassis/optical physics (shared live+synthetic) | Retune temperature, power or DOM behaviour |
 | `/root/LAB/telemetry/env-metrics.py` | Device-health sidecar (real CPU/queue/routing + modelled sensors) | Add a device-scoped metric |
-| `/root/LAB/telemetry/grafana/dashboards/*.json` | Grafana panels | Customize dashboard visualizations |
+| `/root/LAB/grafana ui/grafana/dashboards/*.json` | Active Grafana dashboards | Customize dashboard visualizations |
 | `/root/LAB/synthetic/generate.py` | Synthetic data generator | Tweak diurnal curves or fault injection rates |
 | `/root/LAB/streaming/bridge.py` | Kafka producer (4 topics, keyed by device) | Add a topic or change a record shape |
 | `/root/LAB/streaming/consume.py` | The two consumer pipelines (predictive, copilot) | Change window length/stride or the copilot brief |

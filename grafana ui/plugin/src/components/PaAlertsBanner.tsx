@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { appConfig } from '../config';
+import { fetchPaAlerts, PaAlertsResponse, PA_POLL_MS } from '../data/paAlerts';
 import { useToaster } from './AlertToaster';
 
 // PA live-prediction banner (demo path A). Polls dataapi /pa/alerts (which proxies
@@ -8,30 +8,6 @@ import { useToaster } from './AlertToaster';
 // baseline (a freshly injected fault), it appears here and fires a toast — this is
 // the "our PA pipeline predicted the injected fault" signal on the dashboard.
 // Copilot is intentionally NOT in this path.
-
-interface PaAlert {
-  entity_id: string;
-  device: string;
-  cause: string | null;
-  p_any: number;
-  calibrated_probability?: number | null;
-  time_to_impact_s?: number | null;
-  baseline?: number;
-  rise?: number;
-  threshold?: number;
-}
-
-interface PaAlertsResponse {
-  ts: string | null;
-  mode: string | null;
-  warm: boolean;
-  alerts: PaAlert[];
-  predictions: PaAlert[];
-  n_scored: number;
-  error?: string | null;
-}
-
-const POLL_MS = 10000;
 
 function eta(s?: number | null): string {
   if (s == null) return '—';
@@ -48,9 +24,7 @@ export function PaAlertsBanner() {
     let alive = true;
     const tick = async () => {
       try {
-        const res = await fetch(`${appConfig.apiBaseUrl}/pa/alerts`);
-        if (!res.ok) return;
-        const json: PaAlertsResponse = await res.json();
+        const json = await fetchPaAlerts();
         if (!alive) return;
         // toast on NEW alerting entities
         for (const a of json.alerts) {
@@ -78,7 +52,7 @@ export function PaAlertsBanner() {
       }
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, PA_POLL_MS);
     return () => {
       alive = false;
       clearInterval(id);
