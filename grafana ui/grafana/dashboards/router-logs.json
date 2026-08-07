@@ -20,11 +20,11 @@
         "label": "Device",
         "type": "query",
         "datasource": {
-          "type": "loki",
-          "uid": "loki"
+          "type": "prometheus",
+          "uid": "victoriametrics"
         },
-        "definition": "label_values({job=\"syslog\"}, device)",
-        "query": "label_values({job=\"syslog\"}, device)",
+        "definition": "label_values(interface_ifHCInOctets, device)",
+        "query": "label_values(interface_ifHCInOctets, device)",
         "refresh": 2,
         "sort": 1,
         "includeAll": true,
