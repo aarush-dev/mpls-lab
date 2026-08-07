@@ -38,6 +38,10 @@ class _OAIHandler(http.server.BaseHTTPRequestHandler):
         self.server.auths.append(self.headers.get("Authorization"))
         msg = self.server.replies[self.server.i]
         self.server.i += 1
+        if isinstance(msg, int):                       # a bare int scripts an error status (429/503)
+            self.send_response(msg)
+            self.end_headers()
+            return
         payload = json.dumps({"choices": [{"message": msg}]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -231,6 +235,21 @@ def test_recorded_risk_investigate_and_chat_are_sync():
         "sync endpoint -> Starlette threadpool (ADR-0010 local-only); blocks a worker, not the loop"
 
 
+def test_chat_retries_transient_429_then_succeeds():
+    # The shared backend 429s under concurrent load; chat() must retry, not surface a 500 to /chat.
+    # Two 429s then a completion -> one Reply, three requests made. Patch sleep so the test is fast.
+    import copilot.llm.http as http_mod
+    saved = http_mod.time.sleep
+    http_mod.time.sleep = lambda *_: None
+    try:
+        with _FakeOpenAI([429, 429, {"role": "assistant", "content": "ok"}]) as srv:
+            reply = OpenAIClient(srv.url, "m").chat([{"role": "user", "content": "hi"}])
+        assert reply.content == "ok"
+        assert len(srv.requests) == 3, "retried past both 429s, then got the completion"
+    finally:
+        http_mod.time.sleep = saved
+
+
 def _smoke():
     """One live smoke call (R1 acceptance) -- opt-in, needs a running endpoint. Proves the
     client speaks the wire protocol; NOT a full investigation."""
@@ -252,6 +271,7 @@ def _run():
     test_recorded_risk_self_judge_fails_open_on_prose()
     test_recorded_risk_ask_back_without_question_mark_is_gated()
     test_recorded_risk_investigate_and_chat_are_sync()
+    test_chat_retries_transient_429_then_succeeds()
     print("copilot.llm.http self-check OK")
 
 
