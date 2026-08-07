@@ -6,6 +6,10 @@ export const nodeDetailPath = (id: string) => `${APP_BASE}/node/${encodeURICompo
 
 export const copilotPath = `${APP_BASE}/copilot`;
 
+// sessionStorage hand-off for the "Open copilot" deep-link. Survives the full-reload navigation the
+// plain <a> triggers, where Grafana can strip the query string before CopilotPage's effect reads it.
+export const COPILOT_CASE_KEY = 'noc.copilot.case';
+
 // Deep-link to /copilot carrying a forensic case so the tab opens a fresh chat auto-asking about it.
 // CopilotPage reads device/ts/fault/sev and composes the question + hour-before window.
 export const copilotCasePath = (c: {

@@ -8,7 +8,7 @@ import { LIVE_REFRESH_MS } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { ActiveFault, FaultScenario, ForensicCase, InjectFaultRequest, TopologyNode } from '../data/types';
 import { targetOptions, isValidTarget } from '../data/faultTargets';
-import { nodeDetailPath, copilotCasePath } from '../constants';
+import { nodeDetailPath, copilotCasePath, COPILOT_CASE_KEY } from '../constants';
 import { formatUtc } from '../utils/time';
 
 // Fault Injection: fires a REAL fault in the simulated lab (dataapi /faults/inject -> orchestrator
@@ -326,7 +326,18 @@ export function FaultInjectionPage() {
                   {c.fault_type ?? 'unknown'} · {c.severity}
                   {Number.isFinite(t) ? ` · ${formatUtc(t)}` : ''}
                 </span>
-                <a href={copilotCasePath(c)}>
+                {/* Stash the case before the (full-reload) nav so CopilotPage can auto-ask about it —
+                    survives the reload where a query string can get normalized away. URL is a fallback. */}
+                <a
+                  href={copilotCasePath(c)}
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem(COPILOT_CASE_KEY, JSON.stringify(c));
+                    } catch {
+                      // storage unavailable — the query-string fallback still carries the case
+                    }
+                  }}
+                >
                   Open copilot <Icon name="arrow-right" />
                 </a>
               </li>
