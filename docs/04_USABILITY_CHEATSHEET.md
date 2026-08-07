@@ -170,7 +170,11 @@ The dashboard polls Loki every 5 seconds. For a true live tail, use **Explore â†
 {severity="error"}
 ```
 
-FRR file logging is intentionally disabled. Router shells have no local FRR log file; use this dashboard or `/events` below.
+FRR also writes local logs to `/var/log/frr/frr.log`; `frr-node/start.sh` creates this directory at container start.
+
+```bash
+docker exec -it clab-sdwan_mpls_noc-ce_branch2 tail -f /var/log/frr/frr.log
+```
 
 ---
 

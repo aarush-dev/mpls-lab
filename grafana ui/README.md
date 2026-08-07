@@ -26,7 +26,7 @@ Provisioned datasources (`grafana/provisioning/datasources/datasources.yaml`): *
 
 Open the app at `http://localhost:3000/a/mplslab-noccopilot-app`.
 
-Provisioned dashboards: **NOC Overview** (11 metric panels) and **Router Logs** at `http://localhost:3000/d/router-logs/router-logs`. Router Logs queries Loki with `{job="syslog", device=~"${device:regex}"}`, offers a device dropdown sourced from continuous VictoriaMetrics interface telemetry so quiet routers remain selectable, and polls every 5 seconds over the selected Grafana time range. For a true live tail use **Explore → Loki → Live**. FRR file logging stays disabled; router shells do not contain a local FRR log file.
+Provisioned dashboards: **NOC Overview** (11 metric panels) and **Router Logs** at `http://localhost:3000/d/router-logs/router-logs`. Router Logs queries Loki with `{job="syslog", device=~"${device:regex}"}`, offers a device dropdown sourced from continuous VictoriaMetrics interface telemetry so quiet routers remain selectable, and polls every 5 seconds over the selected Grafana time range. For a true live tail use **Explore → Loki → Live**. FRR also writes `/var/log/frr/frr.log` in each router container.
 
 ## Pages
 

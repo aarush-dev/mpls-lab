@@ -61,4 +61,6 @@ pmacctd -f /run/pmacctd.conf &
 # ── 5. Start FRR (foreground via /usr/lib/frr/docker-start) ──────────────────
 # docker-start reads /etc/frr/daemons and starts all enabled daemons, then
 # exec's watchfrr in the foreground — that keeps the container alive.
+mkdir -p /var/log/frr
+chown frr:frr /var/log/frr
 exec /usr/lib/frr/docker-start

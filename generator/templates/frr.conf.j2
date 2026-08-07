@@ -2,6 +2,7 @@ frr defaults traditional
 hostname {{ hostname }}
 no ipv6 forwarding
 log syslog informational
+log file /var/log/frr/frr.log informational
 !
 {# ===== VRF definitions (PE only) ===== #}
 {% if role == 'PE' %}
