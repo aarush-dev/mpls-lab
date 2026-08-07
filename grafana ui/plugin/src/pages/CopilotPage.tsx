@@ -47,8 +47,8 @@ export function CopilotPage() {
     // No fault type (PA predictions) → ask generically about "the incident"; don't double the word.
     const subject = c.fault_type ? `${c.fault_type} incident` : 'incident';
     const when = c.ts ? ` around ${c.ts}` : '';
-    const win = scope ? ` Focus on the hour before it (${new Date(scope.start * 1000).toISOString()} to ${c.ts}).` : '';
-    const q = `Investigate the ${subject} on ${c.device}${when}${c.severity ? ` (severity ${c.severity})` : ''}.${win} What happened and why?`;
+    // scope (hour-before window) still rides send(); the question text stays terse per the requested format.
+    const q = `Investigate the ${subject} on ${c.device}${when}${c.severity ? ` (severity ${c.severity})` : ''}. what happened and why`;
     newChat();
     send(q, false, scope);
   }, [newChat, send]);
