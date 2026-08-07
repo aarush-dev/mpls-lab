@@ -1211,10 +1211,6 @@ four findings (three filed, one fixed). Harness + record: `copilot/e2e/harness.p
   (`[metrics:3-5]`, unicode hyphen) the gate rejects as fabricated; **#45** a harmony
   `<|channel|>commentary` token leaks into a tool-call name (registry safely rejects it — no crash
    — but a step is wasted).
-- **Client-side 19 req/min cap** — the shared backend rate-limits, so `http.py` spaces every
-  `chat()` POST `>= 60/19s` apart proc-wide (`_throttle`: global lock + last-send timestamp,
-  leaky-bucket at rate 1). Sits *before* the 429/503 retry, so the cap and the transient-reject
-  backoff compose. Single choke point = every profile/turn funnels through one `chat()`.
 
 ## Dataset closing-pass confirmations (2026-08-03)
 
