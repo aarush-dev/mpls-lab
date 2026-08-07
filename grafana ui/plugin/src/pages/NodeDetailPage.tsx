@@ -3,9 +3,9 @@ import { useParams, useHistory } from 'react-router-dom';
 import { css } from '@emotion/css';
 import { PluginPage } from '@grafana/runtime';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { useStyles2, Link, Select, FilterInput } from '@grafana/ui';
+import { useStyles2, Link, Select, FilterInput, MultiSelect } from '@grafana/ui';
 
-import { TimeSeriesPanel } from '../components/TimeSeriesPanel';
+import { TimeSeriesPanel, FaultOverlay } from '../components/TimeSeriesPanel';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { InterfaceTable } from '../components/InterfaceTable';
@@ -33,12 +33,27 @@ export function NodeDetailPage() {
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [q, setQ] = useState('');
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
-  // Clear telemetry only when the selected device changes (not on refresh) so switching nodes shows
-  // a clean "Loading…" instead of the previous node's charts, without per-refresh blinking.
+  // Clear telemetry + metric picker only when the selected device changes (not on refresh) so
+  // switching nodes shows a clean "Loading…" instead of the previous node's charts.
   useEffect(() => {
     setTelemetry(null);
+    setSelectedKeys([]);
   }, [id]);
+
+  // ponytail: topology is static graph structure — fetch once per device, not on every refreshTick.
+  useEffect(() => {
+    let cancelled = false;
+    dataClient.getTopology({}).then((topologyResult) => {
+      if (!cancelled) {
+        setTopology(topologyResult);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataClient, id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,18 +66,16 @@ export function NodeDetailPage() {
 
     Promise.all([
       dataClient.getTelemetry({ deviceId: id, timeRange }),
-      dataClient.getTopology({}),
       dataClient.getIncidents({ device: id }),
       dataClient.getPredictions({ device: id }),
       dataClient.getEvents({ device: id, timeRange: eventsTimeRange }),
       dataClient.getFlows({ device: id, timeRange }),
     ])
-      .then(([telemetryResult, topologyResult, incidentsResult, predictionsResult, eventsResult, flowsResult]) => {
+      .then(([telemetryResult, incidentsResult, predictionsResult, eventsResult, flowsResult]) => {
         if (cancelled) {
           return;
         }
         setTelemetry(telemetryResult);
-        setTopology(topologyResult);
         setIncidents(incidentsResult);
         setPredictions(predictionsResult);
         setEvents(eventsResult);
@@ -97,7 +110,32 @@ export function NodeDetailPage() {
 
   const activeIncident = incidents.find((i) => i.status === 'open' || i.status === 'active');
   const activePrediction = predictions[0];
-  const panels = telemetry ? groupSeries(telemetry) : [];
+
+  // Metric-key picker: filter the fetched series to the chosen keys (all when none picked).
+  const keyOptions = useMemo<Array<SelectableValue<string>>>(
+    () => (telemetry ?? []).map((s) => ({ label: s.label, value: s.key })),
+    [telemetry]
+  );
+  const shownSeries = useMemo(
+    () => (selectedKeys.length ? (telemetry ?? []).filter((s) => selectedKeys.includes(s.key)) : telemetry ?? []),
+    [telemetry, selectedKeys]
+  );
+  const panels = telemetry ? groupSeries(shownSeries) : [];
+
+  // Fault overlays: shade this device's incident windows onto the telemetry charts.
+  const overlays = useMemo<FaultOverlay[]>(
+    () =>
+      incidents
+        .filter((i) => i.deviceIds.includes(id))
+        .map((i) => {
+          const fromMs = Date.parse(i.startedAt);
+          const rawTo = Date.parse(i.endedAt ?? i.impactAt ?? i.startedAt);
+          const toMs = Number.isNaN(rawTo) ? fromMs : rawTo;
+          return { fromMs, toMs, label: i.faultType };
+        })
+        .filter((b) => !Number.isNaN(b.fromMs)),
+    [incidents, id]
+  );
 
   // Live search: filter metric panels + fixed sections by case-insensitive title substring.
   const term = q.trim().toLowerCase();
@@ -164,14 +202,32 @@ export function NodeDetailPage() {
           {telemetryVisible && (
             <>
               <h3 className={styles.sectionTitle}>Telemetry</h3>
-              {panels.length === 0 ? (
+              {(telemetry?.length ?? 0) === 0 ? (
                 <EmptyState message="No telemetry feed for this device (unmonitored host/core). Pick a monitored device above." />
               ) : (
-                <div className={styles.panels}>
-                  {shownPanels.map((group) => (
-                    <TimeSeriesPanel key={group.title} title={group.title} series={group.series} unit={group.unit} />
-                  ))}
-                </div>
+                <>
+                  <MultiSelect
+                    placeholder="All metrics"
+                    options={keyOptions}
+                    value={selectedKeys}
+                    onChange={(vals) =>
+                      setSelectedKeys(vals.map((v) => v.value as string).filter((v): v is string => !!v))
+                    }
+                    width={40}
+                    className={styles.search}
+                  />
+                  <div className={styles.panels}>
+                    {shownPanels.map((group) => (
+                      <TimeSeriesPanel
+                        key={group.title}
+                        title={group.title}
+                        series={group.series}
+                        unit={group.unit}
+                        overlays={overlays}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
             </>
           )}

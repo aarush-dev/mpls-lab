@@ -57,7 +57,7 @@ export interface TopologyNode {
 
 /** TopologyNode + a live-at-cursor health state, without changing the shared base type. */
 export interface TopologyNodeLive extends TopologyNode {
-  state?: 'red' | 'amber' | 'green';
+  state?: 'red' | 'amber' | 'yellow' | 'green';
 }
 
 export interface TopologyLink {
