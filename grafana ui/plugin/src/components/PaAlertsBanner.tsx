@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchPaAlerts, PaAlertsResponse, PA_POLL_MS } from '../data/paAlerts';
 import { useToaster } from './AlertToaster';
+import { copilotCasePath, COPILOT_CASE_KEY } from '../constants';
 
 // PA live-prediction banner (demo path A). Polls dataapi /pa/alerts (which proxies
 // the pa_alerts service scoring the live topology through the graph-v2 model) and
@@ -110,14 +111,31 @@ export function PaAlertsBanner() {
       <span style={dot} />
       <strong style={{ letterSpacing: 0.3 }}>{label}</strong>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {alerts.map((a) => (
-          <span key={a.entity_id} style={chip} title={`p_any=${a.p_any}${a.rise != null ? ` rise=${a.rise}` : ''}`}>
-            <span>{a.device}</span>
-            <span style={{ opacity: 0.85 }}>{a.cause ?? 'fault'}</span>
-            <span style={{ opacity: 0.7 }}>· {(a.p_any * 100).toFixed(0)}%</span>
-            {a.time_to_impact_s != null && <span style={{ opacity: 0.7 }}>· ETA {eta(a.time_to_impact_s)}</span>}
-          </span>
-        ))}
+        {alerts.map((a) => {
+          // Deep-link to copilot like "Open copilot", but WITHOUT the fault type — just ask about
+          // whatever happened on this device at the prediction time (data.ts), hour-before window.
+          const c = { device: a.device, ts: data?.ts ?? null, fault_type: null, severity: '' };
+          return (
+            <a
+              key={a.entity_id}
+              href={copilotCasePath(c)}
+              onClick={() => {
+                try {
+                  sessionStorage.setItem(COPILOT_CASE_KEY, JSON.stringify(c));
+                } catch {
+                  // storage unavailable — query-string fallback still carries device+ts
+                }
+              }}
+              style={{ ...chip, textDecoration: 'none', cursor: 'pointer' }}
+              title="Open copilot — investigate this prediction"
+            >
+              <span>{a.device}</span>
+              <span style={{ opacity: 0.85 }}>{a.cause ?? 'fault'}</span>
+              <span style={{ opacity: 0.7 }}>· {(a.p_any * 100).toFixed(0)}%</span>
+              {a.time_to_impact_s != null && <span style={{ opacity: 0.7 }}>· ETA {eta(a.time_to_impact_s)}</span>}
+            </a>
+          );
+        })}
       </div>
     </div>
   );

@@ -38,15 +38,17 @@ export function CopilotPage() {
       return;
     }
     const c = readCase();
-    if (!c || !c.device || !c.ts) {
+    if (!c || !c.device) {
       return;
     }
     fired.current = true;
-    const t = Date.parse(c.ts);
+    const t = c.ts ? Date.parse(c.ts) : NaN;
     const scope = Number.isFinite(t) ? { start: Math.floor(t / 1000) - 3600, end: Math.floor(t / 1000) } : undefined;
-    const fault = c.fault_type || 'incident';
+    // No fault type (PA predictions) → ask generically about "the incident"; don't double the word.
+    const subject = c.fault_type ? `${c.fault_type} incident` : 'incident';
+    const when = c.ts ? ` around ${c.ts}` : '';
     const win = scope ? ` Focus on the hour before it (${new Date(scope.start * 1000).toISOString()} to ${c.ts}).` : '';
-    const q = `Investigate the ${fault} incident on ${c.device} around ${c.ts}${c.severity ? ` (severity ${c.severity})` : ''}.${win} What happened and why?`;
+    const q = `Investigate the ${subject} on ${c.device}${when}${c.severity ? ` (severity ${c.severity})` : ''}.${win} What happened and why?`;
     newChat();
     send(q, false, scope);
   }, [newChat, send]);
