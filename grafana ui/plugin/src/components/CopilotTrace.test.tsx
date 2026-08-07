@@ -75,7 +75,7 @@ test('trace cards are collapsed by default and expand on click', () => {
 
 test('citation chip renders, previews the cited row, and jumps on click', () => {
   render(<CopilotTrace events={events} turn={turn} />);
-  const chip = screen.getByRole('button', { name: 'metrics:1' });
+  const chip = screen.getByRole('link', { name: 'metrics:1' });
   expect(chip).toHaveAttribute('title', 'bgp flap [metrics:1]');
   // Card collapsed before click.
   expect(screen.queryByText('bgp flap [metrics:1]')).not.toBeInTheDocument();
@@ -83,4 +83,26 @@ test('citation chip renders, previews the cited row, and jumps on click', () => 
   // Click expands the evidence card + scrolls to it.
   expect(screen.getByText('bgp flap [metrics:1]')).toBeInTheDocument();
   expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+});
+
+test('answer renders GitHub-flavored markdown tables', () => {
+  const markdownTurn = {
+    ...turn,
+    answer: '| Device | State |\n| --- | --- |\n| R1 [metrics:1] | down |',
+  };
+  render(<CopilotTrace events={events} turn={markdownTurn} />);
+  expect(screen.getByRole('table')).toBeInTheDocument();
+  expect(screen.getByRole('columnheader', { name: 'Device' })).toBeInTheDocument();
+  expect(screen.getByRole('cell', { name: 'down' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'metrics:1' })).toHaveAttribute(
+    'title',
+    'bgp flap [metrics:1]'
+  );
+});
+
+test('answer markdown is sanitized', () => {
+  const unsafeTurn = { ...turn, answer: '<script>alert(1)</script>safe' };
+  const { container } = render(<CopilotTrace events={events} turn={unsafeTurn} />);
+  expect(container.querySelector('script')).not.toBeInTheDocument();
+  expect(container).toHaveTextContent('safe');
 });

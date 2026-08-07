@@ -1579,3 +1579,8 @@ render (CopilotTrace): raster (png/jpg/gif/webp/bmp) inline via a CLIENT-typed i
 Blob (the UI, never the server mime string, picks the type), svg/html a download chip
 only (never inlined) -- the endpoint hardening (#54: octet-stream+nosniff+attachment)
 guards agent-authored stored XSS. See ADR-0011 Amendment.
+
+Decision (T3/#69 follow-up): Copilot answers render through Grafana's sanitized
+`renderMarkdown` path, preserving GitHub-flavored Markdown blocks such as tables.
+`[source:offset]` citations are converted to links before Markdown parsing; their native hover and
+delegated click still preview and jump to the cited evidence row.

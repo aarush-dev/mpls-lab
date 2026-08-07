@@ -282,12 +282,13 @@ History mode sending `start`/`end` (epoch s) and Live omitting both. `CopilotPag
 render — user/assistant bubbles, "investigating…" spinner, error + Retry. First in-browser proof the
 mock is gone. Self-check: `yarn typecheck && yarn test:ci` (108 tests).
 
-T3 (#69, `components/CopilotTrace.tsx`) — Claude-style collapsed trace + citation chips. Each
+T3 (#69, `components/CopilotTrace.tsx`) — Claude-style collapsed trace + citation links. Each
 streamed event renders inline as a collapsed, expandable card (think / tool_call+its tool_result /
-gate); the answer renders with `[source:offset]` citation chips. A chip's native hover previews the
-cited evidence row; clicking it expands + scrolls to + highlights that row inside its tool_result
-card (via the turn's `citeMap` from T1). Honest to the sync backend loop — cards burst in after
-"investigating…", not typed live. Self-check: `yarn typecheck && yarn test:ci` (112 tests).
+gate); answers render sanitized GitHub-flavored Markdown, including tables. A citation link's native
+hover previews the cited evidence row; clicking it expands + scrolls to + highlights that row inside
+its tool_result card (via the turn's `citeMap` from T1). Honest to the sync backend loop — cards
+burst in after "investigating…", not typed live. Self-check:
+`node ./node_modules/jest/bin/jest.js src/components/CopilotTrace.test.tsx --runInBand` (8 tests).
 
 T4/T6 (#70/#71, commit 39820fdb) — multi-turn session (shared id, `localStorage` thread persist,
 New chat, Stop) + backend `workspace` flag with UI toggle and inline/download artifact rendering.

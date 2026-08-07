@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { css, cx } from '@emotion/css';
-import { GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2, renderMarkdown, textUtil } from '@grafana/data';
 import { useStyles2, Icon } from '@grafana/ui';
 
 import type { ArtifactEvent, ChatEvent, CopilotTurn, ToolResultEvent } from '../data/types';
@@ -130,36 +130,24 @@ export function CopilotTrace({ events, turn }: { events: ChatEvent[]; turn?: Cop
   );
 }
 
-// Answer prose with citation chips. Splits on `[source:offset]`; each token becomes a chip whose
-// title (native hover) previews the cited row and whose click jumps to the evidence card.
+// Grafana's renderer provides sanitized GFM. Citations become links before parsing so tables and
+// other block syntax stay intact; delegated clicks retain the evidence-card jump.
 function Answer({ turn, onCite, styles }: { turn: CopilotTurn; onCite: (id: string) => void; styles: Styles }) {
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  CITE_RE.lastIndex = 0;
-  let k = 0;
-  while ((m = CITE_RE.exec(turn.answer))) {
-    if (m.index > last) {
-      parts.push(turn.answer.slice(last, m.index));
-    }
-    const id = m[1];
+  const markdown = turn.answer.replace(CITE_RE, (_token, id: string) => {
     const src = turn.citeMap[id];
-    parts.push(
-      <button
-        key={`c-${k++}`}
-        className={styles.chip}
-        title={src ? citedRow(src.content, id) : id}
-        onClick={() => onCite(id)}
-      >
-        {id}
-      </button>
-    );
-    last = m.index + m[0].length;
-  }
-  if (last < turn.answer.length) {
-    parts.push(turn.answer.slice(last));
-  }
-  return <div className={styles.answer}>{parts}</div>;
+    const title = textUtil.escapeHtml(src ? citedRow(src.content, id) : id);
+    return `<a class="${styles.chip}" href="#cite-${id}" title="${title}">${id}</a>`;
+  });
+  const html = renderMarkdown(markdown);
+  const click = (event: React.MouseEvent<HTMLDivElement>) => {
+    const link = (event.target as Element).closest<HTMLAnchorElement>('a[href^="#cite-"]');
+    const href = link?.getAttribute('href');
+    if (href) {
+      event.preventDefault();
+      onCite(href.slice('#cite-'.length));
+    }
+  };
+  return <div className={styles.answer} onClick={click} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 // One presented `artifact` event. A raster kind inlines from a client-typed image blob; everything
@@ -226,7 +214,18 @@ const getStyles = (theme: GrafanaTheme2) => ({
   pre: css({ margin: 0, fontSize: theme.typography.bodySmall.fontSize, whiteSpace: 'pre-wrap' }),
   row: css({ fontFamily: theme.typography.fontFamilyMonospace, fontSize: theme.typography.bodySmall.fontSize }),
   hot: css({ background: theme.colors.warning.transparent, borderRadius: theme.shape.radius.default }),
-  answer: css({ whiteSpace: 'pre-wrap', marginTop: theme.spacing(1) }),
+  answer: css({
+    marginTop: theme.spacing(1),
+    overflowX: 'auto',
+    '& > :first-child': { marginTop: 0 },
+    '& > :last-child': { marginBottom: 0 },
+    '& table': { width: '100%', borderCollapse: 'collapse' },
+    '& th, & td': {
+      padding: theme.spacing(0.5, 1),
+      border: `1px solid ${theme.colors.border.weak}`,
+      textAlign: 'left',
+    },
+  }),
   artifact: css({ maxWidth: '100%', borderRadius: theme.shape.radius.default, border: `1px solid ${theme.colors.border.weak}` }),
   dlchip: css({
     display: 'inline-flex',
