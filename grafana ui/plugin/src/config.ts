@@ -10,5 +10,5 @@ export const appConfig: AppConfig = {
   requestTimeoutMs: 8000,
   // Copilot /chat is a separate service with a much longer budget (an investigation can take ~3 min).
   copilotBaseUrl: 'http://127.0.0.1:8100',
-  copilotTimeoutMs: 180000,
+  copilotTimeoutMs: 1800000, // 30 min
 };

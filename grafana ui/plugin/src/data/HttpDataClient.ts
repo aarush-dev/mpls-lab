@@ -143,7 +143,7 @@ export class HttpDataClient implements DataClient {
     private baseUrl: string,
     private timeoutMs: number,
     private copilotBaseUrl = 'http://127.0.0.1:8100',
-    private copilotTimeoutMs = 180000
+    private copilotTimeoutMs = 1800000 // 30 min
   ) {}
 
   // --- transport ------------------------------------------------------------------------------
