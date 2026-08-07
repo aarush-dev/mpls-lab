@@ -78,7 +78,10 @@ def loki_query_range(logql: str, start: int, end: int, limit: int = 1000):
             "start": str(start) + "000000000",  # ns
             "end": str(end) + "000000000",
             "limit": limit,
-            "direction": "forward",
+            # backward = newest `limit` lines in the window. forward drops the
+            # newest once a busy window exceeds `limit`, freezing /events at the
+            # oldest slice. events_rows() re-sorts ascending for display.
+            "direction": "backward",
         },
         timeout=_HTTP_TIMEOUT,
     )
