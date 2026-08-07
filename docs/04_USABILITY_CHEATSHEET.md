@@ -95,6 +95,11 @@ cd /root/LAB && ./copilot-up.sh
 # Boot autostart: sudo systemctl enable --now noc-copilot   (After=noc-lab.service)
 # Stop the procs (systemctl stop won't reach them — disowned): pkill -f 'copilot\.(emulator\.predictor|forensic\.trigger)'
 ```
+Live progress + per-call LLM token usage (`<model> tok prompt=.. completion=.. total=..`, emitted by `copilot.llm.http` on every `chat()`):
+```bash
+tail -f /tmp/copilot-{api,predictor,trigger}.log   # all procs
+tail -f /tmp/copilot-api.log | grep ' tok '        # just the token lines
+```
 
 ---
 

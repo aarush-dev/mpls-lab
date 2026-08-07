@@ -17,6 +17,7 @@ Self-check:  python3 -m copilot.llm.test_http
 Live smoke (opt-in, needs a running endpoint):  COPILOT_LLM_SMOKE=1 python3 -m copilot.llm.test_http
 """
 import json
+import logging
 import os
 import re
 
@@ -25,6 +26,12 @@ from copilot.llm.client import Reply, ToolCall
 
 _TIMEOUT = 120.0     # a real multi-round investigation turn on a 20B model is slow; generous so a
                      # healthy-but-slow completion is not cut off client-side as a false outage.
+
+_log = logging.getLogger("copilot.llm")    # per-call token usage -> the owning proc's stdout log
+if not _log.handlers:                      # uvicorn configures only uvicorn.*; give ourselves a
+    _h = logging.StreamHandler()           # handler so the line lands in /tmp/copilot-{api,...}.log
+    _h.setFormatter(logging.Formatter("%(asctime)s llm %(message)s"))
+    _log.addHandler(_h); _log.setLevel(logging.INFO); _log.propagate = False
 
 
 # profile -> (base-url env, base-url default, model env, model default). Both the endpoint AND
@@ -77,7 +84,11 @@ class OpenAIClient:
             timeout=_TIMEOUT,
         )
         r.raise_for_status()
-        return _to_reply(r.json()["choices"][0]["message"])
+        data = r.json()
+        u = data.get("usage") or {}
+        _log.info("%s tok prompt=%s completion=%s total=%s", self._model,
+                  u.get("prompt_tokens"), u.get("completion_tokens"), u.get("total_tokens"))
+        return _to_reply(data["choices"][0]["message"])
 
 
 def _as_function(spec: dict) -> dict:
