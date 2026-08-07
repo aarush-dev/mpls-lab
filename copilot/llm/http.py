@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 
 from copilot.config import Config
@@ -27,6 +28,14 @@ from copilot.llm.client import Reply, ToolCall
 
 _TIMEOUT = 120.0     # a real multi-round investigation turn on a 20B model is slow; generous so a
                      # healthy-but-slow completion is not cut off client-side as a false outage.
+
+# Backend caps us at 19 req/min shared across the proc, so space every chat() POST >= 60/19s apart.
+# ponytail: global lock + last-send timestamp = leaky-bucket at rate 1; a token-bucket allowing
+# short bursts only if 19rpm is a rolling-window (not fixed-spacing) cap.
+_RPM = 19
+_MIN_GAP = 60.0 / _RPM
+_gate = threading.Lock()
+_last_send = [0.0]     # list so the closure-free nested func can mutate without `global`
 
 _log = logging.getLogger("copilot.llm")    # per-call token usage -> the owning proc's stdout log
 if not _log.handlers:                      # uvicorn configures only uvicorn.*; give ourselves a
@@ -85,6 +94,7 @@ class OpenAIClient:
         # with backoff, honoring Retry-After. ponytail: fixed 5-try ceiling; raise it via env only
         # if a real queue depth needs more.
         for attempt in range(5):
+            _throttle()
             r = httpx.post(f"{self._url}/chat/completions", json=body, headers=headers, timeout=_TIMEOUT)
             if r.status_code not in (429, 503) or attempt == 4:
                 break
@@ -97,6 +107,16 @@ class OpenAIClient:
         _log.info("%s tok prompt=%s completion=%s total=%s", self._model,
                   u.get("prompt_tokens"), u.get("completion_tokens"), u.get("total_tokens"))
         return _to_reply(data["choices"][0]["message"])
+
+
+def _throttle() -> None:
+    """Block until >= _MIN_GAP has passed since the last POST, proc-wide. Holding the lock across
+    the sleep serializes calls so N concurrent turns queue instead of all firing at once."""
+    with _gate:
+        wait = _MIN_GAP - (time.monotonic() - _last_send[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_send[0] = time.monotonic()
 
 
 def _as_function(spec: dict) -> dict:
