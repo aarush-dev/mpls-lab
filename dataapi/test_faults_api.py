@@ -20,7 +20,7 @@ def client(monkeypatch):
     # Fake run_scenario: block on cancel so the target reads as busy until
     # revert (or the test process ends). Never touches docker/VM.
     def fake_run_scenario(name, target, severity="medium", duration=90,
-                          dry_run=False, cancel=None, status=None):
+                          dry_run=False, cancel=None, status=None, buildup=None):
         if status is not None:  # mimic the real buildup->impact transition
             status.update(phase="impact", lead=45.0,
                           t_impact="2099-01-01T00:00:45+00:00")
@@ -68,7 +68,7 @@ def test_active_reports_lifecycle_phase(client, monkeypatch):
     gate = threading.Event()  # held in buildup until the test releases it
 
     def staged(name, target, severity="medium", duration=90,
-               dry_run=False, cancel=None, status=None):
+               dry_run=False, cancel=None, status=None, buildup=None):
         status.update(phase="buildup", lead=45.0, t_impact="2099-01-01T00:00:45Z")
         gate.wait(timeout=5)
         status.update(phase="impact")

@@ -714,7 +714,7 @@ def _label_row(spec, scenario_id, name, target, severity, t_start, t_impact,
 
 
 def run_scenario(name, target, severity="medium", duration=90,
-                 dry_run=False, cancel=None, status=None):
+                 dry_run=False, cancel=None, status=None, buildup=None):
     """buildup -> impact -> hold -> revert state machine for one live injection.
 
     Every scenario draws a precursor lead from the shared prior, floored to a
@@ -749,7 +749,11 @@ def run_scenario(name, target, severity="medium", duration=90,
     overlay_active = is_overlay  # cleared below if the controller post fails
     # Every overlay scenario injects on its target (a spoke CE), which is the site
     # the tunnel metric folds into — so the overlay is keyed on `target`.
-    lead = min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0]))
+    # buildup (precursor lead): caller-supplied value wins; else draw the shared
+    # prior floored to a demo-visible [30,60]s. ponytail: the prior is minutes-scale
+    # so the clamp always pinned it to 60 -- the UI now passes an explicit buildup.
+    lead = (max(1.0, float(buildup)) if buildup is not None
+            else min(60.0, max(30.0, leadpriors.draw_lead_s(name, 30, random.gauss(0, 1))[0])))
     overlay = (_OverlayInjector(target, spec["type"], lead, duration, severity)
                if is_overlay and not dry_run else None)
     t_start = now_utc()

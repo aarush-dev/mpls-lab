@@ -206,7 +206,7 @@ curl localhost:8000/faults/scenarios
 
 # Inject: fires a real fault, returns immediately with a scenario_id
 curl -X POST 127.0.0.1:8000/faults/inject -H 'Content-Type: application/json' \
-  -d '{"scenario":"node_failure","target":"ce_branch3","duration":45}'
+  -d '{"scenario":"node_failure","target":"ce_branch3","duration":45,"buildup":30}'
 # -> {"scenario_id": "node_failure-ce_branch3-<hex8>", "status": "injecting"}
 # 404 unknown scenario | 422 target role invalid for that scenario | 409 target already active
 
@@ -220,7 +220,7 @@ curl localhost:8000/faults/active
 curl -X POST localhost:8000/faults/revert/node_failure-ce_branch3-<hex8>
 ```
 
-`run_scenario` gained an optional `cancel: threading.Event` param for this early-revert path — the guaranteed-revert `try/finally` is unchanged. It also takes an optional `status: dict`: when given, it reports its phase into it at each transition (`buildup` with `lead`+`t_impact`, `impact`, `reverting`) via GIL-atomic key writes — the `/faults/active` registry reads that dict lock-free to project the live phase. Passing no `status` leaves behaviour unchanged (CLI/campaign callers).
+`run_scenario` gained an optional `cancel: threading.Event` param for this early-revert path — the guaranteed-revert `try/finally` is unchanged. It also takes an optional `status: dict`: when given, it reports its phase into it at each transition (`buildup` with `lead`+`t_impact`, `impact`, `reverting`) via GIL-atomic key writes — the `/faults/active` registry reads that dict lock-free to project the live phase. Passing no `status` leaves behaviour unchanged (CLI/campaign callers). It also takes an optional `buildup` (seconds): when the `/faults/inject` body sets it, that value IS the precursor lead; when omitted, the lead is drawn from the shared prior floored to `[30,60]s` (which the minutes-scale prior always pinned to 60) — so the UI's buildup field now controls it directly.
 
 ### /datasets — The Main Event: Labeled Parquet
 

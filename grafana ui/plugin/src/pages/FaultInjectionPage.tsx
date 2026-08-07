@@ -18,6 +18,7 @@ import { formatUtc } from '../utils/time';
 
 const SEVERITIES: Array<InjectFaultRequest['severity']> = ['low', 'medium', 'high'];
 const DEFAULT_DURATION = 90;
+const DEFAULT_BUILDUP = 30; // precursor lead before impact (s)
 
 // The fault methods live on HttpDataClient beyond the shared DataClient interface; mock mode has
 // none of them, so the page degrades to an empty (visual-only) list.
@@ -71,6 +72,7 @@ export function FaultInjectionPage() {
   const [target, setTarget] = useState<string | undefined>(undefined);
   const [severity, setSeverity] = useState<InjectFaultRequest['severity']>('medium');
   const [duration, setDuration] = useState<number>(DEFAULT_DURATION);
+  const [buildup, setBuildup] = useState<number>(DEFAULT_BUILDUP);
   const [active, setActive] = useState<ActiveFault[]>([]);
   const [cases, setCases] = useState<ForensicCase[]>([]);
   const [busy, setBusy] = useState(false);
@@ -177,7 +179,7 @@ export function FaultInjectionPage() {
     }
     setBusy(true);
     try {
-      await faultApi.injectFault({ scenario, target, severity, duration });
+      await faultApi.injectFault({ scenario, target, severity, duration, buildup });
       fetchLive(); // reflect the new injection immediately
     } catch (e) {
       const msg = (e as { message?: string })?.message ?? 'inject failed';
@@ -238,8 +240,23 @@ export function FaultInjectionPage() {
           width={16}
         />
         <Select<number>
-          options={[15, 30, 60, 90, 180, 300, 600].map((d) => ({ label: `${d}s`, value: d }))}
-          value={{ label: `${duration}s`, value: duration }}
+          aria-label="Buildup"
+          options={[10, 30, 60, 120, 300].map((d) => ({ label: `buildup ${d}s`, value: d }))}
+          value={{ label: `buildup ${buildup}s`, value: buildup }}
+          onChange={(v) => v?.value && setBuildup(v.value)}
+          allowCustomValue
+          onCreateOption={(v) => {
+            const n = Number(v);
+            if (Number.isFinite(n) && n > 0) {
+              setBuildup(Math.round(n));
+            }
+          }}
+          width={18}
+        />
+        <Select<number>
+          aria-label="Duration"
+          options={[15, 30, 60, 90, 180, 300, 600].map((d) => ({ label: `hold ${d}s`, value: d }))}
+          value={{ label: `hold ${duration}s`, value: duration }}
           onChange={(v) => v?.value && setDuration(v.value)}
           allowCustomValue
           onCreateOption={(v) => {
@@ -248,7 +265,7 @@ export function FaultInjectionPage() {
               setDuration(Math.round(n));
             }
           }}
-          width={14}
+          width={16}
         />
         <Button icon="bolt" variant="destructive" onClick={inject} disabled={!scenario || !target || busy}>
           {busy ? 'Injecting…' : 'Inject fault'}

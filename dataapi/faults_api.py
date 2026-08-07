@@ -68,13 +68,15 @@ class InjectBody(BaseModel):
     target: str
     severity: str = "medium"
     duration: int = DEFAULT_DURATION
+    buildup: int | None = None  # precursor lead (s); None => orchestrator draws the prior
 
 
-def _runner(scenario_id, name, target, severity, duration, cancel, status):
+def _runner(scenario_id, name, target, severity, duration, cancel, status, buildup):
     """Thread body: run the scenario, then always drop it from the registry."""
     try:
         orchestrator.run_scenario(name, target, severity=severity,
-                                  duration=duration, cancel=cancel, status=status)
+                                  duration=duration, cancel=cancel, status=status,
+                                  buildup=buildup)
     finally:
         with _LOCK:
             _ACTIVE.pop(scenario_id, None)
@@ -123,7 +125,7 @@ def inject(body: InjectBody):
         }
     threading.Thread(target=_runner, daemon=True, args=(
         scenario_id, body.scenario, body.target, body.severity,
-        body.duration, cancel, status)).start()
+        body.duration, cancel, status, body.buildup)).start()
     return {"scenario_id": scenario_id, "status": "injecting"}
 
 

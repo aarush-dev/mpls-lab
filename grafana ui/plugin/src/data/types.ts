@@ -203,6 +203,7 @@ export interface InjectFaultRequest {
   target: string;
   severity?: 'low' | 'medium' | 'high';
   duration?: number;
+  buildup?: number; // precursor lead (s) before impact; omitted => backend draws the prior
 }
 
 // --- Copilot chat trace model (mirrors backend `event_wire`, ADR-0009) ------------------------
