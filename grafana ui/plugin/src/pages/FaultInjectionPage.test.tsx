@@ -7,7 +7,7 @@ jest.mock('@grafana/runtime', () => ({
 }));
 
 import type { ForensicCase } from '../data/types';
-import { copilotPath } from '../constants';
+import { copilotCasePath } from '../constants';
 
 // Fake client: only the copilot-cases path matters here; other fault methods return empty.
 const fakeCases: ForensicCase[] = [
@@ -41,8 +41,9 @@ describe('FaultInjectionPage — copilot cases panel', () => {
     expect(within(items[0]).getByText(/cpu_hog · medium/)).toBeInTheDocument();
     expect(within(items[1]).getByText('r1')).toBeInTheDocument();
 
+    // Deep-link carries the case so /copilot can auto-ask about it (newest-first: c2/r2).
     const links = screen.getAllByRole('link', { name: /Open copilot/ });
-    expect(links[0]).toHaveAttribute('href', copilotPath);
+    expect(links[0]).toHaveAttribute('href', copilotCasePath(fakeCases[1]));
   });
 
   it('shows the empty state when no cases exist', async () => {

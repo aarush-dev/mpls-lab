@@ -8,7 +8,7 @@ import { LIVE_REFRESH_MS } from '../state/AppContext';
 import { useDataClient } from '../data/DataClientContext';
 import { ActiveFault, FaultScenario, ForensicCase, InjectFaultRequest, TopologyNode } from '../data/types';
 import { targetOptions, isValidTarget } from '../data/faultTargets';
-import { nodeDetailPath, copilotPath } from '../constants';
+import { nodeDetailPath, copilotCasePath } from '../constants';
 import { formatUtc } from '../utils/time';
 
 // Fault Injection: fires a REAL fault in the simulated lab (dataapi /faults/inject -> orchestrator
@@ -18,7 +18,7 @@ import { formatUtc } from '../utils/time';
 
 const SEVERITIES: Array<InjectFaultRequest['severity']> = ['low', 'medium', 'high'];
 const DEFAULT_DURATION = 90;
-const DEFAULT_BUILDUP = 30; // precursor lead before impact (s)
+const DEFAULT_BUILDUP = 60; // precursor lead before impact (s); PA target/ETA tuned on the 60s ramp (2 window rows) — 30s halved it and broke detection
 
 // The fault methods live on HttpDataClient beyond the shared DataClient interface; mock mode has
 // none of them, so the page degrades to an empty (visual-only) list.
@@ -326,7 +326,7 @@ export function FaultInjectionPage() {
                   {c.fault_type ?? 'unknown'} · {c.severity}
                   {Number.isFinite(t) ? ` · ${formatUtc(t)}` : ''}
                 </span>
-                <a href={copilotPath}>
+                <a href={copilotCasePath(c)}>
                   Open copilot <Icon name="arrow-right" />
                 </a>
               </li>

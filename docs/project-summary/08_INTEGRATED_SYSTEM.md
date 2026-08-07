@@ -182,6 +182,7 @@ across tickets T1–T6 and is wired to the real backend:
 | T3 | `CopilotTrace` — collapsed cards per event + `[source:offset]` citation chips; hover to preview, click to scroll to and highlight the cited row | `CopilotTrace.tsx:28-163` |
 | T4/T6 | multi-turn session (shared id, Stop button via `AbortController`), `workspace` toggle, inline/downloadable artifacts | `useCopilotChat.ts:78-216` |
 | T5 | one shared conversation across the `/copilot` tab and a global collapsible side-panel `Drawer` | `CopilotChatContext.tsx`, `AppShell.tsx` |
+| — | Fault-injection "Open copilot" deep-links a case (`copilotCasePath` → `?device&ts&fault&sev`); `CopilotPage` starts a fresh chat and auto-asks about it, scoped to the hour before `ts` | `constants.ts`, `CopilotPage.tsx`, `useCopilotChat.ts:154` |
 
 The running app builds **only** `HttpDataClient` — there is no code path that returns a canned/fake
 answer (`DataClientContext.tsx:8-17`).

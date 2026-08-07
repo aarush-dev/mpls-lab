@@ -78,7 +78,8 @@ function loadThread(sid: string): Turn[] {
 export interface UseCopilotChat {
   items: Turn[];
   sending: boolean;
-  send: (question: string, workspace?: boolean) => void;
+  /** `scope` pins the History window (epoch s) for this turn; omit to derive from the global picker. */
+  send: (question: string, workspace?: boolean, scope?: { start: number; end: number }) => void;
   retry: (id: string) => void;
   /** Abort every in-flight turn; each returns to idle (state 'aborted'), never 'error'. */
   stop: () => void;
@@ -152,10 +153,10 @@ export function useCopilotChat(): UseCopilotChat {
   );
 
   const send = useCallback(
-    (question: string, workspace = false) => {
+    (question: string, workspace = false, scope?: { start: number; end: number }) => {
       const id = `turn-${seq.current++}`;
-      const scope = mode === 'history' ? { start: Math.floor(range.fromMs / 1000), end: Math.floor(range.toMs / 1000) } : {};
-      setBoth((prev) => [...prev, { id, question, events: [], state: 'sending', workspace, ...scope }]);
+      const win = scope ?? (mode === 'history' ? { start: Math.floor(range.fromMs / 1000), end: Math.floor(range.toMs / 1000) } : {});
+      setBoth((prev) => [...prev, { id, question, events: [], state: 'sending', workspace, ...win }]);
       run(id);
     },
     [mode, range.fromMs, range.toMs, setBoth, run]
