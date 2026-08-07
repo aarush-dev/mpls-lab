@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import time
 
 from copilot.config import Config
 from copilot.llm.client import Reply, ToolCall
@@ -77,12 +78,19 @@ class OpenAIClient:
             body["tools"] = [_as_function(t) for t in tools]
         if self._effort:                  # gpt-oss burns tokens on reasoning -> tier it explicitly;
             body["reasoning_effort"] = self._effort   # unset (default) keeps the plain OpenAI body.
-        r = httpx.post(
-            f"{self._url}/chat/completions",
-            json=body,
-            headers={"Authorization": f"Bearer {self._key}"} if self._key else {},
-            timeout=_TIMEOUT,
-        )
+        headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
+        # The shared inference backend rate-limits (429) / sheds (503) under concurrent load; a
+        # multi-round investigation issues many chat() calls, so one transient reject must NOT
+        # bubble a 500 to /chat (dashboard reads that as "copilot unreachable"). Bounded retry
+        # with backoff, honoring Retry-After. ponytail: fixed 5-try ceiling; raise it via env only
+        # if a real queue depth needs more.
+        for attempt in range(5):
+            r = httpx.post(f"{self._url}/chat/completions", json=body, headers=headers, timeout=_TIMEOUT)
+            if r.status_code not in (429, 503) or attempt == 4:
+                break
+            wait = float(r.headers.get("Retry-After") or 0) or 1.5 * (2 ** attempt)
+            _log.warning("%s %s -> retry %d in %.1fs", self._model, r.status_code, attempt + 1, wait)
+            time.sleep(wait)
         r.raise_for_status()
         data = r.json()
         u = data.get("usage") or {}
