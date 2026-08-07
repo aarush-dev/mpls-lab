@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:06:41.722015+00:00", "content": "What's the overall health of the network right now?"}
+
+data: {"type": "gate", "ts": "2026-08-06T12:06:48.719424+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:06:48.719451+00:00", "content": "That's a very broad question. To investigate effectively, I need to narrow the scope. Are you interested in:\n\n- A specific **region, site, or device** (e.g., \"r1\", \"nyc-edge\", \"core-dc1\")?\n- A particular **service or overlay** (SD-WAN tunnels, MPLS underlay, internet breakout)?\n- A certain **metric domain** (latency/jitter/loss, hardware health, interface errors, control-plane)?\n- A **time window** (last 5 min, last hour, since a known change)?\n\nIf you can point me at a device or a symptom (e.g., \"users in Site A reporting slowness\"), I can pull focused telemetry, logs, and any relevant runbooks/incidents."}
+

@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734498+00:00", "content": "Start two investigations in the same session_id concurrently and see what happens."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:28.196640+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:28.196663+00:00", "content": "I don't have tools for managing investigation sessions or running concurrent investigations. The available tools are for live telemetry queries (metrics, logs, flows), knowledge-base lookups (runbooks, incidents), and topology exploration.\n\nCould you clarify what you're trying to achieve? For example:\n- Are you looking to investigate two different devices or issues at once?\n- Do you want me to run parallel queries for two different targets?\n- Is there a specific investigation workflow you have in mind?\n\nI can certainly run multiple tool calls in sequence to gather evidence for different aspects of a problem, or for different devices if you specify them."}
+

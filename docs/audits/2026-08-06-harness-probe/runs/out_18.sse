@@ -1,0 +1,10 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:10:34.921662+00:00", "content": "Show faults for device pe999 which I don't think exists."}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:10:49.460948+00:00", "name": "walk_topology_graph", "arguments": {"device": "pe999", "hops": 1}, "id": "call-3404e7fa-13f3-4977-9e75-5dcdace345c5"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:10:49.494717+00:00", "id": "call-3404e7fa-13f3-4977-9e75-5dcdace345c5", "name": "walk_topology_graph", "content": "error: unknown device 'pe999': not in the topology", "n": 0}
+
+data: {"type": "gate", "ts": "2026-08-06T12:10:53.372486+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:10:53.372509+00:00", "content": "The device **pe999** does not exist in the network topology \u2014 the topology graph lookup returns \"unknown device 'pe999': not in the topology\" [topo:error].\n\nIf you meant a different device (e.g., a similar hostname like `pe99`, `pe998`, or `pe100`), let me know the correct name and I can pull its metrics, logs, flows, and any related runbooks or past incidents."}
+

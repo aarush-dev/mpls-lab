@@ -23,15 +23,28 @@ export function styleForRole(role: string): RoleStyle {
   return roleStyles[role] ?? defaultRoleStyle;
 }
 
-// Health-state colors. red = down, amber = precursor, green = healthy.
-export const stateColors: Record<'red' | 'amber' | 'green', string> = {
+// Health-state colors. red = down, amber = precursor (blue), yellow = stressed, green = healthy.
+export const stateColors: Record<'red' | 'amber' | 'yellow' | 'green', string> = {
   red: '#e02f44',
-  amber: '#ff9830',
+  amber: '#5794f2',
+  yellow: '#f2cc0c',
   green: '#56a64b',
 };
 
 export const neutralColor = '#8e9297';
 
-export function colorForState(state?: 'red' | 'amber' | 'green'): string {
+export function colorForState(state?: 'red' | 'amber' | 'yellow' | 'green'): string {
   return state ? stateColors[state] : neutralColor;
 }
+
+// "Stressed" (yellow) thresholds for live sdwan_tunnel_latency_ms/jitter_ms/loss_pct — real
+// backend only. Sized from the actual running lab (no fault injected): sampled max across all
+// 168 tunnels over ~30s was ~145ms latency / ~119ms jitter / ~50% loss (this sim's tunnels run
+// noisier than controller.py's on-paper baseline), and real spoke degree is 4-6 (checked
+// /topology). BASE * (1 + min_degree/5) clears the observed max with margin, so nothing reads
+// stressed at idle — only once an injected fault pushes a tunnel past this.
+// Scaled by node degree (connection count): a node with more links has more redundancy, so it
+// takes a bigger excursion to call it stressed. Effective threshold = BASE * (1 + degree / 5).
+export const STRESS_LATENCY_MS = 110;
+export const STRESS_JITTER_MS = 85;
+export const STRESS_LOSS_PCT = 35;

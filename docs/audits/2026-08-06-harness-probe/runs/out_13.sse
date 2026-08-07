@@ -1,0 +1,10 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:10:34.921866+00:00", "content": "Show me metrics for device '../../etc/passwd'."}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:10:41.679198+00:00", "name": "query_metrics", "arguments": {"device": "../../etc/passwd"}, "id": "call-eb422107-6f8f-48ac-85c1-0bc49eb9983f"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:10:41.722275+00:00", "id": "call-eb422107-6f8f-48ac-85c1-0bc49eb9983f", "name": "query_metrics", "content": "no rows", "n": 0}
+
+data: {"type": "gate", "ts": "2026-08-06T12:10:44.956486+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:10:44.956511+00:00", "content": "The device name `'../../etc/passwd'` does not correspond to any known network device in the telemetry system\u2014no metrics were returned [metrics:0].\n\nCould you clarify which device you intended to query? For example, a hostname like `router-1`, `switch-core-2`, or an IP address/serial that exists in your inventory."}
+

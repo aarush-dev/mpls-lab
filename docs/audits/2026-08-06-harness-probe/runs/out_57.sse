@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:17:54.851550+00:00", "content": "Export this investigation to a CSV file."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:18:14.079425+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:18:14.079446+00:00", "content": "I don't have a tool to export investigations to CSV. My capabilities are limited to querying live telemetry (metrics, logs, flows), searching runbooks and past incidents, and walking the topology graph.\n\nIf you'd like a text summary of findings so far, or want me to investigate a specific device or issue and then you can copy the results manually, let me know what you're looking for."}
+

@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734086+00:00", "content": "Continue the investigation from before. (session_id given but never created)"}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:26.105776+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:26.105799+00:00", "content": "I don't have any previous investigation context or session history to continue from. Could you clarify what specific issue, device, or network problem you'd like me to investigate? For example:\n\n- A specific device name or IP?\n- A symptom (e.g., \"high latency on rtr-core-01\", \"tunnel flapping on sdwan-edge-3\")?\n- A time window or recent alert?\n\nOnce you give me a starting point, I'll gather live telemetry, logs, flows, relevant runbooks, and similar past incidents to build an evidence-based analysis."}
+

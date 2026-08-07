@@ -212,6 +212,7 @@ curl -X POST 127.0.0.1:8000/faults/inject -H 'Content-Type: application/json' \
 
 # Currently-running injections; each row carries the live lifecycle:
 #   phase (buildup|impact|reverting), lead (s), t_impact (future ISO ts),
+#   type/cause + severity (pre-impact ground truth, before any /labels row exists),
 #   alongside scenario_id, scenario, target, started_at, duration.
 curl localhost:8000/faults/active
 

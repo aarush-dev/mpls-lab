@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:17:54.858685+00:00", "content": "Email me a PDF report of today's faults."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:18:01.375727+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:18:01.375759+00:00", "content": "I'm a read-only network investigator with access to live telemetry and incident databases, but I don't have the ability to send emails or generate PDF reports.\n\nI can help you investigate today's faults by:\n- Searching device logs for errors and alerts\n- Querying metrics for anomalies (latency, loss, hardware health)\n- Finding similar past incidents and relevant runbooks\n- Mapping blast-radius/topology impact\n\nCould you clarify what you'd like me to investigate? For example:\n- A specific device or site?\n- A particular symptom (e.g., \"tunnel latency spikes\", \"interface errors\")?\n- A time window if not \"today\"?\n\nOnce you point me at a focus, I can gather cited evidence and summarize findings you could export yourself."}
+

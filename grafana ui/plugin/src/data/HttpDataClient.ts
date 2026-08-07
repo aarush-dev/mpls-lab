@@ -34,6 +34,7 @@ import type {
 import { normalizeError } from './errors';
 import { METRIC_CATALOG } from './metricCatalog';
 import { parseSseFrames, mapEventsToTurn } from './copilotChat';
+import { STRESS_LATENCY_MS, STRESS_JITTER_MS, STRESS_LOSS_PCT } from './topologyStyles';
 
 // --- Raw backend DTOs -------------------------------------------------------------------------
 
@@ -210,20 +211,44 @@ export class HttpDataClient implements DataClient {
     }
   }
 
-  // /labels is 174KB and every node load fetches it 3x (topology + incidents + predictions).
-  // Collapse concurrent/burst calls onto one in-flight request with a 2s TTL so a single load —
-  // and its 5s refresh siblings — pay for it once. ponytail: process-wide, fine for one browser tab.
-  private labelsCache?: { at: number; p: Promise<RawLabelRow[]> };
-  private async fetchLabels(): Promise<RawLabelRow[]> {
-    const now = Date.now();
-    if (this.labelsCache && now - this.labelsCache.at < 2000) {
-      return this.labelsCache.p;
+  /** Instant PromQL vector (e.g. `max by(device)(...)`). device -> value; malformed/missing device rows skipped. */
+  private async instantVector(query: string): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const resp = await this.fetchJson<PromResp>(`/metrics${this.qs({ query })}`);
+    for (const s of resp.result ?? []) {
+      const dev = s.metric.device;
+      const v = s.value?.[1];
+      if (!dev || v == null) {
+        continue;
+      }
+      const n = parseFloat(v);
+      if (!Number.isNaN(n)) {
+        out.set(dev, n);
+      }
     }
-    const p = this.fetchJson<{ rows: RawLabelRow[] }>('/labels').then((resp) => resp.rows ?? []);
-    this.labelsCache = { at: now, p };
+    return out;
+  }
+
+  // Full /labels was 174KB and every node load fetched it 3x (topology + incidents + predictions).
+  // The server now supports ?device= to scope the response, so per-device callers (incidents,
+  // predictions) send only their device's rows over the tunnel. Collapse concurrent/burst calls
+  // onto one in-flight request per cache key (device, or '' for the full set) with a 2s TTL so a
+  // single load — and its 5s refresh siblings — pay for it once.
+  // ponytail: process-wide Map, fine for one browser tab.
+  private labelsCache = new Map<string, { at: number; p: Promise<RawLabelRow[]> }>();
+  private async fetchLabels(device?: string): Promise<RawLabelRow[]> {
+    const key = device ?? '';
+    const now = Date.now();
+    const cached = this.labelsCache.get(key);
+    if (cached && now - cached.at < 2000) {
+      return cached.p;
+    }
+    const url = device ? `/labels?device=${encodeURIComponent(device)}` : '/labels';
+    const p = this.fetchJson<{ rows: RawLabelRow[] }>(url).then((resp) => resp.rows ?? []);
+    this.labelsCache.set(key, { at: now, p });
     p.catch(() => {
-      if (this.labelsCache?.p === p) {
-        this.labelsCache = undefined; // don't cache a rejection
+      if (this.labelsCache.get(key)?.p === p) {
+        this.labelsCache.delete(key); // don't cache a rejection
       }
     });
     return p;
@@ -236,14 +261,17 @@ export class HttpDataClient implements DataClient {
   // --- topology -------------------------------------------------------------------------------
 
   async getTopology(filters: Filters): Promise<TopologyGraph> {
-    const [topo, labels] = await Promise.all([
+    const [topo, labels, latency, jitter, loss] = await Promise.all([
       this.fetchJson<RawTopologyResp>('/topology'),
       this.fetchLabels().catch(() => [] as RawLabelRow[]),
+      this.instantVector('max by(device)(sdwan_tunnel_latency_ms)').catch(() => new Map<string, number>()),
+      this.instantVector('max by(device)(sdwan_tunnel_jitter_ms)').catch(() => new Map<string, number>()),
+      this.instantVector('max by(device)(sdwan_tunnel_loss_pct)').catch(() => new Map<string, number>()),
     ]);
     const nowS = Date.now() / 1000;
 
     // device -> live health from the ground-truth timeline.
-    const state = new Map<string, 'red' | 'amber'>();
+    const state = new Map<string, 'red' | 'amber' | 'yellow'>();
     for (const l of labels) {
       const dev = HttpDataClient.deviceOf(l);
       if (!dev) {
@@ -256,6 +284,27 @@ export class HttpDataClient implements DataClient {
         state.set(dev, 'red');
       } else if (nowS >= s && nowS < i && state.get(dev) !== 'red') {
         state.set(dev, 'amber');
+      }
+    }
+
+    // No red/amber ground-truth state: check live tunnel metrics for stress. Thresholds scale
+    // with a node's connection count — a well-connected node has more redundancy, so it takes a
+    // bigger metric excursion to call it "stressed" than a node with a single link.
+    const degree = new Map<string, number>();
+    for (const l of topo.links) {
+      degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
+      degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
+    }
+    for (const n of topo.nodes) {
+      if (state.has(n.id)) {
+        continue;
+      }
+      const mult = 1 + (degree.get(n.id) ?? 0) / 5;
+      const l = latency.get(n.id) ?? 0;
+      const j = jitter.get(n.id) ?? 0;
+      const p = loss.get(n.id) ?? 0;
+      if (l > STRESS_LATENCY_MS * mult || j > STRESS_JITTER_MS * mult || p > STRESS_LOSS_PCT * mult) {
+        state.set(n.id, 'yellow');
       }
     }
 
@@ -393,7 +442,7 @@ export class HttpDataClient implements DataClient {
   // --- incidents / predictions (derived from /labels) -----------------------------------------
 
   async getIncidents(filters: Filters): Promise<Incident[]> {
-    const labels = await this.fetchLabels();
+    const labels = await this.fetchLabels(filters.device);
     const nowS = Date.now() / 1000;
     const out: Incident[] = [];
     for (const l of labels) {
@@ -435,7 +484,7 @@ export class HttpDataClient implements DataClient {
   }
 
   async getPredictions(filters: Filters): Promise<Prediction[]> {
-    const labels = await this.fetchLabels();
+    const labels = await this.fetchLabels(filters.device);
     const nowS = Date.now() / 1000;
     const out: Prediction[] = [];
     for (const l of labels) {

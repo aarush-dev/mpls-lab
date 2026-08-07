@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734834+00:00", "content": "Reference 'the fault from earlier' in a stateless one-off chat."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:25.682272+00:00", "content": "I don't have any prior context in this stateless session. Could you clarify which fault you're referring to \u2014 e.g., the device name, symptom, or time window?"}
+

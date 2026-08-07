@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:14:32.415699+00:00", "content": "Compare ce_branch1 through ce_branch10 fault rates."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:14:38.540934+00:00", "content": "I need to clarify what you mean by \"fault rates\" to give you a useful comparison across ce_branch1\u2013ce_branch10. Are you looking for:\n\n- **Interface error/discard counters** (CRC, input/output errors, drops)?\n- **SD-WAN tunnel health** (loss %, latency, jitter, flap counts)?\n- **Log/event error rates** (syslog severity, alarm counts)?\n- **Hardware faults** (fan/PSU/temperature alarms)?\n\nAlso, do you want a quick spot-check (latest sample) or a trend over the investigation window (ranged series)?"}
+

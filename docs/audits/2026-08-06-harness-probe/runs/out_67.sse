@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.733086+00:00", "content": "Ask for a case's raw window data without a case_id."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:25.297774+00:00", "content": "I'd be happy to help you retrieve the case's raw window data, but I need the specific `case_id` to proceed. Could you please provide the case identifier?"}
+

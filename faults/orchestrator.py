@@ -617,6 +617,17 @@ SCENARIOS = {
 }
 
 
+# Ground-truth fault type/cause per scenario, available PRE-IMPACT (before the
+# t_end /labels row is written). Same value each scen_ fn puts in spec["type"]
+# and _label_row writes at t_end -- serving it from /faults/active lets #91 build
+# a §3.3 salvage record and a stable base alert_id during buildup. For every
+# scenario that value IS the scenario name; test_scenario_types_match_specs guards
+# spec["type"] == name so a future divergent scenario fails loudly, not silently.
+# ponytail: {name: name}; add an explicit override here only if a scenario's type
+# ever stops matching its name.
+SCENARIO_TYPES = {name: name for name in SCENARIOS}
+
+
 # --------------------------------------------------------------------------- run
 def draw_ramp_seconds(name, duration, step=30):
     """DEFECT 1b: ramp wall-duration for a ramping scenario = the lead drawn from

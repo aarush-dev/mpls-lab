@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:06:41.721665+00:00", "content": "List all BGP flaps across every device in the last 24h."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:06:52.280816+00:00", "content": "I need to check BGP flaps on specific devices \u2014 the telemetry tools require a device name. Could you tell me which device(s) you want me to search (e.g., `r1`, `r2`, `core-sw1`), or would you like me to start with a particular device and then walk its topology to find neighbors?"}
+

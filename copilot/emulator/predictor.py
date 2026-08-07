@@ -12,24 +12,32 @@ Forensic pipeline (R5); this ticket delivers the record stream it consumes.
 
 Self-check:  python3 -m copilot.emulator.test_predictor
 """
+import logging
 import time
 
 from copilot.emulator.emulate import fetch_labels, persist, prediction
 
+log = logging.getLogger(__name__)
 
-def predict_once(cfg, labels: list[dict], ledger, now: str, *, drift_tick: int = 0):
+
+def predict_once(cfg, labels: list[dict], ledger, now: str, *, drift_tick: int = 0,
+                 real_pa=None):
     """One predictor tick: predict on the window ending `now`, persist any record (ADR-0014).
     Returns the record (or None if no fault is active). `drift_tick` is the run's tick index -- it
-    evolves the faked drift/health scalar over the run. Idempotent by alert_id: re-emitting the
-    same active episode on a later tick is a no-op in the ledger."""
-    rec = prediction(cfg, labels, now=now, drift_tick=drift_tick)
+    evolves the faked drift/health scalar over the run. `real_pa` is the real-PA callable used when
+    `cfg.emulate_pa` is false (PA-A6/G4). Idempotent by alert_id: re-emitting the same active
+    episode on a later tick is a no-op in the ledger."""
+    rec = prediction(cfg, labels, now=now, real_pa=real_pa, drift_tick=drift_tick)
     if rec is not None:
         persist(ledger, rec)
+        dec = rec.get("decision") or {}
+        log.info("tick %s: device=%s alert=%s p=%s", now, rec.get("device"), dec.get("alert"),
+                 dec.get("calibrated_probability"))
     return rec
 
 
 def run_predictor(cfg, base_url: str, ledger, *, now_fn, stop_fn,
-                  sleep=time.sleep, fetch=None) -> int:
+                  sleep=time.sleep, fetch=None, real_pa=None) -> int:
     """The periodic predictor (ADR-0014). Until `stop_fn()`: re-read the ground-truth timeline,
     predict on the window ending `now_fn()`, persist, sleep `cfg.predict_interval_s` (its first
     reader). `now_fn`/`stop_fn`/`sleep`/`fetch` are injected so a test drives the loop
@@ -38,6 +46,11 @@ def run_predictor(cfg, base_url: str, ledger, *, now_fn, stop_fn,
     boot -- a fault injected after the daemon started would otherwise be invisible forever (the loop
     only ever saw the boot snapshot). ponytail: a sleep-loop, not cron; restart-safety rides
     persist's alert_id idempotency (ADR-0014), no separate cursor needed yet."""
+    # PA-A7: the real PA self-gates on decision.alert and needs no ground-truth labels, so only the
+    # emulator path reads /labels. Build the real-PA client once when emulate_pa is false.
+    if real_pa is None and not cfg.emulate_pa:
+        from copilot.emulator.real_pa import RealPA
+        real_pa = RealPA(cfg).predict
     tick = 0
     while not stop_fn():
         # #55: one try guards fetch+predict so a transient dataapi outage skips the tick instead of
@@ -45,9 +58,10 @@ def run_predictor(cfg, base_url: str, ledger, *, now_fn, stop_fn,
         # broad except by design -- a daemon must outlive any single-tick fault; upgrade path is a
         # typed retry/backoff on the transport if a specific error class needs distinct handling.
         try:
-            predict_once(cfg, fetch_labels(base_url, fetch=fetch), ledger, now_fn(), drift_tick=tick)
-        except Exception as e:  # noqa: BLE001 -- keep-alive is the point
-            print(f"predictor tick {tick} failed (transient?): {e}", flush=True)
+            labels = fetch_labels(base_url, fetch=fetch) if cfg.emulate_pa else []
+            predict_once(cfg, labels, ledger, now_fn(), drift_tick=tick, real_pa=real_pa)
+        except Exception:  # noqa: BLE001 -- keep-alive is the point
+            log.exception("tick %s failed (transient?)", tick)
         tick += 1
         sleep(cfg.predict_interval_s)
     return tick
@@ -65,6 +79,7 @@ def _main():  # pragma: no cover -- #55 process entrypoint, exercised by copilot
     from copilot.config import load
     from copilot.memory import Ledger
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     cfg = load()
     base_url = os.environ.get("COPILOT_DATAAPI_URL", cfg.dataapi_url)
     ledger = Ledger(os.environ.get("COPILOT_LEDGER_PATH", "ledger.db"))

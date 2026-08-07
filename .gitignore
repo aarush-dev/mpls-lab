@@ -45,3 +45,9 @@ node_modules/
 
 # streaming: python bytecode only; bridge.py/consume.py are source
 streaming/__pycache__/
+
+# PA (predictive-analysis) repo + weights — lives on VM/Modal, never in lab git
+bah_predictive_analysis/
+._*
+scratchpad/
+.agents/

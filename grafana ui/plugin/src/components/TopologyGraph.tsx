@@ -157,6 +157,10 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
           style: { 'background-color': colorForState('amber') },
         },
         {
+          selector: 'node[state = "yellow"]',
+          style: { 'background-color': colorForState('yellow') },
+        },
+        {
           selector: 'node[state = "green"]',
           style: { 'background-color': colorForState('green') },
         },
@@ -167,6 +171,10 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
         {
           selector: 'edge.state-amber',
           style: { 'line-color': colorForState('amber') },
+        },
+        {
+          selector: 'edge.state-yellow',
+          style: { 'line-color': colorForState('yellow') },
         },
       ],
       layout: { name: 'grid' },
@@ -222,11 +230,13 @@ export function TopologyGraph({ nodes, links, onSelectNode, onHoverNode }: Props
       cy.edges().forEach((e) => {
         const sState = stateById.get(e.data('source'));
         const tState = stateById.get(e.data('target'));
-        e.removeClass('state-red state-amber');
+        e.removeClass('state-red state-amber state-yellow');
         if (sState === 'red' || tState === 'red') {
           e.addClass('state-red');
         } else if (sState === 'amber' || tState === 'amber') {
           e.addClass('state-amber');
+        } else if (sState === 'yellow' || tState === 'yellow') {
+          e.addClass('state-yellow');
         }
       });
     }

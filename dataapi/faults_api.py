@@ -60,7 +60,7 @@ DEFAULT_DURATION = 90  # run_scenario's default hold (orchestrator.run_scenario)
 
 # --- in-memory registry of live injections (Lock-guarded) ----------------------
 _LOCK = threading.Lock()
-_ACTIVE = {}  # scenario_id -> {scenario, target, started_at, duration, cancel}
+_ACTIVE = {}  # scenario_id -> {scenario, target, type, severity, started_at, duration, cancel, status}
 
 
 class InjectBody(BaseModel):
@@ -112,6 +112,12 @@ def inject(body: InjectBody):
         status = {"phase": "buildup"}
         _ACTIVE[scenario_id] = {
             "scenario": body.scenario, "target": body.target,
+            # type/cause = the ground-truth type the t_end /labels row will carry
+            # (SCENARIO_TYPES), served now so #91 can build a pre-impact §3.3 record
+            # + a stable base alert_id. severity is the inject param (dropped until
+            # now). Both are additive; existing /active consumers are unaffected.
+            "type": orchestrator.SCENARIO_TYPES[body.scenario],
+            "severity": body.severity,
             "started_at": orchestrator.iso(orchestrator.now_utc()),
             "duration": body.duration, "cancel": cancel, "status": status,
         }
@@ -130,6 +136,7 @@ def active():
     # ponytail: lead/t_impact are null in the sub-ms window between inject and the
     #   worker's first status write (phase seeded "buildup" at inject so it never is).
     return [{"scenario_id": sid, "scenario": e["scenario"], "target": e["target"],
+             "type": e["type"], "severity": e["severity"],
              "started_at": e["started_at"], "duration": e["duration"],
              "phase": e["status"].get("phase"),
              "lead": e["status"].get("lead"),

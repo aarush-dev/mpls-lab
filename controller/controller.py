@@ -48,6 +48,25 @@ from topo import build_model  # noqa: E402
 
 OVERLAY_STEP = 5.0  # prog() dur-floor; matches the default tick interval
 OVERLAY_SEVMUL = {"low": 0.5, "medium": 0.8, "high": 1.0}
+
+# p_cross = fraction of the calibrated peak at which the SLA is breached = t_impact.
+# The generator (generate.py:630-641) sets this per episode, so its POSITIVE (pre-
+# impact) windows sit at a SUBTLE precursor level (congestion ~36 ms / 1% loss) while
+# the full peak (102 ms / 5.7%) is only reached at t_impact+0.3*dur, POST-impact. The
+# live overlay hardcoded p_cross=1.0 -> full peak AT impact -> the served window is the
+# out-of-distribution peaked state, so the model mis-types it. Reproduce the generator
+# so the served precursor matches training. VOICE is the strictest (binding) SLA on
+# every spoke tunnel; profile tunnel_baseline means = healthy floor.
+_SLA_THETA_LAT, _SLA_THETA_LOSS = 150.0, 1.0          # VOICE (faults/leadpriors THETA_SLA)
+_BASE_LAT_MEAN, _BASE_LOSS_MEAN = 29.06, 0.44         # synthetic/profile.json tunnel_baseline
+
+
+def _p_cross(sig: dict, sevmul: float) -> float:
+    """SLA-crossing fraction of peak, per generator generate.py:635-641 (min of the
+    latency/loss crossings). Clamped to [0.02, 1.0]."""
+    p_lat = (_SLA_THETA_LAT - _BASE_LAT_MEAN) / max(1e-6, (sig["lat_peak"] - _BASE_LAT_MEAN) * sevmul)
+    p_loss = (_SLA_THETA_LOSS - _BASE_LOSS_MEAN) / max(1e-6, sig["loss_peak"] * sevmul)
+    return float(min(1.0, max(0.02, min(p_lat, p_loss))))
 # Fallback bases for signatures.default_signatures() when the calibration profile
 # is absent (e.g. --selftest, no dataset). The relative-peak tunnel_ramp faults
 # (asymmetric_loss, gray_failure) DO scale off these, so an overlay posted without
@@ -420,7 +439,7 @@ class Controller:
             "fault_type": fault_type, "sig": sig,
             "t_start": t0, "t_impact": t_impact, "t_end": t_end,
             "dur": float(duration), "sevmul": OVERLAY_SEVMUL.get(str(severity), 1.0),
-            "p_cross": 1.0, "expires": t_end,
+            "p_cross": _p_cross(sig, OVERLAY_SEVMUL.get(str(severity), 1.0)), "expires": t_end,
         }
         self._overlay[site] = rec
         return rec

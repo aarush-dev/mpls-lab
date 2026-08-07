@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.733721+00:00", "content": "Resume session 'sid-typo-not-real' and ask what's new."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:26.203407+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:26.203429+00:00", "content": "I don't have access to session state or memory of previous conversations \u2014 each interaction is stateless. I can't resume a prior session.\n\nWhat would you like me to investigate? Please describe the symptom, device(s), or time window you want me to look at, and I'll start gathering evidence with the telemetry and knowledge-base tools."}
+

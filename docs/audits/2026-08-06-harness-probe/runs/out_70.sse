@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:19:21.734780+00:00", "content": "Invoke a skill name that doesn't exist via the skills param."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:19:59.829096+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:19:59.829119+00:00", "content": "I don't have a \"skills\" parameter or the ability to invoke arbitrary skill names. I can only use the specific investigative tools defined in my environment:\n\n- **query_metrics** \u2013 device hardware & network telemetry\n- **search_logs** \u2013 device logs/events\n- **flows** \u2013 network flow records\n- **search_runbooks** \u2013 runbook knowledge base\n- **search_incidents** \u2013 past incidents (optionally scoped by topology)\n- **walk_topology_graph** \u2013 blast-radius / downstream topology with live status\n\nIf you have a concrete investigation question (e.g., \"check latency on device X\", \"find runbooks for MPLS failure\", \"show downstream impact of router Y\"), let me know and I\u2019ll use the appropriate tool(s)."}
+

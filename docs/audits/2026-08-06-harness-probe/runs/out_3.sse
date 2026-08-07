@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:06:41.721808+00:00", "content": "Give me a count of faults by severity across the whole network today."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:06:51.955524+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:06:51.955547+00:00", "content": "I can help investigate faults, but the telemetry tools require a specific device or pattern to query. Which devices or device group should I check for faults today? (For example: a particular router, switch, or a pattern like \"core\" or \"edge\" devices?)"}
+

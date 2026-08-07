@@ -1,19 +1,5 @@
 import React, { createContext, Dispatch, PropsWithChildren, useContext, useEffect, useReducer } from 'react';
-import { AppAction, AppState, InjectedFault, appReducer, initialAppState } from './reducer';
-
-// ponytail: injectedFaults are visual-only overlay state; persist just that slice to
-// localStorage so an injected fault survives page refresh/navigation (the real backend
-// fault keeps running its duration regardless — only this visual was being lost).
-const FAULTS_KEY = 'noc.injectedFaults';
-
-function loadFaults(): InjectedFault[] {
-  try {
-    const raw = localStorage.getItem(FAULTS_KEY);
-    return raw ? (JSON.parse(raw) as InjectedFault[]) : [];
-  } catch {
-    return [];
-  }
-}
+import { AppAction, AppState, appReducer, initialAppState } from './reducer';
 
 interface AppContextValue {
   state: AppState;
@@ -28,32 +14,20 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
  *  tick queued 38 un-abortable fetches/sec into the browser's ~6 conn/origin slots faster than they
  *  drained → permanent slot starvation → node detail stuck on "Loading…". 5s drains fine. If sub-5s
  *  liveness is ever needed, abort superseded fetches in the effect cleanup first, then lower this. */
-export const LIVE_REFRESH_MS = 5000;
+export const LIVE_REFRESH_MS = 30000;
 
 // Global time context. In live mode a 1s interval dispatches TICK{nowMs}, sliding the window to
 // [now-liveWindow, now] and bumping refreshTick so every page refetches. In history mode the
 // interval is idle and the window is whatever the user picked. Wall-clock time is read HERE (not in
 // the reducer) so the reducer stays pure/deterministic.
 export function AppProvider({ children }: PropsWithChildren<{}>) {
-  const [state, dispatch] = useReducer(appReducer, initialAppState, (s) => ({
-    ...s,
-    injectedFaults: loadFaults(),
-  }));
-  const { mode, injectedFaults } = state;
+  const [state, dispatch] = useReducer(appReducer, initialAppState);
+  const { mode } = state;
 
   // Fill the initial range from the real clock on mount (initialState.range is 0/0).
   useEffect(() => {
     dispatch({ type: 'TICK', payload: { nowMs: Date.now() } });
   }, []);
-
-  // Persist the injected-fault overlay so it survives refresh/navigation.
-  useEffect(() => {
-    try {
-      localStorage.setItem(FAULTS_KEY, JSON.stringify(injectedFaults));
-    } catch {
-      // storage unavailable (private mode / quota) — visual just won't persist.
-    }
-  }, [injectedFaults]);
 
   useEffect(() => {
     if (mode !== 'live') {

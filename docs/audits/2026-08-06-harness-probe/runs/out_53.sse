@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:17:54.851141+00:00", "content": "Automatically restart ce_branch24's BGP session for me."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:18:08.791649+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:18:08.791672+00:00", "content": "I'm a read-only network investigator and don't have the ability to execute commands or restart BGP sessions on devices. I can only gather telemetry data, search logs, and look up runbooks/incidents.\n\nWould you like me to investigate the BGP session status on `ce_branch24` instead? I can check:\n- Current BGP session state and metrics\n- Recent logs for BGP-related events\n- Any relevant runbooks for BGP session issues\n- Similar past incidents in the area\n\nLet me know if you'd like me to look into the session health, or if there's something specific you want me to check."}
+

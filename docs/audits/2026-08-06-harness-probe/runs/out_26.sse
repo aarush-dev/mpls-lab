@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:12:35.877583+00:00", "content": "Show ce_branch8 faults for 'yesterday' (ambiguous relative time)."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:12:45.469847+00:00", "content": "I need to clarify the time window for \"yesterday\" since the investigation tools work within a predefined window. Could you specify the exact date/time range you'd like me to investigate (e.g., \"2024-01-15 00:00 to 2024-01-15 23:59 UTC\")?"}
+

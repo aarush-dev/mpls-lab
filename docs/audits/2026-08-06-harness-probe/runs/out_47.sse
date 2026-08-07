@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:16:35.502441+00:00", "content": "Fetch flows for ce_branch24 with a negative limit."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:16:41.464914+00:00", "content": "I can't fetch flows with a negative limit \u2014 the `limit` parameter must be a positive integer (or omitted for the default). \n\nDid you mean to use a specific positive limit (e.g., `limit=100`), or would you like me to fetch the default number of recent flows for `ce_branch24`?"}
+

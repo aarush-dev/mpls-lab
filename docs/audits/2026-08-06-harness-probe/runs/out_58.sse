@@ -1,0 +1,4 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:17:54.852151+00:00", "content": "Schedule a recurring report of daily faults."}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:18:06.789237+00:00", "content": "I'm a read-only network investigator \u2014 I can query live telemetry, search logs/flows, search runbooks/incidents, and walk the topology graph to investigate faults. I don't have the ability to schedule reports or configure recurring reports.\n\nIf you're looking to investigate recent faults or understand the fault landscape for a report, I can help you gather evidence (metrics, logs, flows, similar past incidents, runbooks, topology blast-radius) for a specific device, time window, or fault pattern.\n\nWhat would you like to investigate? For example:\n- A specific device or site showing faults?\n- A time window to search for faults?\n- A symptom pattern (e.g., tunnel latency, interface errors, tunnel flaps)?"}
+

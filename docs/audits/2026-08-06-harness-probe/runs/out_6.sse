@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:06:41.724085+00:00", "content": "Are there any active/unresolved faults anywhere right now?"}
+
+data: {"type": "gate", "ts": "2026-08-06T12:06:59.062565+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:06:59.062590+00:00", "content": "I don't have a global \"show all active faults\" tool \u2014 the telemetry and incident tools are device-scoped. To investigate, I need a starting point. Could you tell me:\n\n- A specific device, site, or region you're concerned about, or  \n- A symptom/type of fault you're hunting (e.g., \"SD-WAN tunnel flaps\", \"BGP session drops\", \"interface errors\")?\n\nWith a focus device or fault pattern I can pull live metrics, logs, recent incidents, and the downstream blast-radius."}
+

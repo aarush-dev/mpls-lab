@@ -1,0 +1,14 @@
+[Unit]
+Description=NOC dataapi (clean data API :8000 — metrics/faults/topology + PA alerts proxy)
+After=network.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/LAB/dataapi
+Environment=PA_ALERTS_URL=http://127.0.0.1:8002
+ExecStart=/bin/bash /root/LAB/dataapi/start.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

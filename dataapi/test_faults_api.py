@@ -95,6 +95,28 @@ def test_active_reports_lifecycle_phase(client, monkeypatch):
     assert client.get("/faults/active").json() == []    # reverting drops the row
 
 
+def test_active_exposes_type_and_severity(client):
+    # #96: pre-impact fidelity source -- /faults/active must carry the fault
+    # type/cause + severity on a LIVE entry (before any /labels row exists), so
+    # #91 can build a §3.3 salvage record + a stable base alert_id during buildup.
+    client.post("/faults/inject",
+                json={"scenario": "congestion", "target": "ce_branch1", "severity": "high"})
+    row = client.get("/faults/active").json()[0]
+    assert row["severity"] == "high"                              # == inject param
+    assert row["type"] == orchestrator.SCENARIO_TYPES["congestion"]
+    # type served now == the type the t_end /labels row will carry (same base id).
+    assert row["type"] == "congestion"
+
+
+def test_scenario_types_match_specs():
+    # #96 drift guard: SCENARIO_TYPES is the pre-impact source; each entry must
+    # equal the type its scen_ fn puts in spec (which _label_row writes at t_end).
+    for name in orchestrator.SCENARIOS:
+        target = sorted(faults_api._POOLS[name])[0]
+        spec = orchestrator.SCENARIOS[name](target, "medium", 90)
+        assert spec["type"] == orchestrator.SCENARIO_TYPES[name], name
+
+
 def test_double_inject_same_target_409(client):
     client.post("/faults/inject", json={"scenario": "congestion", "target": "ce_branch1"})
     r = client.post("/faults/inject", json={"scenario": "tunnel_degrade", "target": "ce_branch1"})

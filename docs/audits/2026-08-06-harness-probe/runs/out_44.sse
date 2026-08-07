@@ -1,0 +1,12 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:16:35.501605+00:00", "content": "Search incidents with an empty query string."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:16:35.882769+00:00", "ok": false, "missing": ["empty answer"], "retry": 0}
+
+data: {"type": "tool_call", "ts": "2026-08-06T12:16:48.064809+00:00", "name": "search_incidents", "arguments": {"query": ""}, "id": "call-4ca0d12f-7029-4b87-be07-dd3991293350"}
+
+data: {"type": "tool_result", "ts": "2026-08-06T12:16:48.064834+00:00", "id": "call-4ca0d12f-7029-4b87-be07-dd3991293350", "name": "search_incidents", "content": "error: retrieval backend not available", "n": 0}
+
+data: {"type": "gate", "ts": "2026-08-06T12:16:50.813819+00:00", "ok": true, "missing": [], "retry": 1}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:16:50.813844+00:00", "content": "The search_incidents tool returned an error: \"retrieval backend not available\". This appears to be a system issue with the incidents knowledge base. I cannot retrieve incidents with an empty query at this time."}
+

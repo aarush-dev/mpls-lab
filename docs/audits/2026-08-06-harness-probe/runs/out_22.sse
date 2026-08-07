@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:12:35.876946+00:00", "content": "Show me faults on pe1 from the year 3000."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:12:48.551239+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:12:48.551262+00:00", "content": "I can't investigate faults for \"the year 3000\" \u2014 our telemetry tools only operate within the current investigation window (recent operational data). There's no way to query a future or arbitrary historical year.\n\nCould you clarify the time window you're interested in? For example:\n- \"last 4 hours\"\n- \"yesterday 06:00\u201310:00 UTC\"\n- \"since the last maintenance window\"\n\nOnce you give me a valid window, I can pull metrics, logs, and flows for **pe1** and correlate with runbooks and past incidents."}
+

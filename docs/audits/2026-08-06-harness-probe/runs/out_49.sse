@@ -1,0 +1,6 @@
+data: {"type": "user_msg", "ts": "2026-08-06T12:16:35.501734+00:00", "content": "Query metrics pattern containing a regex injection: '(.*)+'."}
+
+data: {"type": "gate", "ts": "2026-08-06T12:16:41.976297+00:00", "ok": true, "missing": [], "retry": 0}
+
+data: {"type": "assistant_msg", "ts": "2026-08-06T12:16:41.976319+00:00", "content": "I notice the pattern you've provided `(.*)+` appears to be a regular expression rather than a simple keyword filter. The `pattern` parameter in the metrics query expects plain keyword filters like `latency`, `jitter`, `loss`, or `tunnel` \u2014 not regex syntax.\n\nCould you clarify which metric type you're looking for? For example:\n- `latency` (sdwan_tunnel_latency_ms)\n- `jitter` (jitter_ms)  \n- `loss` (loss_pct)\n- `tunnel` (sdwan tunnel metrics)\n\nOr if you have a specific device in mind, I can query its metrics with an appropriate keyword filter."}
+
